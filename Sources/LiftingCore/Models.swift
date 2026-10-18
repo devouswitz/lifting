@@ -1,0 +1,218 @@
+import Foundation
+
+public enum WeightUnit: String, Codable, CaseIterable, Identifiable, Sendable {
+    case lb, kg
+    public var id: String { rawValue }
+    public func kilograms(_ value: Double) -> Double { self == .kg ? value : value * 0.45359237 }
+    public func display(_ kilograms: Double) -> Double { self == .kg ? kilograms : kilograms / 0.45359237 }
+}
+
+public enum ExerciseMode: String, Codable, CaseIterable, Identifiable, Sendable {
+    case strength, bodyweight, cardio
+    public var id: String { rawValue }
+    public var title: String { rawValue.capitalized }
+    public var symbol: String { self == .cardio ? "figure.run" : self == .bodyweight ? "figure.strengthtraining.functional" : "dumbbell" }
+}
+
+public struct Exercise: Identifiable, Codable, Equatable, Sendable {
+    public var id: UUID
+    public var name: String
+    public var muscle: String
+    public var equipment: String
+    public var mode: ExerciseMode
+    public init(id: UUID = UUID(), name: String, muscle: String = "Other", equipment: String = "", mode: ExerciseMode = .strength) {
+        self.id = id; self.name = name; self.muscle = muscle; self.equipment = equipment; self.mode = mode
+    }
+}
+
+public enum SetKind: String, Codable, CaseIterable, Identifiable, Sendable {
+    case warmup, working, drop, myoActivation, myoMini
+    public var id: String { rawValue }
+    public var title: String { switch self { case .warmup: return "Warm-up"; case .working: return "Working"; case .drop: return "Drop set"; case .myoActivation: return "MYO activation"; case .myoMini: return "MYO mini-set" } }
+}
+
+public enum LoadRule: String, Codable, CaseIterable, Identifiable, Sendable {
+    case working, percent, fixed, none
+    public var id: String { rawValue }
+    public var title: String {
+        switch self { case .working: return "Working weight"; case .percent: return "% of working weight"; case .fixed: return "Fixed weight"; case .none: return "No weight" }
+    }
+}
+
+public struct SetPlan: Identifiable, Codable, Equatable, Sendable {
+    public var id: UUID
+    public var kind: SetKind
+    public var load: LoadRule
+    public var fixedWeight: Double
+    public var percent: Double
+    public var reps: Int?
+    public var repCeiling: Int?
+    public var seconds: Double?
+    public var meters: Double?
+    public var rpe: Double?
+    public var amrap: Bool
+    public var restSeconds: Int?
+    public init(id: UUID = UUID(), kind: SetKind = .working, load: LoadRule = .working, fixedWeight: Double = 0, percent: Double = 50, reps: Int? = 8, repCeiling: Int? = 12, seconds: Double? = nil, meters: Double? = nil, rpe: Double? = nil, amrap: Bool = false, restSeconds: Int? = nil) {
+        self.id = id; self.kind = kind; self.load = load; self.fixedWeight = fixedWeight; self.percent = percent
+        self.reps = reps; self.repCeiling = repCeiling; self.seconds = seconds; self.meters = meters; self.rpe = rpe; self.amrap = amrap; self.restSeconds = restSeconds
+    }
+    public func resolvedWeight(working: Double, increment: Double) -> Double? {
+        switch load {
+        case .none: return nil
+        case .working: return working
+        case .fixed: return fixedWeight
+        case .percent:
+            let result = working * percent / 100
+            return increment > 0 ? floor((result + 0.000001) / increment) * increment : result
+        }
+    }
+}
+
+public enum ProgressionMode: String, Codable, CaseIterable, Identifiable, Sendable {
+    case manual, linear, double
+    public var id: String { rawValue }
+    public var title: String { self == .manual ? "Manual" : self == .linear ? "Linear" : "Double progression" }
+}
+
+public struct Progression: Codable, Equatable, Sendable {
+    public var mode: ProgressionMode = .manual
+    public var increment: Double = WeightUnit.lb.kilograms(5)
+    public var deloadAfter: Int = 3
+    public var deloadPercent: Double = 10
+    public var failures: Int = 0
+    public init() {}
+}
+
+public struct Variant: Identifiable, Codable, Equatable, Sendable {
+    public var id: UUID
+    public var exerciseID: UUID
+    public var label: String
+    public var workingWeight: Double
+    public var rounding: Double
+    public var restSeconds: Int
+    public var notes: String
+    public var sets: [SetPlan]
+    public var progression: Progression
+    public init(id: UUID = UUID(), exerciseID: UUID, label: String, workingWeight: Double = 0, rounding: Double = WeightUnit.lb.kilograms(2.5), restSeconds: Int = 90, notes: String = "", sets: [SetPlan] = [SetPlan(), SetPlan(), SetPlan()], progression: Progression = Progression()) {
+        self.id = id; self.exerciseID = exerciseID; self.label = label; self.workingWeight = workingWeight; self.rounding = rounding
+        self.restSeconds = restSeconds; self.notes = notes; self.sets = sets; self.progression = progression
+    }
+}
+
+public struct RoutineSlot: Identifiable, Codable, Equatable, Sendable {
+    public var id: UUID
+    public var variantID: UUID
+    public var group: String
+    public init(id: UUID = UUID(), variantID: UUID, group: String = "") { self.id = id; self.variantID = variantID; self.group = group }
+}
+
+public struct Routine: Identifiable, Codable, Equatable, Sendable {
+    public var id: UUID
+    public var name: String
+    public var notes: String
+    public var slots: [RoutineSlot]
+    public init(id: UUID = UUID(), name: String, notes: String = "", slots: [RoutineSlot] = []) {
+        self.id = id; self.name = name; self.notes = notes; self.slots = slots
+    }
+}
+
+public struct LoggedSet: Identifiable, Codable, Equatable, Sendable {
+    public var id: UUID
+    public var plan: SetPlan
+    public var weight: Double?
+    public var reps: Int?
+    public var seconds: Double?
+    public var meters: Double?
+    public var rpe: Double?
+    public var completedAt: Date?
+    public init(plan: SetPlan, variant: Variant) {
+        id = UUID(); self.plan = plan
+        weight = plan.resolvedWeight(working: variant.workingWeight, increment: variant.rounding)
+        reps = plan.repCeiling ?? plan.reps; seconds = plan.seconds; meters = plan.meters; rpe = plan.rpe
+    }
+}
+
+public struct SessionExercise: Identifiable, Codable, Equatable, Sendable {
+    public var id: UUID
+    public var slotID: UUID?
+    public var variantID: UUID
+    public var exerciseID: UUID
+    public var name: String
+    public var label: String
+    public var mode: ExerciseMode
+    public var recurringNotes: String
+    public var notes: String
+    public var restSeconds: Int
+    public var substitutedFrom: String?
+    public var progressionEligible: Bool
+    public var timerStartedAt: Date?
+    public var timerElapsed: Double
+    public var sets: [LoggedSet]
+    public init(variant: Variant, exercise: Exercise, slotID: UUID? = nil) {
+        id = UUID(); self.slotID = slotID; variantID = variant.id; exerciseID = exercise.id
+        name = exercise.name; label = variant.label; mode = exercise.mode; recurringNotes = variant.notes
+        notes = ""; restSeconds = variant.restSeconds; progressionEligible = true; timerElapsed = 0; sets = variant.sets.map { LoggedSet(plan: $0, variant: variant) }
+    }
+}
+
+public struct Session: Identifiable, Codable, Equatable, Sendable {
+    public var id: UUID
+    public var routineID: UUID?
+    public var name: String
+    public var startedAt: Date
+    public var endedAt: Date?
+    public var notes: String
+    public var exercises: [SessionExercise]
+    public init(id: UUID = UUID(), routineID: UUID? = nil, name: String, startedAt: Date = Date(), endedAt: Date? = nil, exercises: [SessionExercise] = []) {
+        self.id = id; self.routineID = routineID; self.name = name; self.startedAt = startedAt; self.endedAt = endedAt; self.exercises = exercises; notes = ""
+    }
+    public var completedSets: Int { exercises.flatMap(\.sets).filter { $0.completedAt != nil }.count }
+    public var totalSets: Int { exercises.flatMap(\.sets).count }
+    public var volume: Double { exercises.flatMap(\.sets).filter { $0.completedAt != nil && $0.plan.kind != .warmup }.reduce(0) { $0 + ($1.weight ?? 0) * Double($1.reps ?? 0) } }
+}
+
+public struct Settings: Codable, Equatable, Sendable {
+    public var unit: WeightUnit = .lb
+    public var theme: String = "system"
+    public var autoRest: Bool = true
+    public var haptics: Bool = true
+    public var keepAwake: Bool = true
+    public var barWeight: Double = WeightUnit.lb.kilograms(45)
+    public var platesLB: [Double] = [45, 35, 25, 10, 5, 2.5]
+    public var platesKG: [Double] = [25, 20, 15, 10, 5, 2.5, 1.25]
+    public var lastBackupAt: Date?
+    public init() {}
+}
+
+public struct TrainingData: Codable, Equatable, Sendable {
+    public var schemaVersion: Int = 1
+    public var exercises: [Exercise] = []
+    public var variants: [Variant] = []
+    public var routines: [Routine] = []
+    public var sessions: [Session] = []
+    public var activeSession: Session?
+    public var restDeadline: Date?
+    public var settings: Settings = Settings()
+    public init() {}
+    public func exercise(_ id: UUID) -> Exercise? { exercises.first { $0.id == id } }
+    public func variant(_ id: UUID) -> Variant? { variants.first { $0.id == id } }
+}
+
+public enum TrainingError: LocalizedError, Equatable {
+    case invalid(String)
+    public var errorDescription: String? { if case .invalid(let message) = self { return message }; return nil }
+}
+
+public enum Metric: String, CaseIterable, Identifiable, Sendable {
+    case weight, volume, estimatedMax, reps, duration, distance, rpe
+    public var id: String { rawValue }
+    public var title: String {
+        switch self { case .weight: return "Top weight"; case .volume: return "Volume"; case .estimatedMax: return "Estimated 1RM"; case .reps: return "Reps"; case .duration: return "Minutes"; case .distance: return "Distance (km)"; case .rpe: return "RPE" }
+    }
+}
+
+public struct ProgressPoint: Identifiable, Equatable, Sendable {
+    public var id: UUID
+    public var date: Date
+    public var value: Double
+}
