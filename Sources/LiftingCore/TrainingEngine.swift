@@ -3,12 +3,16 @@ import Foundation
 public extension TrainingData {
     mutating func start(routineID: UUID, now: Date = Date()) throws {
         guard activeSession == nil else { throw TrainingError.invalid("Finish or discard the current workout first.") }
-        guard let routine = routines.first(where: { $0.id == routineID }), !routine.slots.isEmpty else { throw TrainingError.invalid("Add an exercise to this routine first.") }
+        guard let routine = routines.first(where: { $0.id == routineID }), !routine.slots.isEmpty else { throw TrainingError.invalid("Add an exercise to this day first.") }
         let items = try routine.slots.map { slot -> SessionExercise in
             guard let variant = variant(slot.variantID), let exercise = exercise(variant.exerciseID) else { throw TrainingError.invalid("An exercise is missing.") }
             return SessionExercise(variant: variant, exercise: exercise, slotID: slot.id)
         }
+        let owner = programForDay(routine.id)
         activeSession = Session(routineID: routine.id, name: routine.name, startedAt: now, exercises: items)
+        activeSession?.programID = owner?.id
+        activeSession?.advancesProgram = owner?.nextDayID == routine.id
+        for index in activeSession!.exercises.indices { activeSession!.exercises[index].collapsed = index != 0 }
         activeSession?.notes = routine.notes
         restDeadline = nil
     }
@@ -55,7 +59,12 @@ public extension TrainingData {
                 }
             }
         }
-        sessions.append(session); activeSession = nil; restDeadline = nil
+        sessions.append(session)
+        if session.advancesProgram == true, let programID = session.programID, let dayID = session.routineID,
+           let p = programs.firstIndex(where: { $0.id == programID }), programs[p].nextDayID == dayID, let day = programs[p].dayIDs.firstIndex(of: dayID) {
+            programs[p].nextDayIndex = (day + 1) % programs[p].dayIDs.count
+        }
+        activeSession = nil; restDeadline = nil
     }
 
     mutating func substitute(sessionExerciseID: UUID, with exerciseID: UUID, future: Bool) throws {
@@ -145,6 +154,10 @@ public extension TrainingData {
         guard schemaVersion == 1 else { throw TrainingError.invalid("This backup uses an unsupported version.") }
         func unique<T: Identifiable>(_ values: [T]) -> Bool where T.ID == UUID { Set(values.map(\.id)).count == values.count }
         guard unique(exercises), unique(variants), unique(routines), unique(sessions), sessions.count <= 100_000 else { throw TrainingError.invalid("The backup contains duplicate or excessive records.") }
+        let ownedDays = programs.flatMap(\.dayIDs)
+        guard unique(programs), Set(ownedDays).count == ownedDays.count,
+              programs.allSatisfy({ p in !p.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && p.name.count <= 200 && p.dayIDs.allSatisfy { routine($0) != nil } && (p.dayIDs.isEmpty ? p.nextDayIndex == 0 : p.dayIDs.indices.contains(p.nextDayIndex)) }),
+              activeProgramID.map({ program($0) != nil }) ?? true else { throw TrainingError.invalid("The backup contains invalid programs or days.") }
         func number(_ n: Double, max: Double = 10_000_000) -> Bool { n.isFinite && n >= 0 && n <= max }
         func plan(_ p: SetPlan) -> Bool {
             number(p.fixedWeight) && number(p.percent, max: 1000) && (p.reps.map { (0...10000).contains($0) } ?? true)
@@ -158,7 +171,7 @@ public extension TrainingData {
         for session in sessions + [activeSession].compactMap({ $0 }) {
             guard unique(session.exercises), session.endedAt.map({ $0 >= session.startedAt }) ?? true else { throw TrainingError.invalid("Invalid session records.") }
             for item in session.exercises {
-                guard variant(item.variantID)?.exerciseID == item.exerciseID, exercise(item.exerciseID) != nil, unique(item.sets), (0...86400).contains(item.restSeconds), number(item.timerElapsed), item.sets.allSatisfy({ plan($0.plan) }) else { throw TrainingError.invalid("A session references a missing exercise or variant.") }
+                guard variant(item.variantID)?.exerciseID == item.exerciseID, exercise(item.exerciseID) != nil, unique(item.sets), (0...86400).contains(item.restSeconds), number(item.timerElapsed), item.workingWeight.map({ number($0) }) ?? true, item.roundingIncrement.map({ number($0) }) ?? true, item.sets.allSatisfy({ plan($0.plan) }) else { throw TrainingError.invalid("A session references a missing exercise or variant.") }
                 for set in item.sets { try Self.validateLoggedSet(set) }
             }
         }

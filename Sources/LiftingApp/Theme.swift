@@ -81,3 +81,33 @@ struct AccentButtonStyle: ButtonStyle {
             .background(Palette.tint(scheme).opacity(enabled ? configuration.isPressed ? 0.75 : 1 : 0.35), in: RoundedRectangle(cornerRadius: 10))
     }
 }
+
+struct SavedNameField: View {
+    var name: String
+    var onSave: (String) -> Void
+    @State private var text = ""
+    @FocusState private var focused: Bool
+    var body: some View {
+        TextField("Name", text: $text).focused($focused)
+            .onAppear { text = name }
+            .onChange(of: text) { _, value in
+                if !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, value.count <= 200, value != name { onSave(value) }
+            }
+            .onChange(of: name) { _, value in if !focused { text = value } }
+            .onChange(of: focused) { _, active in if !active { text = name } }
+            .onSubmit { focused = false }
+    }
+}
+
+struct StoreErrorRow: View {
+    @EnvironmentObject var store: AppStore
+    var body: some View {
+        if let error = store.error {
+            HStack(alignment: .top) {
+                Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 8)
+                Button("Dismiss") { store.error = nil }
+            }
+        }
+    }
+}

@@ -8,13 +8,16 @@ struct RoutineEditor: View {
     @State private var picker = false
     @State private var editing: Variant?
     @State private var deleting = false
+    @State private var export: CSVExportRequest?
+    var isTemplate: Bool { store.data.programForDay(routineID) == nil }
     var routine: Routine? { store.data.routines.first { $0.id == routineID } }
     func update(_ change: @escaping (inout Routine) -> Void) { store.perform { d in if let i = d.routines.firstIndex(where: { $0.id == routineID }) { change(&d.routines[i]) } } }
     var body: some View {
         Form {
+            StoreErrorRow()
             if let routine {
-                Section("Routine") {
-                    TextField("Name", text: Binding(get: { self.routine?.name ?? "" }, set: { value in if !value.isEmpty { update { $0.name = value } } }))
+                Section(isTemplate ? "Template" : "Day") {
+                    SavedNameField(name: routine.name) { value in update { $0.name = value } }
                     TextField("Notes", text: Binding(get: { self.routine?.notes ?? "" }, set: { value in update { $0.notes = value } }), axis: .vertical)
                 }
                 Section("Exercises") {
@@ -42,19 +45,18 @@ struct RoutineEditor: View {
                     Button { picker = true } label: { Label("Add exercise", systemImage: "plus") }
                 }
                 Section {
-                    Button("Duplicate routine") {
-                        store.perform { d in
-                            var copy = Routine(name: routine.name + " copy", notes: routine.notes)
-                            for slot in routine.slots {
-                                if var variant = d.variant(slot.variantID) { variant.id = UUID(); variant.label = copy.name; variant.progression.failures = 0; d.variants.append(variant); copy.slots.append(RoutineSlot(variantID: variant.id)) }
-                            }
-                            d.routines.append(copy)
-                        }
+                    Button("Export CSV") { do { export = try .day(routineID, in: store.data) } catch { store.error = error.localizedDescription } }
+                    if let program = store.data.programForDay(routineID) {
+                        Button("Save as Template") { store.perform { _ = try $0.saveDayAsTemplate(routineID) } }
+                        Button("Duplicate Day") { store.perform { _ = try $0.addDay(to: program.id, templateID: routineID, name: TrainingData.uniqueName(routine.name + " copy", among: store.data.routines.map(\.name))) } }
+                    } else {
+                        if !store.data.programs.isEmpty { Menu("Add to Program") { ForEach(store.data.programs) { program in Button(program.name) { store.perform { _ = try $0.addDay(to: program.id, templateID: routineID) } } } } }
+                        Button("Duplicate Template") { store.perform { _ = try $0.saveDayAsTemplate(routineID, name: TrainingData.uniqueName(routine.name + " copy", among: store.data.routines.map(\.name))) } }
                     }
-                    Button("Delete routine", role: .destructive) { deleting = true }
+                    Button(isTemplate ? "Delete Template" : "Delete Day", role: .destructive) { deleting = true }
                 }
             }
-        }.formStyle(.grouped).navigationTitle(routine?.name ?? "Routine").inlineTitle()
+        }.formStyle(.grouped).navigationTitle(routine?.name ?? "Day").inlineTitle()
         .toolbar {
             #if os(iOS)
             EditButton()
@@ -62,8 +64,9 @@ struct RoutineEditor: View {
         }
         .sheet(isPresented: $picker) { ExercisePicker(title: "Add exercise") { store.add($0, to: routineID) }.environmentObject(store).sheetSize() }
         .sheet(item: $editing) { VariantEditor(variant: $0).environmentObject(store).sheetSize() }
-        .confirmationDialog("Delete routine?", isPresented: $deleting) {
-            Button("Delete routine", role: .destructive) { store.perform { $0.routines.removeAll { $0.id == routineID } }; dismiss() }
+        .modifier(CSVExportModifier(request: $export))
+        .confirmationDialog(isTemplate ? "Delete template?" : "Delete day?", isPresented: $deleting) {
+            Button("Delete", role: .destructive) { if store.perform({ $0.removeDay(routineID) }) { dismiss() } }
         } message: { Text("Workout history is kept.") }
     }
 }
@@ -132,6 +135,7 @@ struct ExerciseEditor: View {
     var body: some View {
         NavigationStack {
             Form {
+                StoreErrorRow()
                 TextField("Name", text: $exercise.name)
                 Picker("Tracking", selection: $exercise.mode) { ForEach(ExerciseMode.allCases) { Text($0.title).tag($0) } }
                 TextField("Muscle group", text: $exercise.muscle)

@@ -9,6 +9,7 @@ struct SettingsView: View {
     @EnvironmentObject var store: AppStore
     @State private var exporting = false
     @State private var importing = false
+    @State private var importingCSV = false
     @State private var document = BackupDocument()
     @State private var contentType = UTType.json
     @State private var importPreview: TrainingData?
@@ -24,6 +25,7 @@ struct SettingsView: View {
             }
             Section("Workout") {
                 Toggle("Auto-start rest timer", isOn: setting(\.autoRest))
+                Toggle("Collapse completed exercises", isOn: Binding(get: { store.data.settings.autoCollapseCompleted != false }, set: { value in store.perform { $0.settings.autoCollapseCompleted = value } }))
                 Toggle("Haptics", isOn: setting(\.haptics))
                 Toggle("Keep screen awake", isOn: setting(\.keepAwake))
                 #if os(iOS)
@@ -48,12 +50,13 @@ struct SettingsView: View {
                     do { document = BackupDocument(bytes: try LocalRepository.encode(store.data)); contentType = .json; exportName = "Lifting-\(Date().formatted(.iso8601.year().month().day().dateSeparator(.dash)))"; exporting = true } catch { store.error = error.localizedDescription }
                 }.accessibilityIdentifier("settings.export")
                 Button("Export logged sets as CSV") { document = BackupDocument(bytes: LocalRepository.csv(store.data)); contentType = .commaSeparatedText; exportName = "Lifting-sets"; exporting = true }
+                Button("Import CSV") { importingCSV = true }.accessibilityIdentifier("settings.importCSV")
                 Button("Import backup") { importing = true }.accessibilityIdentifier("settings.import")
                 if let date = store.data.settings.lastBackupAt { Text("Last backup: \(date.formatted(date: .abbreviated, time: .omitted))").font(.footnote).foregroundStyle(.secondary) }
                 Text("Stored on this device. No account or server.").font(.footnote).foregroundStyle(.secondary)
                 if store.storageBlocked { Text("Your local files were preserved. Import a valid backup to recover.").foregroundStyle(.red) }
             }
-            Section { LabeledContent("Version", value: "1.0"); Text("Backup files include all routines, variants, history, and the active workout.").font(.footnote).foregroundStyle(.secondary) }
+            Section { LabeledContent("Version", value: "1.0"); Text("Backup files include programs, templates, variants, history, and the active workout.").font(.footnote).foregroundStyle(.secondary) }
         }.formStyle(.grouped).navigationTitle("Settings")
         .fileExporter(isPresented: $exporting, document: document, contentType: contentType, defaultFilename: exportName) { result in
             switch result { case .success: if contentType == .json { store.perform { $0.settings.lastBackupAt = Date() } }; case .failure(let error): store.error = error.localizedDescription }
@@ -70,7 +73,8 @@ struct SettingsView: View {
         .confirmationDialog("Replace all data with this backup?", isPresented: $confirmingImport, titleVisibility: .visible) {
             Button("Replace all data", role: .destructive) { if let importPreview { store.importBackup(importPreview) }; importPreview = nil }
             Button("Cancel", role: .cancel) { importPreview = nil }
-        } message: { Text("\(importPreview?.sessions.count ?? 0) workouts, \(importPreview?.routines.count ?? 0) routines, \(importPreview?.variants.count ?? 0) variants. A copy of your current data is preserved locally.") }
+        } message: { Text("\(importPreview?.sessions.count ?? 0) workouts, \(importPreview?.programs.count ?? 0) programs, \(importPreview?.routines.count ?? 0) days, \(importPreview?.variants.count ?? 0) variants. A copy of your current data is preserved locally.") }
+        .modifier(CSVImportModifier(isPresented: $importingCSV))
         .sheet(isPresented: $plates) { PlateView().environmentObject(store).sheetSize() }
     }
 }

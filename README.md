@@ -29,26 +29,36 @@ open -n '../Lifting Preview.app' --args --demo
 
 ## Controls
 
-- Train: start, create, duplicate, edit, reorder, or remove routines. Adding an exercise creates an independent variant for that routine.
+- Train: load a Program and start its next Day. Each program remembers its place. Completing another day does not skip the next one.
+- Programs: add blank days or copy day templates, then reorder, edit, duplicate, or export. Templates stay reusable; each copy has independent prescriptions and tracking.
 - Prescription: configure working load, each set, percentage warm-ups, rep ranges, AMRAP, time, distance, RPE, rest, notes, and optional progression.
 - Workout: tap the circle to log a set, tap a value to edit, tap the working load to update remaining work and percentage warm-ups.
-- Substitute: choose Today only or Future sessions, then an exercise. Completed sets stay on the original exercise. Future changes affect this routine slot only.
+- Substitute: choose Today only or Future sessions, then an exercise. Completed sets stay on the original exercise. Future changes affect this day slot only.
 - Drop: choose reductions, number of drops, and reps. Recurring drop loads stay relative to working weight.
 - MYO: choose activation reps, mini-set count, mini-set reps, and rest. Replace remaining work sets if desired. Add mini-sets, change values, or remove sets during the workout.
-- Save to this routine variant: makes live load or drop/MYO changes recur. Otherwise they apply to the current workout.
-- Each set's menu changes its type or removes it. Its context menu also exposes time, distance, and rest.
+- Save to this day variant: makes live load or drop/MYO changes recur. Otherwise they apply to the current workout.
+- Tap the leading chevron to collapse an exercise. Completed exercises collapse automatically and open the next incomplete exercise. Manually reopening a completed exercise keeps it open. Workout options include Collapse All and Expand All.
+- Each set's menu edits today's targets, load rule, percentage, type, and rest. Tap a value to edit the actual result.
 - Progress: select an exercise, variant, metric, and date range. All variants draws separate series. Sessions beneath the graph provide the same data as readable text.
-- Settings: units, appearance, rest preferences, plate sizes, JSON backup/restore, and CSV export.
+- Settings: units, appearance, rest preferences, plate sizes, JSON backup/restore, and CSV import/export.
 
 Weights are stored in kilograms and converted for display. Warm-up and drop percentages round down to the variant's increment. RPE is a user-entered target or observation.
 
 ## Data
 
-Data is stored as an atomic, versioned JSON file in the app's Application Support directory. The previous valid save is kept as `training.json.previous`. Imports preserve the pre-import state as `training.json.before-import`. Corrupt files are not silently replaced with starter data.
+Data is stored as an atomic, versioned JSON file in the app's Application Support directory. The previous valid save is kept as `training.json.previous`. Backup replacement preserves the pre-import state as `training.json.before-import`. Corrupt files are not silently replaced with starter data.
 
-Completed sessions snapshot names, prescriptions, notes, and values. Routine edits do not rewrite history. Exercise identity and variant identity are separate. Progression applies only to the relevant variant and requires all non-warm-up sets to be complete.
+Completed sessions snapshot names, prescriptions, notes, and values. Day and program edits do not rewrite history. Exercise identity and variant identity are separate. Progression applies only to the relevant variant and requires all non-warm-up sets to be complete.
 
 Deleting the app removes its on-device data. Export backups to a location you control.
+
+## Sharing CSV
+
+Export CSV from a day/template or program editor. Import CSV from Train, Programs, or Settings. Review the preview, then Add or Add and Load. Imports create independent copies and preserve existing data.
+
+Day/program CSV carries ordered days and exercises, working loads, relative warm-up/drop formulas, MYO sets, targets, rest, notes, groups, and progression rules. A minimal hand-edited CSV needs `day,exercise` columns. Use an exported file as the full schema; weight columns ending `_kg` use kilograms, time uses seconds, and distance uses meters. UTF-8, quoted multiline fields, comma and semicolon separators are supported. Invalid files are rejected before changing data.
+
+Logged-set CSV is a separate format for history, with actual values, notes, times, and stable IDs. Reimporting the same workouts skips duplicates. Legacy Lifting CSV is accepted with inferred exercise types and no duration. Other apps' proprietary CSV formats are not currently mapped. JSON backup is the complete device backup, including active workouts and settings.
 
 ## Checks
 
@@ -60,4 +70,4 @@ This compiles and runs the actual XCTest case bodies with a small compatibility 
 
 The current host's Command Line Tools contain mismatched public and private SwiftPM interfaces. The Mac build was verified using a workspace copy of ManifestAPI with the stale private interfaces removed. No system toolchain files were changed. A normal Xcode installation should use the commands above directly.
 
-See `VERIFICATION.md` for completed checks and remaining device checks. `DESIGN.md` records the Claude Opus UI specification; it includes design proposals beyond the implemented features.
+See `VERIFICATION.md` for completed checks and remaining device checks. `DESIGN.md` and `DESIGN-REFINEMENT.md` record the Claude Opus UI specifications; it includes design proposals beyond the implemented features.

@@ -6,6 +6,230 @@ import Foundation
 #endif
 
 final class TrainingTests: XCTestCase {
+    func testHistoryCSVTransfersSnapshotsAndNotesWithoutChangingExistingPlans() throws {
+        var source = TrainingData.starter()
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        try source.start(routineID: source.routines[0].id, now: start)
+        source.activeSession!.notes = "Workout \"note\", =literal"
+        source.activeSession!.exercises[0].notes = "=1+1\nSeat 4"
+        source.activeSession!.exercises[0].recurringNotes = "Recurring note"
+        let exercise = source.activeSession!.exercises[0]
+        try source.toggleSet(exerciseID: exercise.id, setID: exercise.sets[0].id, now: start.addingTimeInterval(30))
+        try source.finish(now: start.addingTimeInterval(1200))
+        let original = source.sessions[0]
+        let bundle = try HistoryCSV.decode(HistoryCSV.export(source))
+        let log = bundle.content.sessions[0]
+        XCTAssertEqual(log.id, original.id)
+        XCTAssertEqual(log.startedAt, original.startedAt)
+        XCTAssertEqual(log.endedAt, original.endedAt)
+        XCTAssertEqual(log.notes, original.notes)
+        XCTAssertEqual(log.exercises[0].notes, original.exercises[0].notes)
+        XCTAssertEqual(log.exercises[0].recurringNotes, original.exercises[0].recurringNotes)
+        XCTAssertEqual(log.exercises[0].sets[0].weight, original.exercises[0].sets[0].weight)
+        XCTAssertEqual(log.exercises[0].sets[0].completedAt, original.exercises[0].sets[0].completedAt)
+        let plans = source.variants
+        XCTAssertEqual(try source.importHistory(bundle), 0)
+        XCTAssertEqual(source.variants, plans)
+        var target = TrainingData.starter()
+        let before = target.variants
+        XCTAssertEqual(try target.importHistory(bundle), 1)
+        XCTAssertEqual(try target.importHistory(bundle), 0)
+        XCTAssertEqual(Array(target.variants.prefix(before.count)), before)
+        XCTAssertNoThrow(try target.validated())
+    }
+
+    func testHistoryCSVKeepsRenamedExerciseSnapshotsAndLegacyImportIsStable() throws {
+        var source = TrainingData.starter()
+        let dayID = source.routines[0].id
+        for index in 0..<2 {
+            try source.start(routineID: dayID, now: Date(timeIntervalSince1970: 1_800_000_000 + Double(index * 86400)))
+            let item = source.activeSession!.exercises[0]
+            if index == 1 { source.activeSession!.exercises[0].name = "Renamed movement"; source.activeSession!.exercises[0].label = "Renamed track" }
+            try source.toggleSet(exerciseID: item.id, setID: item.sets[0].id)
+            try source.finish()
+        }
+        let bundle = try HistoryCSV.decode(HistoryCSV.export(source))
+        XCTAssertEqual(bundle.content.sessions[1].exercises[0].name, "Renamed movement")
+        XCTAssertEqual(bundle.content.sessions[1].exercises[0].label, "Renamed track")
+        let csv = Data("date,workout,exercise,variant,weight_kg,reps,seconds,meters,rpe,notes\n2026-10-18T12:00:00Z,Upper,Press,Heavy,50,5,,,8,Test".utf8)
+        let legacy = try HistoryCSV.decode(csv)
+        XCTAssertEqual(legacy.warnings.count, 1)
+        var target = TrainingData.starter()
+        XCTAssertEqual(try target.importHistory(legacy), 1)
+        XCTAssertEqual(try target.importHistory(HistoryCSV.decode(csv)), 0)
+        XCTAssertNoThrow(try target.validated())
+    }
+
+    func testLongContextNamesAndClampedDropCountsStayValid() throws {
+        var data = TrainingData.starter()
+        let template = data.dayTemplates[0]
+        let name = String(repeating: "A", count: 200)
+        let id = try data.createProgram(name: name, templateIDs: [template.id])
+        _ = try data.duplicateProgram(id)
+        XCTAssertNoThrow(try data.validated())
+        XCTAssertNil(SetTechniques.drops(workingWeight: 50, rounding: 1, count: 0).last!.restSeconds)
+        XCTAssertNil(SetTechniques.drops(workingWeight: 50, rounding: 1, count: 100).last!.restSeconds)
+    }
+
+    func testProgramsCopyTemplatesAndKeepIndependentPositions() throws {
+        var data = TrainingData.starter()
+        let template = data.dayTemplates[0]
+        let programID = try data.createProgram(name: "Custom", templateIDs: [template.id, data.dayTemplates[1].id])
+        let otherID = try data.createProgram(name: "Other", templateIDs: [template.id])
+        let first = data.routine(data.program(programID)!.dayIDs[0])!
+        XCTAssertNotEqual(first.id, template.id)
+        XCTAssertNotEqual(first.slots[0].variantID, template.slots[0].variantID)
+        XCTAssertEqual(data.variant(first.slots[0].variantID)!.sets.map(\.kind), data.variant(template.slots[0].variantID)!.sets.map(\.kind))
+        try data.loadProgram(programID)
+        try data.start(routineID: first.id)
+        let exercise = data.activeSession!.exercises[0]
+        try data.toggleSet(exerciseID: exercise.id, setID: exercise.sets[0].id)
+        try data.loadProgram(otherID)
+        try data.finish()
+        XCTAssertEqual(data.program(programID)!.nextDayIndex, 1)
+        XCTAssertEqual(data.program(otherID)!.nextDayIndex, 0)
+        try data.loadProgram(programID)
+        XCTAssertEqual(data.activeProgram!.nextDayIndex, 1)
+        XCTAssertNoThrow(try data.validated())
+    }
+
+    func testOutOfOrderProgramDayDoesNotSkipRotation() throws {
+        var data = TrainingData.starter()
+        let p = data.activeProgram!
+        try data.start(routineID: p.dayIDs[1])
+        let exercise = data.activeSession!.exercises[0]
+        try data.toggleSet(exerciseID: exercise.id, setID: exercise.sets[0].id)
+        try data.finish()
+        XCTAssertEqual(data.program(p.id)!.nextDayIndex, 0)
+        let reversed = Array(p.dayIDs.reversed())
+        try data.reorderDays(reversed, in: p.id)
+        XCTAssertEqual(data.program(p.id)!.nextDayID, p.dayIDs[0])
+        data.removeDay(p.dayIDs[0])
+        XCTAssertNoThrow(try data.validated())
+    }
+
+    func testProgramDeleteAndTemplateSavePreserveHistory() throws {
+        var data = TrainingData.starter()
+        let p = data.activeProgram!
+        let dayID = p.dayIDs[0]
+        let copy = try data.saveDayAsTemplate(dayID)
+        XCTAssertTrue(data.dayTemplates.contains { $0.id == copy })
+        try data.start(routineID: dayID)
+        let item = data.activeSession!.exercises[0]
+        try data.toggleSet(exerciseID: item.id, setID: item.sets[0].id)
+        data.removeProgram(p.id)
+        try data.finish()
+        XCTAssertEqual(data.sessions.count, 1)
+        XCTAssertEqual(data.sessions[0].programID, p.id)
+        XCTAssertNoThrow(try data.validated())
+    }
+
+    func testRoutineCSVRoundTripPreservesTechniquesAndAddsIndependentCopies() throws {
+        var data = TrainingData.starter()
+        let p = data.activeProgram!
+        let vID = data.routine(p.dayIDs[0])!.slots[0].variantID
+        let v = data.variants.firstIndex { $0.id == vID }!
+        data.variants[v].notes = "=1+1\nSeat \"4\", right side"
+        data.variants[v].sets += SetTechniques.myo(miniReps: 4, miniSets: 3, rest: 15)
+        data.variants[v].sets += SetTechniques.drops(workingWeight: 100, rounding: 1, count: 2)
+        let csv = try RoutineCSV.export(data, programID: p.id)
+        let imported = try RoutineCSV.decode(csv)
+        XCTAssertEqual(imported.content.programs.count, 1)
+        XCTAssertEqual(imported.dayCount, 3)
+        let originalVariant = data.variant(vID)!
+        let transferredVariant = imported.content.variant(vID)!
+        XCTAssertEqual(transferredVariant.sets, originalVariant.sets)
+        XCTAssertEqual(transferredVariant.notes, originalVariant.notes)
+        let before = data.sessions
+        let ids = try data.importRoutines(imported, loadFirst: true)
+        XCTAssertEqual(data.sessions, before)
+        XCTAssertEqual(data.activeProgramID, ids.first)
+        XCTAssertNotEqual(ids.first, p.id)
+        let day = data.routine(data.program(ids[0])!.dayIDs[0])!
+        XCTAssertNotEqual(day.slots[0].variantID, vID)
+        XCTAssertEqual(data.variant(day.slots[0].variantID)!.sets.map(\.kind), originalVariant.sets.map(\.kind))
+        XCTAssertNoThrow(try data.validated())
+    }
+
+    func testCSVHandlesQuotesNewlinesBOMSemicolonsAndSimpleDays() throws {
+        let rows = [["day", "exercise", "reps_min", "working_weight_kg", "exercise_notes"], ["Upper", "Cable raise", "12", "5.5", "'literal\n\"quoted\", note"], ["Upper", "Cable raise", "15", "5.5", "'literal\n\"quoted\", note"]]
+        let bytes = CSVCodec.render(rows)
+        let parsed = try CSVCodec.parse(bytes)
+        XCTAssertEqual(CSVCodec.unprotect(parsed[1][4]), rows[1][4])
+        let bundle = try RoutineCSV.decode(bytes)
+        XCTAssertEqual(bundle.dayCount, 1)
+        XCTAssertEqual(bundle.setCount, 2)
+        let alternate = Data("\u{FEFF}day;exercise;reps_min;working_weight_kg\r\nLower;Squat;5;20".utf8)
+        XCTAssertEqual(try RoutineCSV.decode(alternate).setCount, 1)
+        XCTAssertThrowsError(try CSVCodec.parse(Data("day,exercise\nUpper,\"bad".utf8)))
+        XCTAssertThrowsError(try CSVCodec.parse(Data("day,exercise\nUpper,Squat,extra".utf8)))
+        XCTAssertThrowsError(try RoutineCSV.decode(Data("day,exercise,rpe\nUpper,Press,11".utf8)))
+    }
+
+    func testCSVPreservesEmptyProgramsAndDaysAndRejectsInvalidReferences() throws {
+        var data = TrainingData.starter()
+        let id = try data.createProgram(name: "Blank")
+        XCTAssertEqual(try RoutineCSV.decode(RoutineCSV.export(data, programID: id)).content.programs[0].dayIDs.count, 0)
+        let dayID = try data.addDay(to: id, name: "Recovery")
+        let bundle = try RoutineCSV.decode(RoutineCSV.export(data, programID: id))
+        XCTAssertEqual(bundle.dayCount, 1)
+        XCTAssertEqual(bundle.content.routine(dayID)!.slots.count, 0)
+        var bad = bundle
+        bad.content.programs[0].dayIDs = [UUID()]
+        let before = data
+        XCTAssertThrowsError(try data.importRoutines(bad))
+        XCTAssertEqual(data, before)
+    }
+
+    func testCollapseFocusAndManualExpansionDoNotChangeLoggedSets() throws {
+        var data = TrainingData.starter()
+        try data.start(routineID: data.routines[0].id)
+        let items = data.activeSession!.exercises
+        XCTAssertEqual(items[0].collapsed, false)
+        XCTAssertEqual(items[1].collapsed, true)
+        data.setExerciseExpanded(items[1].id, expanded: true, focus: true)
+        XCTAssertEqual(data.activeSession!.exercises[0].collapsed, true)
+        for set in items[1].sets { try data.toggleSet(exerciseID: items[1].id, setID: set.id) }
+        let next = data.collapseCompletedExercise(items[1].id)
+        XCTAssertEqual(next, items[2].id)
+        XCTAssertEqual(data.activeSession!.exercises[1].collapsed, true)
+        data.setExerciseExpanded(items[1].id, expanded: true)
+        XCTAssertNil(data.collapseCompletedExercise(items[1].id))
+        XCTAssertEqual(data.activeSession!.exercises[1].collapsed, false)
+        XCTAssertEqual(data.activeSession!.completedSets, items[1].sets.count)
+    }
+
+    func testLiveWarmupUsesTodayWeightAndSetFormulaEditing() throws {
+        var data = TrainingData.starter()
+        try data.start(routineID: data.routines[0].id)
+        let item = data.activeSession!.exercises[0]
+        try data.setWorkingWeight(100, for: item.id, saveFuture: false)
+        try data.addSessionSet(to: item.id, warmup: true)
+        let added = data.activeSession!.exercises[0].sets.last!
+        let increment = data.variant(item.variantID)!.rounding
+        XCTAssertEqual(added.weight!, floor(50 / increment) * increment, accuracy: 0.00001)
+        var plan = added.plan; plan.percent = 75; plan.rpe = 5; plan.reps = nil
+        try data.replaceSetPlan(exerciseID: item.id, setID: added.id, plan: plan)
+        let updated = data.activeSession!.exercises[0].sets.last!
+        XCTAssertEqual(updated.weight!, floor(75 / increment) * increment, accuracy: 0.00001)
+        XCTAssertNil(updated.reps); XCTAssertEqual(updated.rpe, 5)
+    }
+
+    func testLegacyBackupLoadsWithoutNewProgramAndSessionFields() throws {
+        var data = TrainingData.starter()
+        try data.start(routineID: data.routines[0].id)
+        var json = try JSONSerialization.jsonObject(with: LocalRepository.encode(data)) as! [String: Any]
+        json.removeValue(forKey: "programs"); json.removeValue(forKey: "activeProgramID")
+        var session = json["activeSession"] as! [String: Any]
+        session.removeValue(forKey: "programID"); session.removeValue(forKey: "advancesProgram")
+        var exercises = session["exercises"] as! [[String: Any]]
+        for i in exercises.indices { for key in ["workingWeight", "roundingIncrement", "collapsed", "keepExpanded"] { exercises[i].removeValue(forKey: key) } }
+        session["exercises"] = exercises; json["activeSession"] = session
+        let loaded = try LocalRepository.decode(JSONSerialization.data(withJSONObject: json))
+        XCTAssertTrue(loaded.programs.isEmpty)
+        XCTAssertEqual(loaded.activeSession!.exercises[0].workingLoad(fallback: 0), itemWeight(data))
+    }
+    private func itemWeight(_ data: TrainingData) -> Double { data.activeSession!.exercises[0].sets.first { $0.plan.load == .working }!.weight! }
     func testSubstitutionKeepsPendingMyoAndDropStructure() throws {
         var data = TrainingData.starter()
         try data.start(routineID: data.routines[0].id)

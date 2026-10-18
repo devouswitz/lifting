@@ -147,17 +147,26 @@ public struct SessionExercise: Identifiable, Codable, Equatable, Sendable {
     public var progressionEligible: Bool
     public var timerStartedAt: Date?
     public var timerElapsed: Double
+    public var workingWeight: Double?
+    public var roundingIncrement: Double?
+    public var collapsed: Bool?
+    public var keepExpanded: Bool?
     public var sets: [LoggedSet]
     public init(variant: Variant, exercise: Exercise, slotID: UUID? = nil) {
         id = UUID(); self.slotID = slotID; variantID = variant.id; exerciseID = exercise.id
         name = exercise.name; label = variant.label; mode = exercise.mode; recurringNotes = variant.notes
-        notes = ""; restSeconds = variant.restSeconds; progressionEligible = true; timerElapsed = 0; sets = variant.sets.map { LoggedSet(plan: $0, variant: variant) }
+        notes = ""; restSeconds = variant.restSeconds; progressionEligible = true; timerElapsed = 0
+        workingWeight = variant.workingWeight; roundingIncrement = variant.rounding
+        sets = variant.sets.map { LoggedSet(plan: $0, variant: variant) }
     }
+    public func workingLoad(fallback: Double) -> Double { workingWeight ?? sets.first(where: { $0.plan.load == .working && $0.completedAt == nil })?.weight ?? sets.first(where: { $0.plan.load == .working })?.weight ?? fallback }
 }
 
 public struct Session: Identifiable, Codable, Equatable, Sendable {
     public var id: UUID
     public var routineID: UUID?
+    public var programID: UUID?
+    public var advancesProgram: Bool?
     public var name: String
     public var startedAt: Date
     public var endedAt: Date?
@@ -181,6 +190,7 @@ public struct Settings: Codable, Equatable, Sendable {
     public var platesLB: [Double] = [45, 35, 25, 10, 5, 2.5]
     public var platesKG: [Double] = [25, 20, 15, 10, 5, 2.5, 1.25]
     public var lastBackupAt: Date?
+    public var autoCollapseCompleted: Bool?
     public init() {}
 }
 
@@ -189,11 +199,27 @@ public struct TrainingData: Codable, Equatable, Sendable {
     public var exercises: [Exercise] = []
     public var variants: [Variant] = []
     public var routines: [Routine] = []
+    public var programs: [TrainingProgram] = []
+    public var activeProgramID: UUID?
     public var sessions: [Session] = []
     public var activeSession: Session?
     public var restDeadline: Date?
     public var settings: Settings = Settings()
     public init() {}
+    enum CodingKeys: String, CodingKey { case schemaVersion, exercises, variants, routines, programs, activeProgramID, sessions, activeSession, restDeadline, settings }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try c.decode(Int.self, forKey: .schemaVersion)
+        exercises = try c.decode([Exercise].self, forKey: .exercises)
+        variants = try c.decode([Variant].self, forKey: .variants)
+        routines = try c.decode([Routine].self, forKey: .routines)
+        programs = try c.decodeIfPresent([TrainingProgram].self, forKey: .programs) ?? []
+        activeProgramID = try c.decodeIfPresent(UUID.self, forKey: .activeProgramID)
+        sessions = try c.decode([Session].self, forKey: .sessions)
+        activeSession = try c.decodeIfPresent(Session.self, forKey: .activeSession)
+        restDeadline = try c.decodeIfPresent(Date.self, forKey: .restDeadline)
+        settings = try c.decode(Settings.self, forKey: .settings)
+    }
     public func exercise(_ id: UUID) -> Exercise? { exercises.first { $0.id == id } }
     public func variant(_ id: UUID) -> Variant? { variants.first { $0.id == id } }
 }

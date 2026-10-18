@@ -65,7 +65,7 @@ struct VariantEditor: View {
                     var check = store.data
                     if let i = check.variants.firstIndex(where: { $0.id == variant.id }) { check.variants[i] = variant }
                     else { check.variants.append(variant) }
-                    do { _ = try check.validated(); store.saveVariant(variant); dismiss() } catch { validationError = error.localizedDescription }
+                    do { _ = try check.validated(); if store.saveVariant(variant) { dismiss() } } catch { validationError = error.localizedDescription }
                 }.disabled(variant.label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || variant.sets.isEmpty) }
             }
             .sheet(item: $technique) { kind in TechniqueEditor(kind: kind, workingWeight: variant.workingWeight, rounding: variant.rounding) { plans, replace, _ in
@@ -82,22 +82,23 @@ struct PlanEditor: View {
     let unit: WeightUnit
     var body: some View {
         Form {
+            StoreErrorRow()
             Section("Set") {
                 Picker("Type", selection: $plan.kind) { ForEach(SetKind.allCases) { Text($0.title).tag($0) } }
                 Picker("Load", selection: $plan.load) { ForEach(LoadRule.allCases) { Text($0.title).tag($0) } }
-                if plan.load == .percent { HStack { Text("% of working weight"); TextField("50", value: $plan.percent, format: .number).multilineTextAlignment(.trailing) } }
+                if plan.load == .percent { HStack { Text("% of working weight"); TextField("50", value: $plan.percent, format: .number).multilineTextAlignment(.trailing).accessibilityLabel("Percent of working weight").accessibilityIdentifier("plan.percent") } }
                 if plan.load == .fixed { HStack { Text("Weight (\(unit.rawValue))"); TextField("0", value: Binding(get: { unit.display(plan.fixedWeight) }, set: { plan.fixedWeight = unit.kilograms($0) }), format: .number).multilineTextAlignment(.trailing) } }
             }
             Section("Targets") {
-                HStack { Text("Reps"); OptionalNumberField(title: "Optional", value: Binding(get: { plan.reps.map(Double.init) }, set: { plan.reps = $0.map { Int($0) } }), integer: true) }
-                HStack { Text("Top of rep range"); OptionalNumberField(title: "Optional", value: Binding(get: { plan.repCeiling.map(Double.init) }, set: { plan.repCeiling = $0.map { Int($0) } }), integer: true) }
+                HStack { Text("Reps"); OptionalNumberField(title: "Optional", value: Binding(get: { plan.reps.map(Double.init) }, set: { plan.reps = $0.map { Int($0) } }), integer: true).accessibilityLabel("Reps").accessibilityIdentifier("plan.reps") }
+                HStack { Text("Top of rep range"); OptionalNumberField(title: "Optional", value: Binding(get: { plan.repCeiling.map(Double.init) }, set: { plan.repCeiling = $0.map { Int($0) } }), integer: true).accessibilityLabel("Top of rep range").accessibilityIdentifier("plan.repCeiling") }
                 Toggle("AMRAP", isOn: $plan.amrap)
-                HStack { Text("Time (minutes)"); OptionalNumberField(title: "Optional", value: $plan.seconds, factor: 60) }
-                HStack { Text("Distance (meters)"); OptionalNumberField(title: "Optional", value: $plan.meters) }
-                HStack { Text("RPE"); OptionalNumberField(title: "Optional", value: $plan.rpe) }
+                HStack { Text("Time (minutes)"); OptionalNumberField(title: "Optional", value: $plan.seconds, factor: 60).accessibilityLabel("Time in minutes").accessibilityIdentifier("plan.seconds") }
+                HStack { Text("Distance (meters)"); OptionalNumberField(title: "Optional", value: $plan.meters).accessibilityLabel("Distance in meters").accessibilityIdentifier("plan.meters") }
+                HStack { Text("RPE"); OptionalNumberField(title: "Optional", value: $plan.rpe).accessibilityLabel("RPE").accessibilityIdentifier("plan.rpe") }
             }
             Section("Rest after this set") {
-                HStack { Text("Seconds"); OptionalNumberField(title: "Exercise default", value: Binding(get: { plan.restSeconds.map(Double.init) }, set: { plan.restSeconds = $0.map { Int($0) } }), integer: true) }
+                HStack { Text("Seconds"); OptionalNumberField(title: "Exercise default", value: Binding(get: { plan.restSeconds.map(Double.init) }, set: { plan.restSeconds = $0.map { Int($0) } }), integer: true).accessibilityLabel("Rest in seconds").accessibilityIdentifier("plan.rest") }
             }
         }.formStyle(.grouped).navigationTitle(plan.kind.title).inlineTitle()
     }
@@ -153,7 +154,7 @@ struct TechniqueEditor: View {
                     }
                     Toggle(live ? "Replace remaining work sets" : "Replace working sets", isOn: $replace)
                 }
-                if live { Section { Toggle("Save to this routine variant", isOn: $saveFuture) } }
+                if live { Section { Toggle("Save to this day variant", isOn: $saveFuture) } }
                 Section("Preview") {
                     ForEach(plans) { plan in VStack(alignment: .leading, spacing: 5) { Text(plan.kind.title).font(.headline); Text(setPlanSummary(plan, unit: store.data.settings.unit)).font(.subheadline).foregroundStyle(.secondary) } }
                 }

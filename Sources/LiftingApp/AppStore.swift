@@ -12,6 +12,8 @@ final class AppStore: ObservableObject {
     @Published var error: String?
     @Published var storageBlocked = false
     @Published var workoutPresented = false
+    @Published var autoFocusedExerciseID: UUID?
+    @Published var autoFocusRevision = 0
     let repository: LocalRepository?
     let demo: Bool
 
@@ -34,15 +36,16 @@ final class AppStore: ObservableObject {
         }
     }
 
-    func perform(_ change: (inout TrainingData) throws -> Void) {
-        guard !storageBlocked else { error = "Import a valid backup in Settings to recover your preserved data."; return }
+    @discardableResult func perform(_ change: (inout TrainingData) throws -> Void) -> Bool {
+        guard !storageBlocked else { error = "Import a valid backup in Settings to recover your preserved data."; return false }
         var next = data
         do {
             try change(&next)
             _ = try next.validated()
             try repository?.save(next)
             data = next
-        } catch { self.error = error.localizedDescription }
+            return true
+        } catch { self.error = error.localizedDescription; return false }
     }
 
     func start(_ routine: Routine) { perform { try $0.start(routineID: routine.id) }; if data.activeSession != nil { workoutPresented = true } }
@@ -68,7 +71,7 @@ final class AppStore: ObservableObject {
         scheduleRestAlert()
     }
     func skipRest() { perform { $0.restDeadline = nil }; cancelRestAlert() }
-    func saveVariant(_ variant: Variant) {
+    @discardableResult func saveVariant(_ variant: Variant) -> Bool {
         perform { d in
             if let i = d.variants.firstIndex(where: { $0.id == variant.id }) { d.variants[i] = variant }
             else { d.variants.append(variant) }
@@ -77,9 +80,8 @@ final class AppStore: ObservableObject {
     func add(_ exercise: Exercise, to routineID: UUID) {
         perform { d in
             guard let i = d.routines.firstIndex(where: { $0.id == routineID }) else { return }
-            var label = d.routines[i].name
-            var n = 2
-            while d.variants.contains(where: { $0.exerciseID == exercise.id && $0.label == label }) { label = "\(d.routines[i].name) \(n)"; n += 1 }
+            let base = [d.programForDay(routineID)?.name, d.routines[i].name].compactMap { $0 }.joined(separator: " · ")
+            let label = TrainingData.uniqueName(base, among: d.variants.filter { $0.exerciseID == exercise.id }.map(\.label))
             let variant = Self.newVariant(exercise, label: label)
             d.variants.append(variant); d.routines[i].slots.append(RoutineSlot(variantID: variant.id))
         }
@@ -117,6 +119,10 @@ final class AppStore: ObservableObject {
         #if os(iOS)
         if data.settings.haptics { UIImpactFeedbackGenerator(style: .light).impactOccurred() }
         #endif
+    }
+    func collapseCompleted(_ id: UUID) {
+        var nextID: UUID?
+        if perform({ nextID = $0.collapseCompletedExercise(id) }), let nextID { autoFocusedExerciseID = nextID; autoFocusRevision += 1 }
     }
     func scheduleRestAlert() {
         #if os(iOS)

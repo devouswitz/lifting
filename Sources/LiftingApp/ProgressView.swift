@@ -51,8 +51,13 @@ struct ExerciseProgress: View {
     var points: [ProgressPoint] { store.data.points(exerciseID: exerciseID, variantID: selectedVariant, metric: metric, since: since) }
     var series: [ChartDatum] {
         variants.filter { selectedVariant == nil || $0.id == selectedVariant }.flatMap { variant in
-            store.data.points(exerciseID: exerciseID, variantID: variant.id, metric: metric, since: since).map { ChartDatum(id: "\(variant.id)-\($0.id)", date: $0.date, value: display($0.value), label: variant.label, seriesID: variant.id.uuidString) }
+            store.data.points(exerciseID: exerciseID, variantID: variant.id, metric: metric, since: since).map { ChartDatum(id: "\(variant.id)-\($0.id)", date: $0.date, value: display($0.value), label: chartLabel(variant), seriesID: variant.id.uuidString) }
         }
+    }
+    func chartLabel(_ variant: Variant) -> String {
+        let matching = variants.filter { $0.label == variant.label }
+        guard matching.count > 1, let index = matching.firstIndex(where: { $0.id == variant.id }) else { return variant.label }
+        return "\(variant.label) (\(index + 1))"
     }
     func display(_ value: Double) -> Double { [.weight, .volume, .estimatedMax].contains(metric) ? store.data.settings.unit.display(value) : value }
     var unit: String { [.weight, .volume, .estimatedMax].contains(metric) ? store.data.settings.unit.rawValue : metric == .duration ? "min" : metric == .distance ? "km" : "" }
@@ -72,7 +77,7 @@ struct ExerciseProgress: View {
                     else {
                         Chart {
                             ForEach(series) { point in
-                                LineMark(x: .value("Date", point.date), y: .value(metric.title, point.value), series: .value("Variant", point.label)).foregroundStyle(by: .value("Variant", point.label)).symbol(by: .value("Variant", point.label)).interpolationMethod(.linear)
+                                LineMark(x: .value("Date", point.date), y: .value(metric.title, point.value), series: .value("Variant", point.seriesID)).foregroundStyle(by: .value("Variant", point.label)).symbol(by: .value("Variant", point.label)).interpolationMethod(.linear)
                                 PointMark(x: .value("Date", point.date), y: .value(metric.title, point.value)).foregroundStyle(by: .value("Variant", point.label)).symbol(by: .value("Variant", point.label)).symbolSize(28)
                             }
                             if let selectedDate { RuleMark(x: .value("Selected date", selectedDate)).foregroundStyle(.secondary.opacity(0.4)) }

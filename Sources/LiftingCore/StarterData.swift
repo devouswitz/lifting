@@ -39,13 +39,15 @@ public extension TrainingData {
         data.variants.append(runVariant); lower.slots.append(RoutineSlot(variantID: runVariant.id))
         let push = Routine(name: "Push", slots: [add("Incline dumbbell press", day: "Push", pounds: 30, reps: 8, upper: 12, count: 3), add("Cable lateral raise", day: "Push", pounds: 15, reps: 8, upper: 10, count: 3), add("Triceps pressdown", day: "Push", pounds: 30, reps: 10, upper: 15, count: 3)])
         data.routines = [upper, lower, push]
+        data.activeProgramID = try? data.createProgram(name: "Starter", templateIDs: [upper.id, lower.id, push.id])
         return data
     }
 
     static func demo(now: Date = Date()) -> TrainingData {
         var data = starter()
+        let days = data.dayTemplates
         for week in 0..<10 {
-            for (day, routine) in data.routines.enumerated() {
+            for (day, routine) in days.enumerated() {
                 let date = now.addingTimeInterval(Double(-70 + week * 7 + day * 2) * 86400)
                 try? data.start(routineID: routine.id, now: date)
                 if var session = data.activeSession {

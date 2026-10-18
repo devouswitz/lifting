@@ -36,27 +36,6 @@ public struct LocalRepository {
         try bytes.write(to: url, options: .atomic)
     }
     public static func csv(_ data: TrainingData) -> Data {
-        func escape(_ value: String) -> String {
-            var safe = value
-            if let first = value.first, ["=", "+", "-", "@", "\t", "\r"].contains(String(first)) { safe = "'" + value }
-            return "\"" + safe.replacingOccurrences(of: "\"", with: "\"\"") + "\""
-        }
-        let format = ISO8601DateFormatter()
-        var lines = ["date,workout,exercise,variant,variant_id,kind,weight_kg,reps,seconds,meters,rpe,notes"]
-        for session in data.sessions.sorted(by: { $0.startedAt < $1.startedAt }) {
-            for exercise in session.exercises {
-                for set in exercise.sets where set.completedAt != nil {
-                    var row: [String] = [format.string(from: session.startedAt), session.name, exercise.name, exercise.label, exercise.variantID.uuidString, set.plan.kind.rawValue]
-                    row.append(set.weight.map { String($0) } ?? "")
-                    row.append(set.reps.map { String($0) } ?? "")
-                    row.append(set.seconds.map { String($0) } ?? "")
-                    row.append(set.meters.map { String($0) } ?? "")
-                    row.append(set.rpe.map { String($0) } ?? "")
-                    row.append([exercise.recurringNotes, exercise.notes].filter { !$0.isEmpty }.joined(separator: "\n"))
-                    lines.append(row.map(escape).joined(separator: ","))
-                }
-            }
-        }
-        return Data(lines.joined(separator: "\r\n").utf8)
+        HistoryCSV.export(data)
     }
 }

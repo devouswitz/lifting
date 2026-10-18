@@ -9,6 +9,7 @@ struct LiveSetRow: View {
     let setID: UUID
     let index: Int
     @State private var edit: NumericEdit?
+    @State private var editingPlan = false
     var item: SessionExercise? { store.data.activeSession?.exercises.first { $0.id == exerciseID } }
     var set: LoggedSet? { item?.sets.first { $0.id == setID } }
     var previous: LoggedSet? {
@@ -24,6 +25,8 @@ struct LiveSetRow: View {
                 let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6)) : AnyLayout(HStackLayout(spacing: 6))
                 layout {
                     Menu {
+                        Button("Edit Set Targets") { holdExpanded(); editingPlan = true }
+                        Divider()
                         ForEach(SetKind.allCases) { kind in Button(kind.title) { store.editSet(exerciseID, setID) { $0.plan.kind = kind } } }
                         Button("Delete set", role: .destructive) { store.editExercise(exerciseID) { $0.sets.removeAll { $0.id == setID } } }
                     } label: { Text(setLabel(set, item: item)).font(.caption.weight(.semibold)).foregroundStyle(.secondary).frame(minWidth: 28, minHeight: 44) }.accessibilityLabel("\(set.plan.kind.title), set \(index + 1), options")
@@ -50,11 +53,13 @@ struct LiveSetRow: View {
             }.padding(.horizontal, 5).padding(.vertical, 6)
             .background(set.completedAt != nil ? Palette.tint(scheme).opacity(0.09) : set.plan.kind == .warmup ? Palette.secondary(scheme).opacity(0.7) : .clear, in: RoundedRectangle(cornerRadius: 8))
             .contextMenu {
+                Button("Edit Set Targets") { holdExpanded(); editingPlan = true }
                 Button("Add time") { open(.time) }; Button("Add distance") { open(.distance) }
                 Button("Edit rest") { open(.rest) }
                 Button("Delete set", role: .destructive) { store.editExercise(exerciseID) { $0.sets.removeAll { $0.id == setID } } }
             }
             .sheet(item: $edit) { NumericPad(edit: $0).sheetSize() }
+            .sheet(isPresented: $editingPlan) { LivePlanEditor(exerciseID: exerciseID, setID: setID, initial: set.plan).environmentObject(store).sheetSize() }
         }
     }
     func cell(title: String, value: String?, field: Field) -> some View {
@@ -63,8 +68,12 @@ struct LiveSetRow: View {
         }.buttonStyle(.plain).accessibilityLabel("Set \(index + 1), \(title), \(value ?? "not set")").accessibilityIdentifier("workout.\(exerciseID).\(setID).\(field.rawValue)")
     }
     enum Field: String { case weight, reps, time, distance, rpe, rest }
+    func holdExpanded() {
+        if item?.sets.allSatisfy({ $0.completedAt != nil }) == true { store.perform { $0.setExerciseExpanded(exerciseID, expanded: true) } }
+    }
     func open(_ field: Field) {
         guard let set else { return }
+        holdExpanded()
         let unit = store.data.settings.unit
         let value: Double?, title: String, step: Double, maximum: Double
         switch field {
@@ -143,4 +152,22 @@ func loggedSetSummary(_ set: LoggedSet, unit: WeightUnit) -> String {
     if let meters = set.meters { parts.append("\(number(meters)) m") }
     if let rpe = set.rpe { parts.append("RPE \(number(rpe))") }
     return parts.joined(separator: " · ")
+}
+
+struct LivePlanEditor: View {
+    @EnvironmentObject var store: AppStore
+    @Environment(\.dismiss) var dismiss
+    let exerciseID: UUID
+    let setID: UUID
+    @State var plan: SetPlan
+    init(exerciseID: UUID, setID: UUID, initial: SetPlan) { self.exerciseID = exerciseID; self.setID = setID; _plan = State(initialValue: initial) }
+    var body: some View {
+        NavigationStack {
+            PlanEditor(plan: $plan, unit: store.data.settings.unit)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                    ToolbarItem(placement: .confirmationAction) { Button("Apply Today") { if store.perform({ try $0.replaceSetPlan(exerciseID: exerciseID, setID: setID, plan: plan) }) { dismiss() } } }
+                }
+        }
+    }
 }
