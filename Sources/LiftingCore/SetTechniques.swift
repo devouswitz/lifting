@@ -1,17 +1,25 @@
 import Foundation
 
 public enum SetTechniques {
-    public static func drops(workingWeight: Double, rounding: Double, reductionPercent: Double = 20, count: Int = 1, reps: Int = 10) -> [SetPlan] {
+    public static func drops(workingWeight: Double, rounding: Double, reductionPercent: Double = 20, count: Int = 1, reps: Int? = 10, repCeiling: Int? = nil, rpe: Double? = nil, seconds: Double? = nil, meters: Double? = nil, amrap: Bool = false) -> [SetPlan] {
         let total = max(1, min(count, 10))
         return (1...total).map { index in
             let fraction = pow(1 - max(0, min(reductionPercent, 100)) / 100, Double(index))
-            return SetPlan(kind: .drop, load: .percent, percent: fraction * 100, reps: reps, repCeiling: nil, restSeconds: index == total ? nil : 0)
+            return SetPlan(kind: .drop, load: .percent, percent: fraction * 100, reps: reps, repCeiling: repCeiling, seconds: seconds, meters: meters, rpe: rpe, amrap: amrap, restSeconds: index == total ? nil : 0)
         }
     }
     public static func myo(activationReps: Int = 15, miniReps: Int = 5, miniSets: Int = 4, rest: Int = 20) -> [SetPlan] {
         let count = max(1, min(miniSets, 20))
         return [SetPlan(kind: .myoActivation, reps: activationReps, repCeiling: nil, rpe: 9, amrap: true, restSeconds: rest)] + (0..<count).map { index in
             SetPlan(kind: .myoMini, reps: miniReps, repCeiling: nil, rpe: nil, restSeconds: index == count - 1 ? nil : rest)
+        }
+    }
+    public static func myo(activation: SetPlan, mini: SetPlan, miniSets: Int, rest: Int) -> [SetPlan] {
+        var first = activation; first.id = UUID(); first.kind = .myoActivation; first.restSeconds = rest
+        let count = max(1, min(miniSets, 20))
+        return [first] + (0..<count).map { i in
+            var copy = mini; copy.id = UUID(); copy.kind = .myoMini; copy.restSeconds = i == count - 1 ? nil : rest
+            return copy
         }
     }
 }

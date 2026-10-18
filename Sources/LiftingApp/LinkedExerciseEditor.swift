@@ -1,0 +1,68 @@
+import SwiftUI
+import LiftingCore
+
+struct LinkedExerciseEditor: View {
+    @EnvironmentObject var store: AppStore
+    @Environment(\.dismiss) private var dismiss
+    var routineID: UUID?
+    var exerciseID: UUID?
+    @State private var selection: Set<UUID> = []
+    @State private var rest = 90
+    @State private var transition = 0
+    @State private var future = false
+    @State private var originalGroup: String?
+    struct Member: Identifiable { var id: UUID; var name: String; var group: String; var rest: Int?; var transition: Int? }
+    private var members: [Member] {
+        if let routineID, let routine = store.data.routine(routineID) {
+            return routine.slots.compactMap { slot in
+                guard let v = store.data.variant(slot.variantID), let e = store.data.exercise(v.exerciseID) else { return nil }
+                return Member(id: slot.id, name: e.name, group: slot.group, rest: slot.groupRestSeconds, transition: slot.transitionSeconds)
+            }
+        }
+        return (store.data.activeSession?.exercises ?? []).map { Member(id: $0.id, name: $0.name, group: $0.group ?? "", rest: $0.groupRestSeconds, transition: $0.transitionSeconds) }
+    }
+    var body: some View {
+        NavigationStack {
+            Form {
+                StoreErrorRow()
+                Section("Exercises") {
+                    ForEach(members) { member in
+                        Toggle(member.name, isOn: Binding(get: { selection.contains(member.id) }, set: { if $0 { selection.insert(member.id) } else { selection.remove(member.id) } }))
+                            .accessibilityIdentifier("link.member.\(member.id)")
+                    }
+                }
+                Section("Rest") {
+                    HStack { Text("Between exercises (seconds)"); Spacer(); TextField("0", value: $transition, format: .number).labelsHidden().multilineTextAlignment(.trailing).frame(maxWidth: 70) }
+                    HStack { Text("Between rounds (seconds)"); Spacer(); TextField("90", value: $rest, format: .number).labelsHidden().multilineTextAlignment(.trailing).frame(maxWidth: 70) }
+                }
+                if routineID == nil, store.data.activeSession?.routineID != nil { Toggle("Save to this day", isOn: $future) }
+                if let originalGroup {
+                    Button("Unlink exercises", role: .destructive) {
+                        if store.perform({ d in
+                            if let routineID { d.unlinkRoutineGroup(routineID: routineID, group: originalGroup) }
+                            else { d.unlinkSessionGroup(originalGroup, saveFuture: future) }
+                    }) { store.cancelRestAlert(); dismiss() }
+                    }
+                }
+            }.formStyle(.grouped).navigationTitle(selection.count > 2 ? "Circuit" : "Superset").inlineTitle()
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        if store.perform({ d in
+                            if let routineID { try d.linkRoutineExercises(routineID: routineID, slots: selection, rest: rest, transition: transition) }
+                            else { try d.linkSessionExercises(selection, rest: rest, transition: transition, saveFuture: future) }
+                        }) { dismiss() }
+                    }.disabled(selection.count < 2 || !(0...86400).contains(rest) || !(0...86400).contains(transition)).accessibilityIdentifier("link.save")
+                }
+            }
+        }.onAppear {
+            guard let exerciseID, let member = members.first(where: { $0.id == exerciseID }) else { return }
+            selection = [exerciseID]
+            if !member.group.isEmpty {
+                originalGroup = member.group; selection = Set(members.filter { $0.group == member.group }.map(\.id))
+                rest = member.rest ?? 90; transition = member.transition ?? 0
+            }
+        }
+    }
+}

@@ -7,6 +7,7 @@ struct VariantEditor: View {
     @State var variant: Variant
     @State private var technique: TechniqueKind?
     @State private var validationError: String?
+    @State private var savingWarmups = false
     var unit: WeightUnit { store.data.settings.unit }
     var exercise: Exercise? { store.data.exercise(variant.exerciseID) }
     var body: some View {
@@ -43,7 +44,9 @@ struct VariantEditor: View {
                         Button("MYO reps") { technique = .myo }.disabled(exercise?.mode == .cardio)
                     } label: { Label("Add sets", systemImage: "plus") }
                     Menu("Warm-up presets") {
+                        ForEach(store.data.warmupPresets) { preset in Button(preset.name) { variant.sets = TrainingData.applyingWarmups(preset.sets, to: variant.sets, replacing: true) } }
                         Button("50% × 8, 70% × 5, 85% × 2") { variant.sets.removeAll { $0.kind == .warmup }; variant.sets.insert(contentsOf: [(50.0, 8), (70.0, 5), (85.0, 2)].map { SetPlan(kind: .warmup, load: .percent, percent: $0.0, reps: $0.1, repCeiling: nil) }, at: 0) }
+                        Button("Save current warm-ups as preset") { savingWarmups = true }.disabled(!variant.sets.contains { $0.kind == .warmup })
                         Button("Remove warm-ups") { variant.sets.removeAll { $0.kind == .warmup } }
                     }
                 }
@@ -73,6 +76,7 @@ struct VariantEditor: View {
                 if kind == .drop, let last = variant.sets.indices.last { variant.sets[last].restSeconds = 0 }
                 variant.sets.append(contentsOf: plans)
             }.sheetSize() }
+            .sheet(isPresented: $savingWarmups) { WarmupPresetEditor(preset: WarmupPreset(name: variant.label + " warm-up", sets: variant.sets.filter { $0.kind == .warmup })).environmentObject(store).sheetSize() }
         }
     }
 }
@@ -80,23 +84,40 @@ struct VariantEditor: View {
 struct PlanEditor: View {
     @Binding var plan: SetPlan
     let unit: WeightUnit
-    @State private var repSelection: RepTargetMode
-    init(plan: Binding<SetPlan>, unit: WeightUnit) {
-        _plan = plan; self.unit = unit
-        _repSelection = State(initialValue: plan.wrappedValue.reps == nil ? .none : plan.wrappedValue.repRange == nil ? .exact : .range)
-    }
+    var warmupOnly = false
     var body: some View {
         Form {
             StoreErrorRow()
-            Section("Set") {
+            if !warmupOnly { Section("Set") {
                 Picker("Type", selection: $plan.kind) { ForEach(SetKind.allCases) { Text($0.title).tag($0) } }
-            }
+            } }
             Section(plan.kind == .warmup ? "Warm-up weight" : "Weight") {
                 Picker("Based on", selection: $plan.load) { ForEach(LoadRule.allCases) { Text($0.title).tag($0) } }
-                if plan.load == .percent { HStack { Text("Percent of working set"); TextField("50", value: $plan.percent, format: .number).multilineTextAlignment(.trailing).labelsHidden().accessibilityLabel("Percent of working set").accessibilityIdentifier("plan.percent") } }
+                if plan.load == .percent { PercentControl(title: "Percent of working set", value: $plan.percent, range: 0...1000) }
                 if plan.load == .fixed { HStack { Text("Weight (\(unit.rawValue))"); TextField("0", value: Binding(get: { unit.display(plan.fixedWeight) }, set: { plan.fixedWeight = unit.kilograms($0) }), format: .number).multilineTextAlignment(.trailing).labelsHidden() } }
             }
             Section("Targets") {
+                SetTargetFields(plan: $plan)
+            }
+            Section("Rest after this set") {
+                HStack { Text("Seconds"); OptionalNumberField(title: "Exercise default", value: Binding(get: { plan.restSeconds.map(Double.init) }, set: { plan.restSeconds = $0.map { Int($0) } }), integer: true).labelsHidden().accessibilityLabel("Rest in seconds").accessibilityIdentifier("plan.rest") }
+            }
+        }.formStyle(.grouped).navigationTitle(plan.kind.title).inlineTitle()
+        #if os(iOS)
+        .keyboardType(.decimalPad)
+        #endif
+    }
+}
+
+struct SetTargetFields: View {
+    @Binding var plan: SetPlan
+    @State private var repSelection: RepTargetMode
+    init(plan: Binding<SetPlan>) {
+        _plan = plan
+        _repSelection = State(initialValue: plan.wrappedValue.reps == nil ? .none : plan.wrappedValue.repRange == nil ? .exact : .range)
+    }
+    var body: some View {
+        Group {
                 Picker("Rep target", selection: repMode) { ForEach(RepTargetMode.allCases) { Text($0.rawValue).tag($0) } }.accessibilityIdentifier("plan.repMode")
                 if repSelection != .none {
                     HStack { Text(repSelection == .range ? "Minimum reps" : "Target reps"); TextField("Reps", value: Binding(get: { plan.reps ?? 8 }, set: { plan.reps = $0 }), format: .number).multilineTextAlignment(.trailing).labelsHidden().accessibilityLabel("Target reps").accessibilityIdentifier("plan.reps") }
@@ -108,14 +129,7 @@ struct PlanEditor: View {
                 HStack { Text("RPE"); OptionalNumberField(title: "Optional", value: $plan.rpe).labelsHidden().accessibilityLabel("RPE").accessibilityIdentifier("plan.rpe") }
                 HStack { Text("Time (minutes)"); OptionalNumberField(title: "Optional", value: $plan.seconds, factor: 60).labelsHidden().accessibilityLabel("Time in minutes").accessibilityIdentifier("plan.seconds") }
                 HStack { Text("Distance (meters)"); OptionalNumberField(title: "Optional", value: $plan.meters).labelsHidden().accessibilityLabel("Distance in meters").accessibilityIdentifier("plan.meters") }
-            }
-            Section("Rest after this set") {
-                HStack { Text("Seconds"); OptionalNumberField(title: "Exercise default", value: Binding(get: { plan.restSeconds.map(Double.init) }, set: { plan.restSeconds = $0.map { Int($0) } }), integer: true).labelsHidden().accessibilityLabel("Rest in seconds").accessibilityIdentifier("plan.rest") }
-            }
-        }.formStyle(.grouped).navigationTitle(plan.kind.title).inlineTitle()
-        #if os(iOS)
-        .keyboardType(.decimalPad)
-        #endif
+        }
     }
     private var repMode: Binding<RepTargetMode> {
         Binding(get: { repSelection }, set: { mode in
@@ -127,7 +141,6 @@ struct PlanEditor: View {
             }
         })
     }
-
 }
 
 private enum RepTargetMode: String, CaseIterable, Identifiable {
@@ -159,29 +172,37 @@ struct TechniqueEditor: View {
     var onAdd: ([SetPlan], Bool, Bool) -> Void
     @State private var reduction = 20.0
     @State private var dropCount = 1
-    @State private var dropReps = 10
-    @State private var activationReps = 15
-    @State private var miniReps = 5
+    @State private var dropTarget = SetPlan(kind: .drop, reps: 10, repCeiling: nil)
+    @State private var activationTarget = SetPlan(kind: .myoActivation, reps: 15, repCeiling: nil, rpe: 9, amrap: true)
+    @State private var miniTarget = SetPlan(kind: .myoMini, reps: 5, repCeiling: nil)
     @State private var miniCount = 4
     @State private var rest = 20
     @State private var replace = true
     @State private var saveFuture = false
-    var plans: [SetPlan] { kind == .drop ? SetTechniques.drops(workingWeight: workingWeight, rounding: rounding, reductionPercent: reduction, count: dropCount, reps: dropReps) : SetTechniques.myo(activationReps: activationReps, miniReps: miniReps, miniSets: miniCount, rest: rest) }
+    var plans: [SetPlan] { kind == .drop ? SetTechniques.drops(workingWeight: workingWeight, rounding: rounding, reductionPercent: reduction, count: dropCount, reps: dropTarget.reps, repCeiling: dropTarget.repCeiling, rpe: dropTarget.rpe, seconds: dropTarget.seconds, meters: dropTarget.meters, amrap: dropTarget.amrap) : SetTechniques.myo(activation: activationTarget, mini: miniTarget, miniSets: miniCount, rest: rest) }
+    private var validTargets: Bool {
+        guard reduction.isFinite, (0...100).contains(reduction), (1...10).contains(dropCount), (1...20).contains(miniCount), (0...86400).contains(rest) else { return false }
+        var data = TrainingData(); let exercise = Exercise(name: "Validation")
+        data.exercises = [exercise]; data.variants = [Variant(exerciseID: exercise.id, label: "Validation", sets: plans)]
+        return (try? data.validated()) != nil && plans.allSatisfy { $0.reps != nil || $0.rpe != nil || $0.seconds != nil || $0.meters != nil }
+    }
     var body: some View {
         NavigationStack {
             Form {
                 if kind == .drop {
                     Section {
-                        Stepper("Drops: \(dropCount)", value: $dropCount, in: 1...5)
-                        Stepper("Reduce by \(number(reduction))% each drop", value: $reduction, in: 5...80, step: 5)
-                        Stepper("Reps per drop: \(dropReps)", value: $dropReps, in: 1...50)
+                        IntegerControl(title: "Drops", value: $dropCount, range: 1...10)
+                        PercentControl(title: "Reduce each drop (%)", value: $reduction, range: 0...100)
+                    }
+                    Section("Drop targets") {
+                        SetTargetFields(plan: $dropTarget)
                     }
                 } else {
-                    Section("Activation") { Stepper("Target reps: \(activationReps)", value: $activationReps, in: 1...50) }
+                    Section("Activation") { SetTargetFields(plan: $activationTarget) }
                     Section("Mini-sets") {
-                        Stepper("Mini-sets: \(miniCount)", value: $miniCount, in: 1...10)
-                        Stepper("Reps per mini-set: \(miniReps)", value: $miniReps, in: 1...20)
-                        Stepper("Rest: \(rest)s", value: $rest, in: 5...90, step: 5)
+                        IntegerControl(title: "Mini-sets", value: $miniCount, range: 1...20)
+                        SetTargetFields(plan: $miniTarget)
+                        IntegerControl(title: "Rest (seconds)", value: $rest, range: 0...86400, step: 5)
                     }
                     Toggle(live ? "Replace remaining work sets" : "Replace working sets", isOn: $replace)
                 }
@@ -192,8 +213,43 @@ struct TechniqueEditor: View {
             }.formStyle(.grouped).navigationTitle(kind.title).inlineTitle()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) { Button("Add") { onAdd(plans, kind == .myo && replace, saveFuture); dismiss() }.accessibilityIdentifier("technique.add") }
+                ToolbarItem(placement: .confirmationAction) { Button("Add") { onAdd(plans, kind == .myo && replace, saveFuture); dismiss() }.disabled(!validTargets).accessibilityIdentifier("technique.add") }
             }
+        }
+    }
+}
+
+struct PercentControl: View {
+    let title: String
+    @Binding var value: Double
+    var range: ClosedRange<Double>
+    var body: some View {
+        HStack {
+            Text(title)
+            Spacer()
+            TextField("%", value: $value, format: .number).labelsHidden().multilineTextAlignment(.trailing).frame(maxWidth: 70)
+                .accessibilityLabel(title).accessibilityIdentifier("plan.percent")
+                #if os(iOS)
+                .keyboardType(.decimalPad)
+                #endif
+            Stepper(title, value: $value, in: range, step: 5).labelsHidden().fixedSize()
+        }
+    }
+}
+
+struct IntegerControl: View {
+    let title: String
+    @Binding var value: Int
+    var range: ClosedRange<Int>
+    var step = 1
+    var body: some View {
+        HStack {
+            Text(title); Spacer()
+            TextField("0", value: $value, format: .number).labelsHidden().multilineTextAlignment(.trailing).frame(maxWidth: 70).accessibilityLabel(title)
+                #if os(iOS)
+                .keyboardType(.numberPad)
+                #endif
+            Stepper(title, value: $value, in: range, step: step).labelsHidden().fixedSize()
         }
     }
 }

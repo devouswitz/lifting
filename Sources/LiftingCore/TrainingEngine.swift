@@ -6,7 +6,10 @@ public extension TrainingData {
         guard let routine = routines.first(where: { $0.id == routineID }), !routine.slots.isEmpty else { throw TrainingError.invalid("Add an exercise to this day first.") }
         let items = try routine.slots.map { slot -> SessionExercise in
             guard let variant = variant(slot.variantID), let exercise = exercise(variant.exerciseID) else { throw TrainingError.invalid("An exercise is missing.") }
-            return SessionExercise(variant: variant, exercise: exercise, slotID: slot.id)
+            var item = SessionExercise(variant: variant, exercise: exercise, slotID: slot.id)
+            item.group = slot.group.isEmpty ? nil : slot.group
+            item.groupRestSeconds = slot.groupRestSeconds; item.transitionSeconds = slot.transitionSeconds
+            return item
         }
         let owner = programForDay(routine.id)
         activeSession = Session(routineID: routine.id, name: routine.name, startedAt: now, exercises: items)
@@ -26,6 +29,7 @@ public extension TrainingData {
             activeSession!.exercises[e].sets[s].completedAt = now
             let rest = activeSession!.exercises[e].sets[s].plan.restSeconds ?? activeSession!.exercises[e].restSeconds
             restDeadline = settings.autoRest && rest > 0 ? now.addingTimeInterval(Double(rest)) : nil
+            advanceLinkedFlow(after: exerciseID, setID: setID, now: now)
         } else {
             activeSession!.exercises[e].sets[s].completedAt = nil
             restDeadline = nil
@@ -37,7 +41,7 @@ public extension TrainingData {
         session.endedAt = max(now, session.startedAt)
         for item in session.exercises where item.progressionEligible {
             guard let v = variants.firstIndex(where: { $0.id == item.variantID }), variants[v].progression.mode != .manual else { continue }
-            let sets = item.sets.filter { $0.plan.kind == .working }
+            let sets = item.sets.filter { $0.plan.kind == .working || $0.plan.kind == .failure }
             guard !sets.isEmpty, item.sets.filter({ $0.plan.kind != .warmup }).allSatisfy({ $0.completedAt != nil }),
                   sets.allSatisfy({ $0.reps != nil && $0.weight != nil && $0.plan.load == .working }),
                   sets.allSatisfy({ abs(($0.weight ?? 0) - variants[v].workingWeight) < 0.001 }) else { continue }
@@ -96,6 +100,7 @@ public extension TrainingData {
             variants.append(replacement)
         }
         var item = SessionExercise(variant: replacement, exercise: exercise, slotID: old.slotID)
+        item.group = old.group; item.groupRestSeconds = old.groupRestSeconds; item.transitionSeconds = old.transitionSeconds
         item.substitutedFrom = old.name
         let completed = old.sets.filter { $0.completedAt != nil }
         if completed.isEmpty { item.notes = old.notes }
@@ -171,11 +176,15 @@ public extension TrainingData {
               programs.allSatisfy({ p in !p.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && p.name.count <= 200 && p.dayIDs.allSatisfy { routine($0) != nil } && (p.dayIDs.isEmpty ? p.nextDayIndex == 0 : p.dayIDs.indices.contains(p.nextDayIndex)) }),
               activeProgramID.map({ program($0) != nil }) ?? true else { throw TrainingError.invalid("The backup contains invalid programs or days.") }
         func number(_ n: Double, max: Double = 10_000_000) -> Bool { n.isFinite && n >= 0 && n <= max }
+        func group(_ key: String?, rest: Int?, transition: Int?) -> Bool { (key?.count ?? 0) <= 200 && (rest.map { (0...86400).contains($0) } ?? true) && (transition.map { (0...86400).contains($0) } ?? true) }
+        guard exercises.allSatisfy({ $0.muscle.count <= 200 && ($0.secondaryMuscles ?? []).count <= 50 && ($0.secondaryMuscles ?? []).allSatisfy { $0.count <= 200 } }),
+              routines.flatMap(\.slots).allSatisfy({ group($0.group, rest: $0.groupRestSeconds, transition: $0.transitionSeconds) }) else { throw TrainingError.invalid("Invalid muscle groups or linked exercise settings.") }
         func plan(_ p: SetPlan) -> Bool {
             number(p.fixedWeight) && number(p.percent, max: 1000) && (p.reps.map { (0...10000).contains($0) } ?? true)
             && (p.repCeiling.map { $0 >= (p.reps ?? 0) && $0 <= 10000 } ?? true)
             && (p.seconds.map { number($0) } ?? true) && (p.meters.map { number($0) } ?? true) && (p.rpe.map { number($0, max: 10) } ?? true) && (p.restSeconds.map { (0...86400).contains($0) } ?? true)
         }
+        guard unique(warmupPresets), warmupPresets.count <= 10000, warmupPresets.allSatisfy({ !$0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && $0.name.count <= 200 && (1...1000).contains($0.sets.count) && unique($0.sets) && $0.sets.allSatisfy { $0.kind == .warmup && plan($0) } }) else { throw TrainingError.invalid("Invalid warm-up preset.") }
         guard exercises.allSatisfy({ !$0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && $0.name.count <= 200 }),
               variants.allSatisfy({ v in exercise(v.exerciseID) != nil && !v.label.isEmpty && v.label.count <= 200 && number(v.workingWeight) && number(v.rounding) && (0...86400).contains(v.restSeconds) && (1...1000).contains(v.sets.count) && unique(v.sets) && v.sets.allSatisfy(plan) && number(v.progression.increment) && number(v.progression.deloadPercent, max: 100) && (0...100).contains(v.progression.deloadAfter) && (0...1000).contains(v.progression.failures) }),
               routines.allSatisfy({ r in !r.name.isEmpty && r.name.count <= 200 && unique(r.slots) && r.slots.allSatisfy { variant($0.variantID) != nil } }),
@@ -183,6 +192,7 @@ public extension TrainingData {
         for session in sessions + [activeSession].compactMap({ $0 }) {
             guard (session.programName?.count ?? 0) <= 200, unique(session.exercises), session.endedAt.map({ $0 >= session.startedAt }) ?? true else { throw TrainingError.invalid("Invalid session records.") }
             for item in session.exercises {
+                guard group(item.group, rest: item.groupRestSeconds, transition: item.transitionSeconds), (item.muscle?.count ?? 0) <= 200, (item.secondaryMuscles ?? []).count <= 50, (item.secondaryMuscles ?? []).allSatisfy({ $0.count <= 200 }) else { throw TrainingError.invalid("Invalid workout muscle or group settings.") }
                 guard variant(item.variantID)?.exerciseID == item.exerciseID, exercise(item.exerciseID) != nil, unique(item.sets), (0...86400).contains(item.restSeconds), number(item.timerElapsed), item.workingWeight.map({ number($0) }) ?? true, item.roundingIncrement.map({ number($0) }) ?? true, item.sets.allSatisfy({ plan($0.plan) }) else { throw TrainingError.invalid("A session references a missing exercise or variant.") }
                 for set in item.sets { try Self.validateLoggedSet(set) }
             }

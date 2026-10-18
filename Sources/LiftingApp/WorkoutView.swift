@@ -12,6 +12,8 @@ struct WorkoutView: View {
     @State private var finishing = false
     @State private var discard = false
     @State private var sessionNotes = false
+    @State private var linking = false
+    @State private var warmups = false
     var body: some View {
         NavigationStack {
             ScrollViewReader { reader in
@@ -40,6 +42,8 @@ struct WorkoutView: View {
                     HStack(spacing: 12) {
                     Menu {
                         Button("Workout Note", systemImage: "note.text") { sessionNotes = true }.accessibilityIdentifier("workout.note")
+                        Button("Superset / Circuit", systemImage: "link") { linking = true }.disabled((store.data.activeSession?.exercises.count ?? 0) < 2).accessibilityIdentifier("workout.link")
+                        Button("Apply warm-up preset") { warmups = true }
                         Button("Collapse All", systemImage: "chevron.up") { store.perform { $0.setAllExercisesExpanded(false) } }.accessibilityIdentifier("workout.collapseAll")
                         Button("Expand All", systemImage: "chevron.down") { store.perform { $0.setAllExercisesExpanded(true) } }.accessibilityIdentifier("workout.expandAll")
                     } label: { Image(systemName: "ellipsis.circle") }.accessibilityLabel("Workout options").accessibilityIdentifier("workout.options")
@@ -49,6 +53,8 @@ struct WorkoutView: View {
             }
             .safeAreaInset(edge: .bottom, spacing: 0) { RestBar() }
             .sheet(isPresented: $adding) { ExercisePicker(title: "Add exercise", onSelect: store.addToWorkout).environmentObject(store).sheetSize() }
+            .sheet(isPresented: $linking) { LinkedExerciseEditor().environmentObject(store).sheetSize() }
+            .sheet(isPresented: $warmups) { ApplyWarmupPreset().environmentObject(store).sheetSize() }
             .sheet(isPresented: $finishing) { finishSheet }
             .sheet(isPresented: $sessionNotes) {
                 NavigationStack {
@@ -118,6 +124,8 @@ struct WorkoutExerciseCard: View {
     @State private var removing = false
     @State private var workingWeight = false
     @State private var restEdit: NumericEdit?
+    @State private var linking = false
+    @State private var warmups = false
     var item: SessionExercise? { store.data.activeSession?.exercises.first { $0.id == exerciseID } }
     var body: some View {
         if let item {
@@ -130,6 +138,7 @@ struct WorkoutExerciseCard: View {
                             Image(systemName: item.collapsed == true ? "chevron.right" : "chevron.down").font(.caption.weight(.bold)).frame(width: 16)
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(item.name).font(.headline)
+                                if let title = store.data.activeSession?.linkTitle(for: exerciseID) { Text(title).font(.caption).foregroundStyle(.secondary) }
                                 if item.collapsed == true { Text(compactSummary(item)).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
                             }
                             Spacer(minLength: 4)
@@ -139,7 +148,9 @@ struct WorkoutExerciseCard: View {
                     }.buttonStyle(.plain).accessibilityLabel("\(item.collapsed == true ? "Expand" : "Collapse") \(item.name)").accessibilityIdentifier("workout.\(exerciseID).collapse").accessibilityValue("\(item.collapsed == true ? "Collapsed" : "Expanded"), \(item.sets.filter { $0.completedAt != nil }.count) of \(item.sets.count) sets")
                     Menu {
                         Button("Substitute") { substituting = true }
+                        Button("Superset / Circuit") { linking = true }
                         Button("Add Warm-up") { appendSet(item, warmup: true); store.perform { $0.setExerciseExpanded(exerciseID, expanded: true, focus: true) } }
+                        Button("Apply warm-up preset") { warmups = true }.disabled(item.mode == .cardio)
                         Button("Prescription") { editVariant = store.data.variant(item.variantID) }
                         Button("Plate Calculator") { plates = true }.disabled(item.mode == .cardio)
                         Divider()
@@ -158,6 +169,9 @@ struct WorkoutExerciseCard: View {
                         }
                     }.font(.subheadline).buttonStyle(.plain).foregroundStyle(Palette.tint(scheme)).frame(minHeight: 32)
                     if let from = item.substitutedFrom { Text("Instead of \(from)").font(.caption).foregroundStyle(.secondary) }
+                    if let session = store.data.activeSession, session.linkTitle(for: exerciseID) != nil {
+                        Text(session.linkedExercises(for: exerciseID).map(\.name).joined(separator: " → ")).font(.caption).foregroundStyle(.secondary)
+                    }
                     if !item.recurringNotes.isEmpty { Label(item.recurringNotes, systemImage: "pin").font(.caption).foregroundStyle(.secondary) }
                     if item.mode == .cardio || item.sets.contains(where: { $0.seconds != nil }) { CardioTimer(exerciseID: exerciseID) }
                     if item.sets.contains(where: { $0.plan.kind == .warmup }) { setGroup(item, warmup: true) }
@@ -193,6 +207,8 @@ struct WorkoutExerciseCard: View {
             .sheet(isPresented: $plates) { PlateView(initialWeight: store.data.settings.unit.display(item.sets.last?.weight ?? 0)).environmentObject(store).sheetSize() }
             .sheet(isPresented: $workingWeight) { WorkingWeightEditor(exerciseID: exerciseID).environmentObject(store).sheetSize() }
             .sheet(item: $restEdit) { NumericPad(edit: $0).sheetSize() }
+            .sheet(isPresented: $linking) { LinkedExerciseEditor(exerciseID: exerciseID).environmentObject(store).sheetSize() }
+            .sheet(isPresented: $warmups) { ApplyWarmupPreset(exerciseID: exerciseID).environmentObject(store).sheetSize() }
             .confirmationDialog("Remove \(item.name)?", isPresented: $removing) { Button("Remove from workout", role: .destructive) { store.editActive { $0.exercises.removeAll { $0.id == exerciseID } } } } message: { Text("This removes its sets from the current workout.") }
         }
     }

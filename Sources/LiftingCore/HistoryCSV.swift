@@ -8,7 +8,7 @@ public struct HistoryBundle: Sendable {
 }
 
 public enum HistoryCSV {
-    public static let headers = ["date", "workout", "exercise", "variant", "variant_id", "kind", "weight_kg", "reps", "seconds", "meters", "rpe", "notes", "session_id", "ended_at", "workout_notes", "exercise_id", "mode", "muscle", "equipment", "session_exercise_id", "set_id", "recurring_notes", "rest_seconds", "exercise_rest_seconds", "completed_at", "program_id", "program_name", "target_reps", "target_rep_ceiling"]
+    public static let headers = ["date", "workout", "exercise", "variant", "variant_id", "kind", "weight_kg", "reps", "seconds", "meters", "rpe", "notes", "session_id", "ended_at", "workout_notes", "exercise_id", "mode", "muscle", "equipment", "session_exercise_id", "set_id", "recurring_notes", "rest_seconds", "exercise_rest_seconds", "completed_at", "program_id", "program_name", "target_reps", "target_rep_ceiling", "group", "group_rest_seconds", "transition_seconds", "secondary_muscles", "source_fields"]
     public static func export(_ data: TrainingData) -> Data {
         let format = ISO8601DateFormatter(); format.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         var rows = [headers]
@@ -17,9 +17,11 @@ public enum HistoryCSV {
                 for set in exercise.sets where set.completedAt != nil {
                     var row: [String] = [format.string(from: session.startedAt), session.name, exercise.name, exercise.label, exercise.variantID.uuidString, set.plan.kind.rawValue]
                     row += [set.weight.map { String($0) } ?? "", set.reps.map { String($0) } ?? "", set.seconds.map { String($0) } ?? "", set.meters.map { String($0) } ?? "", set.rpe.map { String($0) } ?? "", exercise.notes]
-                    row += [session.id.uuidString, session.endedAt.map(format.string) ?? "", session.notes, exercise.exerciseID.uuidString, exercise.mode.rawValue, data.exercise(exercise.exerciseID)?.muscle ?? "", data.exercise(exercise.exerciseID)?.equipment ?? "", exercise.id.uuidString, set.id.uuidString, exercise.recurringNotes]
+                    row += [session.id.uuidString, session.endedAt.map(format.string) ?? "", session.notes, exercise.exerciseID.uuidString, exercise.mode.rawValue, exercise.muscle ?? data.exercise(exercise.exerciseID)?.muscle ?? "", data.exercise(exercise.exerciseID)?.equipment ?? "", exercise.id.uuidString, set.id.uuidString, exercise.recurringNotes]
                     row += [set.plan.restSeconds.map { String($0) } ?? "", String(exercise.restSeconds), set.completedAt.map(format.string) ?? ""]
                     row += [session.programID?.uuidString ?? "", session.programName ?? session.programID.flatMap(data.program)?.name ?? "", set.plan.reps.map(String.init) ?? "", set.plan.repCeiling.map(String.init) ?? ""]
+                    let sourceFields = set.sourceFields.flatMap { try? JSONEncoder().encode($0) }.flatMap { String(data: $0, encoding: .utf8) } ?? ""
+                    row += [exercise.group ?? "", exercise.groupRestSeconds.map(String.init) ?? "", exercise.transitionSeconds.map(String.init) ?? "", exercise.secondaryMuscles?.joined(separator: "|") ?? "", sourceFields]
                     rows.append(row)
                 }
             }
@@ -75,6 +77,8 @@ public enum HistoryCSV {
             } else {
                 var item = SessionExercise(variant: data.variant(variantID)!, exercise: data.exercise(exerciseID)!)
                 item.id = sessionExerciseID; item.name = name; item.mode = mode; item.label = label; item.notes = r.text("notes"); item.sets = []
+                item.group = r.text("group").isEmpty ? nil : r.text("group"); item.groupRestSeconds = try r.int("group_rest_seconds"); item.transitionSeconds = try r.int("transition_seconds")
+                item.muscle = r.text("muscle", default: "Other"); item.secondaryMuscles = r.text("secondary_muscles").isEmpty ? nil : r.text("secondary_muscles").components(separatedBy: "|")
                 data.sessions[s].exercises.append(item)
             }
             let e = data.sessions[s].exercises.firstIndex { $0.id == sessionExerciseID }!
@@ -84,6 +88,9 @@ public enum HistoryCSV {
             let plan = SetPlan(kind: kind, load: weight == nil ? .none : .fixed, fixedWeight: weight ?? 0, reps: targetReps, repCeiling: try r.int("target_rep_ceiling"), seconds: try r.double("seconds"), meters: try r.double("meters"), rpe: try r.double("rpe", maximum: 10), restSeconds: try r.int("rest_seconds"))
             var logged = LoggedSet(plan: plan, variant: data.variant(variantID)!)
             logged.reps = reps
+            if !r.text("source_fields").isEmpty {
+                logged.sourceFields = try JSONDecoder().decode([String: String].self, from: Data(r.text("source_fields").utf8))
+            }
             logged.id = try r.uuid("set_id") ?? stableID("set|\(sessionExerciseID)|\(data.sessions[s].exercises[e].sets.count)")
             logged.completedAt = r.text("completed_at").isEmpty ? started : try date(r.text("completed_at"), row: r.number)
             data.sessions[s].exercises[e].sets.append(logged)
@@ -104,6 +111,45 @@ public enum HistoryCSV {
 }
 
 public extension TrainingData {
+    mutating func createProgramFromHistory(_ bundle: HistoryBundle, name: String) throws {
+        let programID = try createProgram(name: name)
+        let latest = Dictionary(grouping: bundle.content.sessions, by: { "\($0.programName ?? "")|\($0.name)" }).values.compactMap { $0.max { $0.startedAt < $1.startedAt } }.sorted { $0.name < $1.name }
+        var dayMap: [String: UUID] = [:]
+        for session in latest {
+            let existingNames = program(programID)!.dayIDs.compactMap(routine).map(\.name)
+            let dayID = try addDay(to: programID, name: Self.uniqueName(session.name, among: existingNames))
+            dayMap["\(session.programName ?? "")|\(session.name)"] = dayID
+            let r = routines.firstIndex { $0.id == dayID }!
+            routines[r].notes = session.notes
+            for item in session.exercises {
+                let mapped = historyImports.first(where: { $0.sourceVariantID == item.variantID })?.variantID ?? item.variantID
+                guard let v = variant(mapped) else { throw TrainingError.invalid("Import the workout history before building its program.") }
+                if let index = variants.firstIndex(where: { $0.id == v.id }) {
+                    let base = item.sets.first(where: { $0.plan.kind == .working || $0.plan.kind == .failure || $0.plan.kind == .myoActivation })?.weight ?? item.sets.first(where: { $0.plan.kind != .warmup })?.weight ?? 0
+                    variants[index].workingWeight = base
+                    variants[index].sets = item.sets.map { logged in
+                        var plan = logged.plan; plan.id = UUID()
+                        if let weight = logged.weight, base > 0, plan.load == .fixed {
+                            if plan.kind == .warmup || plan.kind == .drop { plan.load = .percent; plan.percent = weight / base * 100 }
+                            else if abs(weight - base) < 0.000001 { plan.load = .working }
+                        }
+                        return plan
+                    }
+                    for s in variants[index].sets.indices.dropLast() where variants[index].sets[s + 1].kind == .drop { variants[index].sets[s].restSeconds = 0 }
+                }
+                var slot = RoutineSlot(variantID: v.id, group: item.group ?? "")
+                slot.groupRestSeconds = item.groupRestSeconds; slot.transitionSeconds = item.transitionSeconds
+                routines[r].slots.append(slot)
+            }
+        }
+        let sourceSessions = Dictionary(uniqueKeysWithValues: bundle.content.sessions.map { ($0.id, $0) })
+        for s in sessions.indices {
+            guard let source = sourceSessions[sessions[s].id] else { continue }
+            sessions[s].routineID = dayMap["\(source.programName ?? "")|\(source.name)"]
+            sessions[s].programID = programID; sessions[s].programName = program(programID)?.name
+        }
+        activeProgramID = programID
+    }
     @discardableResult mutating func importHistory(_ bundle: HistoryBundle) throws -> Int {
         let source = try bundle.content.validated()
         let known = Set(sessions.map(\.id))
@@ -125,7 +171,7 @@ public extension TrainingData {
         var exerciseMap: [UUID: UUID] = [:], variantMap: [UUID: UUID] = [:]
         for exercise in source.exercises where neededExercises.contains(exercise.id) {
             let linkedID = next.historyImports.first(where: { $0.sourceExerciseID == exercise.id })?.exerciseID
-            if let existing = linkedID.flatMap(next.exercise) ?? next.exercise(exercise.id) ?? next.exercises.first(where: { $0.name.caseInsensitiveCompare(exercise.name) == .orderedSame && $0.mode == exercise.mode && $0.equipment.caseInsensitiveCompare(exercise.equipment) == .orderedSame }) { exerciseMap[exercise.id] = existing.id }
+            if let existing = linkedID.flatMap(next.exercise) ?? next.exercise(exercise.id) ?? ExerciseMatching.match(exercise, among: next.exercises) { exerciseMap[exercise.id] = existing.id }
             else { var copy = exercise; copy.id = UUID(); next.exercises.append(copy); exerciseMap[exercise.id] = copy.id }
         }
         for variant in source.variants where neededVariants.contains(variant.id) {
@@ -146,7 +192,10 @@ public extension TrainingData {
         }
         for var session in incoming {
             session.routineID = nil; session.advancesProgram = nil
-            for e in session.exercises.indices { session.exercises[e].exerciseID = exerciseMap[session.exercises[e].exerciseID]!; session.exercises[e].variantID = variantMap[session.exercises[e].variantID]! }
+            for e in session.exercises.indices {
+                session.exercises[e].exerciseID = exerciseMap[session.exercises[e].exerciseID]!; session.exercises[e].variantID = variantMap[session.exercises[e].variantID]!
+                if session.exercises[e].muscle?.lowercased() == "other" { session.exercises[e].muscle = nil }
+            }
             next.sessions.append(session)
         }
         next.sessions.sort { $0.startedAt < $1.startedAt }

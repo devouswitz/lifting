@@ -1,6 +1,9 @@
 import SwiftUI
 import LiftingCore
 import UniformTypeIdentifiers
+#if os(macOS)
+import AppKit
+#endif
 #if os(iOS)
 import UserNotifications
 #endif
@@ -17,6 +20,8 @@ struct SettingsView: View {
     @State private var plates = false
     @State private var exportName = "Lifting-backup"
     @State private var notificationStatus = ""
+    @State private var choosingSyncFolder = false
+    @State private var choosingMacFolder = false
     func setting<T>(_ key: WritableKeyPath<LiftingCore.Settings, T>) -> Binding<T> { Binding(get: { store.data.settings[keyPath: key] }, set: { value in store.perform { $0.settings[keyPath: key] = value } }) }
     var body: some View {
         Form {
@@ -24,6 +29,7 @@ struct SettingsView: View {
                 Picker("Weight", selection: setting(\.unit)) { ForEach(WeightUnit.allCases) { Text($0.rawValue).tag($0) } }.pickerStyle(.segmented)
             }
             Section("Workout") {
+                NavigationLink("Warm-up presets") { WarmupPresetLibrary() }.accessibilityIdentifier("settings.warmups")
                 Toggle("Auto-start rest timer", isOn: setting(\.autoRest))
                 Toggle("Auto-collapse completed exercises", isOn: Binding(get: { store.data.settings.autoCollapseCompleted == true }, set: { value in store.perform { $0.settings.autoCollapseCompleted = value } }))
                 Toggle("Haptics", isOn: setting(\.haptics))
@@ -45,15 +51,16 @@ struct SettingsView: View {
             Section("Appearance") {
                 Picker("Theme", selection: setting(\.theme)) { Text("System").tag("system"); Text("Light").tag("light"); Text("Dark").tag("dark") }.pickerStyle(.segmented)
             }
+            folderSyncSection
             Section("Data") {
                 Button("Export backup") {
                     do { document = BackupDocument(bytes: try LocalRepository.encode(store.data)); contentType = .json; exportName = "Lifting-\(Date().formatted(.iso8601.year().month().day().dateSeparator(.dash)))"; exporting = true } catch { store.error = error.localizedDescription }
                 }.accessibilityIdentifier("settings.export")
                 Button("Export logged sets as CSV") { document = BackupDocument(bytes: LocalRepository.csv(store.data)); contentType = .commaSeparatedText; exportName = "Lifting-sets"; exporting = true }
-                Button("Import CSV") { importingCSV = true }.accessibilityIdentifier("settings.importCSV")
+                Button("Import workout data") { importingCSV = true }.accessibilityIdentifier("settings.importCSV")
                 Button("Import backup") { importing = true }.accessibilityIdentifier("settings.import")
                 if let date = store.data.settings.lastBackupAt { Text("Last backup: \(date.formatted(date: .abbreviated, time: .omitted))").font(.footnote).foregroundStyle(.secondary) }
-                Text("Stored on this device. No account or server.").font(.footnote).foregroundStyle(.secondary)
+                Text("Stored on this device. Folder backup and sync are optional.").font(.footnote).foregroundStyle(.secondary)
                 if store.storageBlocked { Text("Your local files were preserved. Import a valid backup to recover.").foregroundStyle(.red) }
             }
             Section { LabeledContent("Version", value: "1.0"); Text("Backup files include programs, templates, variants, history, and the active workout.").font(.footnote).foregroundStyle(.secondary) }
@@ -67,7 +74,13 @@ struct SettingsView: View {
                 let access = url.startAccessingSecurityScopedResource(); defer { if access { url.stopAccessingSecurityScopedResource() } }
                 let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
                 guard size <= 100_000_000 else { throw TrainingError.invalid("The backup is too large.") }
-                importPreview = try LocalRepository.decode(Data(contentsOf: url)); confirmingImport = true
+                let bytes = try Data(contentsOf: url)
+                if let library = try? LocalRepository.decode(bytes) { importPreview = library }
+                else {
+                    let replica = try DeviceSyncState.decode(bytes)
+                    var restoring = DeviceSyncState(); importPreview = try restoring.merge([replica], into: TrainingData())
+                }
+                confirmingImport = true
             } catch { store.error = "Import failed. \(error.localizedDescription)" }
         }
         .confirmationDialog("Replace all data with this backup?", isPresented: $confirmingImport, titleVisibility: .visible) {
@@ -75,8 +88,44 @@ struct SettingsView: View {
             Button("Cancel", role: .cancel) { importPreview = nil }
         } message: { Text("\(importPreview?.sessions.count ?? 0) workouts, \(importPreview?.programs.count ?? 0) programs, \(importPreview?.routines.count ?? 0) days, \(importPreview?.variants.count ?? 0) variants. A copy of your current data is preserved locally.") }
         .modifier(CSVImportModifier(isPresented: $importingCSV))
+        .background {
+            Color.clear.frame(width: 1, height: 1).fileImporter(isPresented: $choosingSyncFolder, allowedContentTypes: [.folder], allowsMultipleSelection: false) { result in
+                do { if let url = try result.get().first { store.chooseSyncFolder(url) } } catch { store.syncStatus = error.localizedDescription }
+            }
+        }
         .sheet(isPresented: $plates) { PlateView().environmentObject(store).sheetSize() }
     }
+    private var folderSyncSection: some View {
+            Section {
+                Button(store.syncConfiguration.bookmark == nil ? "Choose iCloud Drive or other folder" : "Folder: \(store.syncConfiguration.name)", action: chooseFolder).disabled(store.syncing || choosingMacFolder).accessibilityIdentifier("settings.syncFolder")
+                Toggle("Automatic backup", isOn: Binding(get: { store.syncConfiguration.automaticBackup }, set: { value in store.configureSync { $0.automaticBackup = value } })).disabled(store.syncConfiguration.bookmark == nil).accessibilityIdentifier("settings.autoBackup")
+                Toggle("Device sync", isOn: Binding(get: { store.syncConfiguration.deviceSync }, set: { value in store.configureSync { $0.deviceSync = value } })).disabled(store.syncConfiguration.bookmark == nil).accessibilityIdentifier("settings.deviceSync")
+                if store.syncConfiguration.automaticBackup || store.syncConfiguration.deviceSync {
+                    Button(store.syncing ? "Syncing…" : "Sync now") { Task { await store.syncNow() } }.disabled(store.syncing).accessibilityIdentifier("settings.syncNow")
+                    Text(store.syncStatus).font(.caption).foregroundStyle(.secondary)
+                    if let date = store.lastFolderSync { Text(date.formatted(date: .abbreviated, time: .shortened)).font(.caption).foregroundStyle(.secondary) }
+                }
+                if store.syncConfiguration.bookmark != nil {
+                    Button("Disconnect folder") { store.configureSync { $0.bookmark = nil; $0.name = ""; $0.automaticBackup = false; $0.deviceSync = false } }
+                }
+            } header: { Text("Backup and sync") } footer: { Text("Optional. Choose the same iCloud Drive folder on each device. Uses your available storage. Sync runs while the app is open; routines and history merge after the active workout ends. Backups include the active workout.") }
+    }
+    private func chooseFolder() {
+        #if os(macOS)
+        guard !choosingMacFolder else { return }; choosingMacFolder = true
+        let panel = NSOpenPanel(); panel.canChooseFiles = false; panel.canChooseDirectories = true
+        panel.canCreateDirectories = true; panel.allowsMultipleSelection = false; panel.prompt = "Choose"
+        let completion: (NSApplication.ModalResponse) -> Void = { response in
+            choosingMacFolder = false
+            if response == .OK, let url = panel.url { store.chooseSyncFolder(url) }
+        }
+        if let window = NSApp.keyWindow { panel.beginSheetModal(for: window, completionHandler: completion) }
+        else { panel.begin(completionHandler: completion) }
+        #else
+        choosingSyncFolder = true
+        #endif
+    }
+
 }
 
 struct PlateInventoryView: View {

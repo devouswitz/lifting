@@ -9,6 +9,9 @@ struct RoutineEditor: View {
     @State private var editing: Variant?
     @State private var deleting = false
     @State private var export: CSVExportRequest?
+    @State private var linking = false
+    @State private var linkedSlotID: UUID?
+    @State private var warmups = false
     var isTemplate: Bool { store.data.programForDay(routineID) == nil }
     var routine: Routine? { store.data.routines.first { $0.id == routineID } }
     func update(_ change: @escaping (inout Routine) -> Void) { store.perform { d in if let i = d.routines.firstIndex(where: { $0.id == routineID }) { change(&d.routines[i]) } } }
@@ -29,11 +32,13 @@ struct RoutineEditor: View {
                                         Text(exercise.name).foregroundStyle(.primary).font(.headline)
                                         Text(planSummary(variant, unit: store.data.settings.unit)).font(.subheadline).foregroundStyle(.secondary)
                                         Chip(title: variant.label)
+                                        if !slot.group.isEmpty, routine.slots.filter({ $0.group == slot.group }).count > 1 { Text(routine.slots.filter({ $0.group == slot.group }).count > 2 ? "Circuit" : "Superset").font(.caption).foregroundStyle(.secondary) }
                                     }
                                     Spacer(); Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
                                 }.padding(.vertical, 4)
                             }.buttonStyle(.plain)
                             .contextMenu {
+                                Button("Superset / Circuit") { linkedSlotID = slot.id; linking = true }
                                 Button("Move up") { update { r in if let i = r.slots.firstIndex(where: { $0.id == slot.id }), i > 0 { r.slots.swapAt(i, i - 1) } } }
                                 Button("Move down") { update { r in if let i = r.slots.firstIndex(where: { $0.id == slot.id }), i < r.slots.count - 1 { r.slots.swapAt(i, i + 1) } } }
                                 Button("Remove", role: .destructive) { update { $0.slots.removeAll { $0.id == slot.id } } }
@@ -43,6 +48,8 @@ struct RoutineEditor: View {
                     .onMove { source, target in update { $0.slots.move(fromOffsets: source, toOffset: target) } }
                     .onDelete { offsets in update { $0.slots.remove(atOffsets: offsets) } }
                     Button { picker = true } label: { Label("Add exercise", systemImage: "plus") }
+                    if routine.slots.count > 1 { Button("Superset / Circuit") { linkedSlotID = nil; linking = true }.accessibilityIdentifier("routine.link") }
+                    if !routine.slots.isEmpty { Button("Apply warm-up preset") { warmups = true }.accessibilityIdentifier("routine.warmups") }
                 }
                 Section {
                     Button("Export CSV") { do { export = try .day(routineID, in: store.data) } catch { store.error = error.localizedDescription } }
@@ -64,6 +71,8 @@ struct RoutineEditor: View {
         }
         .sheet(isPresented: $picker) { ExercisePicker(title: "Add exercise") { store.add($0, to: routineID) }.environmentObject(store).sheetSize() }
         .sheet(item: $editing) { VariantEditor(variant: $0).environmentObject(store).sheetSize() }
+        .sheet(isPresented: $linking) { LinkedExerciseEditor(routineID: routineID, exerciseID: linkedSlotID).environmentObject(store).sheetSize() }
+        .sheet(isPresented: $warmups) { ApplyWarmupPreset(routineID: routineID).environmentObject(store).sheetSize() }
         .modifier(CSVExportModifier(request: $export))
         .confirmationDialog(isTemplate ? "Delete template?" : "Delete day?", isPresented: $deleting) {
             Button("Delete", role: .destructive) { if store.perform({ $0.removeDay(routineID) }) { dismiss() } }
@@ -139,6 +148,7 @@ struct ExerciseEditor: View {
                 TextField("Name", text: $exercise.name)
                 Picker("Tracking", selection: $exercise.mode) { ForEach(ExerciseMode.allCases) { Text($0.title).tag($0) } }
                 TextField("Muscle group", text: $exercise.muscle)
+                TextField("Secondary muscles (comma separated)", text: Binding(get: { exercise.secondaryMuscles?.joined(separator: ", ") ?? "" }, set: { exercise.secondaryMuscles = $0.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty } }))
                 TextField("Equipment", text: $exercise.equipment)
             }.formStyle(.grouped).navigationTitle(initialExercise == nil ? "New exercise" : "Edit exercise").inlineTitle()
             .toolbar {

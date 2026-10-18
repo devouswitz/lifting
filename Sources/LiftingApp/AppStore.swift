@@ -14,6 +14,14 @@ final class AppStore: ObservableObject {
     @Published var workoutPresented = false
     @Published var autoFocusedExerciseID: UUID?
     @Published var autoFocusRevision = 0
+    @Published var syncConfiguration = FolderSyncConfiguration()
+    @Published var syncStatus = "Off"
+    @Published var syncing = false
+    @Published var lastFolderSync: Date?
+    var syncState: DeviceSyncState?
+    var syncGeneration = 0
+    var syncConfigurationLoaded = false
+    var pendingSync: Task<Void, Never>?
     let repository: LocalRepository?
     let demo: Bool
 
@@ -44,6 +52,7 @@ final class AppStore: ObservableObject {
             _ = try next.validated()
             try repository?.save(next)
             data = next
+            scheduleFolderSync()
             return true
         } catch { self.error = error.localizedDescription; return false }
     }
@@ -63,7 +72,12 @@ final class AppStore: ObservableObject {
     func toggle(_ exerciseID: UUID, _ setID: UUID) {
         let before = data.activeSession?.completedSets ?? 0
         perform { try $0.toggleSet(exerciseID: exerciseID, setID: setID) }
-        if (data.activeSession?.completedSets ?? 0) > before { haptic(); scheduleRestAlert() }
+        if (data.activeSession?.completedSets ?? 0) > before {
+            haptic(); scheduleRestAlert()
+            if data.activeSession?.linkTitle(for: exerciseID) != nil, let target = data.activeSession?.exercises.first(where: { $0.collapsed == false }) {
+                autoFocusedExerciseID = target.id; autoFocusRevision += 1
+            }
+        }
         else { cancelRestAlert() }
     }
     func adjustRest(_ seconds: Double) {
@@ -104,6 +118,7 @@ final class AppStore: ObservableObject {
             }
             try repository?.save(next)
             data = next; storageBlocked = false; error = nil; workoutPresented = false; cancelRestAlert()
+            scheduleFolderSync()
         } catch { self.error = "Import failed. \(error.localizedDescription)" }
     }
     func haptic() {
@@ -191,6 +206,7 @@ func loggedExerciseSummary(_ exercise: SessionExercise, unit: WeightUnit) -> Str
         case .drop: parts.append("Drop")
         case .myoActivation: parts.append("Activation")
         case .myoMini: parts.append("Mini-set")
+        case .failure: parts.append("Failure")
         }
         return parts.joined(separator: " · ")
     }.joined(separator: "\n")

@@ -116,6 +116,7 @@ struct LiveSetRow: View {
         case .warmup: return "W\(item.sets.prefix(index + 1).filter { $0.plan.kind == .warmup }.count)"
         case .drop: return "D\(item.sets.prefix(index + 1).filter { $0.plan.kind == .drop }.count)"
         case .myoActivation: return "A"
+        case .failure: return "F"
         case .myoMini: return "M\(item.sets.prefix(index + 1).reversed().prefix { $0.plan.kind == .myoMini }.count)"
         case .working: return "\(item.sets.prefix(index + 1).filter { $0.plan.kind == .working }.count)"
         }

@@ -20,15 +20,16 @@ public struct Exercise: Identifiable, Codable, Equatable, Sendable {
     public var muscle: String
     public var equipment: String
     public var mode: ExerciseMode
+    public var secondaryMuscles: [String]?
     public init(id: UUID = UUID(), name: String, muscle: String = "Other", equipment: String = "", mode: ExerciseMode = .strength) {
         self.id = id; self.name = name; self.muscle = muscle; self.equipment = equipment; self.mode = mode
     }
 }
 
 public enum SetKind: String, Codable, CaseIterable, Identifiable, Sendable {
-    case warmup, working, drop, myoActivation, myoMini
+    case warmup, working, drop, myoActivation, myoMini, failure
     public var id: String { rawValue }
-    public var title: String { switch self { case .warmup: return "Warm-up"; case .working: return "Working"; case .drop: return "Drop set"; case .myoActivation: return "MYO activation"; case .myoMini: return "MYO mini-set" } }
+    public var title: String { switch self { case .warmup: return "Warm-up"; case .working: return "Working"; case .drop: return "Drop set"; case .myoActivation: return "MYO activation"; case .myoMini: return "MYO mini-set"; case .failure: return "Failure" } }
 }
 
 public enum LoadRule: String, Codable, CaseIterable, Identifiable, Sendable {
@@ -113,6 +114,8 @@ public struct RoutineSlot: Identifiable, Codable, Equatable, Sendable {
     public var id: UUID
     public var variantID: UUID
     public var group: String
+    public var groupRestSeconds: Int?
+    public var transitionSeconds: Int?
     public init(id: UUID = UUID(), variantID: UUID, group: String = "") { self.id = id; self.variantID = variantID; self.group = group }
 }
 
@@ -135,6 +138,7 @@ public struct LoggedSet: Identifiable, Codable, Equatable, Sendable {
     public var meters: Double?
     public var rpe: Double?
     public var completedAt: Date?
+    public var sourceFields: [String: String]?
     public init(plan: SetPlan, variant: Variant) {
         id = UUID(); self.plan = plan
         weight = plan.resolvedWeight(working: variant.workingWeight, increment: variant.rounding)
@@ -150,6 +154,11 @@ public struct SessionExercise: Identifiable, Codable, Equatable, Sendable {
     public var name: String
     public var label: String
     public var mode: ExerciseMode
+    public var muscle: String?
+    public var secondaryMuscles: [String]?
+    public var group: String?
+    public var groupRestSeconds: Int?
+    public var transitionSeconds: Int?
     public var recurringNotes: String
     public var notes: String
     public var restSeconds: Int
@@ -165,6 +174,7 @@ public struct SessionExercise: Identifiable, Codable, Equatable, Sendable {
     public init(variant: Variant, exercise: Exercise, slotID: UUID? = nil) {
         id = UUID(); self.slotID = slotID; variantID = variant.id; exerciseID = exercise.id
         name = exercise.name; label = variant.label; mode = exercise.mode; recurringNotes = variant.notes
+        muscle = exercise.muscle; secondaryMuscles = exercise.secondaryMuscles
         notes = ""; restSeconds = variant.restSeconds; progressionEligible = true; timerElapsed = 0
         workingWeight = variant.workingWeight; roundingIncrement = variant.rounding
         sets = variant.sets.map { LoggedSet(plan: $0, variant: variant) }
@@ -222,6 +232,7 @@ public struct TrainingData: Codable, Equatable, Sendable {
     public var variants: [Variant] = []
     public var routines: [Routine] = []
     public var programs: [TrainingProgram] = []
+    public var warmupPresets: [WarmupPreset] = []
     public var activeProgramID: UUID?
     public var sessions: [Session] = []
     public var historyImports: [HistoryImportLink] = []
@@ -229,7 +240,7 @@ public struct TrainingData: Codable, Equatable, Sendable {
     public var restDeadline: Date?
     public var settings: Settings = Settings()
     public init() {}
-    enum CodingKeys: String, CodingKey { case schemaVersion, exercises, variants, routines, programs, activeProgramID, sessions, historyImports, activeSession, restDeadline, settings }
+    enum CodingKeys: String, CodingKey { case schemaVersion, exercises, variants, routines, programs, warmupPresets, activeProgramID, sessions, historyImports, activeSession, restDeadline, settings }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         schemaVersion = try c.decode(Int.self, forKey: .schemaVersion)
@@ -237,6 +248,7 @@ public struct TrainingData: Codable, Equatable, Sendable {
         variants = try c.decode([Variant].self, forKey: .variants)
         routines = try c.decode([Routine].self, forKey: .routines)
         programs = try c.decodeIfPresent([TrainingProgram].self, forKey: .programs) ?? []
+        warmupPresets = try c.decodeIfPresent([WarmupPreset].self, forKey: .warmupPresets) ?? []
         activeProgramID = try c.decodeIfPresent(UUID.self, forKey: .activeProgramID)
         sessions = try c.decode([Session].self, forKey: .sessions)
         historyImports = try c.decodeIfPresent([HistoryImportLink].self, forKey: .historyImports) ?? []

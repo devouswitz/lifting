@@ -1,6 +1,6 @@
 # Lifting
 
-Native SwiftUI workout tracker. iOS 17 or later. No accounts, network calls, analytics, subscriptions, or external packages.
+Native SwiftUI workout tracker. iOS 17 or later. Offline by default, with optional backup and sync through a user-selected folder. No app accounts, subscriptions, external packages, or hosted backend.
 
 ## Run on iPhone
 
@@ -37,11 +37,15 @@ open -n '../Lifting Preview.app' --args --demo
 - Substitute: choose Today only or Future sessions, then an exercise. Completed sets stay on the original exercise. Future changes affect this day slot only.
 - Drop: choose reductions, number of drops, and reps. Recurring drop loads stay relative to working weight.
 - MYO: choose activation reps, mini-set count, mini-set reps, and rest. Replace remaining work sets if desired. Add mini-sets, change values, or remove sets during the workout.
+- Drop/MYO targets use the same exact reps, rep ranges, no-count, RPE, time, and distance controls as ordinary sets. Percentage fields accept typed values and 5-point adjustments. Failure is also available as a set type.
+- Superset / Circuit: link two or more exercises in a day editor or live workout. Choose transition and round rest. Logging advances the focused panel around the group; warm-ups and drop/MYO chains finish before moving on. Uneven set counts skip completed movements. Live links can be saved to the day.
+- Warm-up presets: create named, ordered schemes in Settings, or save a prescription's current warm-ups. Apply a preset to selected day exercises or live exercises. Replace or append warm-ups, and optionally save live changes to the day variants. Completed warm-ups are retained. Presets copy their plans, so editing a preset does not rewrite existing days.
 - Save to this day variant: makes live load or drop/MYO changes recur. Otherwise they apply to the current workout.
 - Tap an exercise header to expand or collapse it. Opening one focuses that exercise. Warm-ups and working sets have separate compact tables. Automatic collapse after completion is optional in Settings. Workout options include Collapse All and Expand All.
 - Each set's menu edits today's targets, load rule, percentage, type, and rest. Range targets stay visible without assuming an exact rep count. Tap the range to optionally record reps completed. Uncounted reps do not contribute to rep totals, volume, estimated max, or automatic progression.
 - History: browse dated results or a selectable monthly calendar with comparisons to the previous month. Open a workout to inspect or edit its sets and notes.
 - Progress: choose a program or All programs, then compare separate exercise and day tracks, choose a metric and date range, or scrub a graph for actual recorded values. Exercise details include dated results.
+- Progress > Muscles: compare logged sets or load volume by primary muscle, with optional half-set credit for secondary muscles. Program and date filters apply. Warm-ups and cardio are excluded; drop/MYO sets count individually. Unknown rep counts contribute no invented volume. Muscle assignments can be edited with an exercise; new sessions snapshot them.
 - Settings: units, appearance, rest preferences, plate sizes, JSON backup/restore, and CSV import/export.
 
 Weights are stored in kilograms and converted for display. Warm-up and drop percentages round down to the variant's increment. RPE is a user-entered target or observation.
@@ -60,7 +64,23 @@ Export CSV from a day/template or program editor. Import CSV from Train, Program
 
 Day/program CSV carries ordered days and exercises, working loads, relative warm-up/drop formulas, MYO sets, targets, rest, notes, groups, and progression rules. A minimal hand-edited CSV needs `day,exercise` columns. Use an exported file as the full schema; weight columns ending `_kg` use kilograms, time uses seconds, and distance uses meters. UTF-8, quoted multiline fields, comma and semicolon separators are supported. Invalid files are rejected before changing data.
 
-Logged-set CSV is a separate format for history, with actual values, rep-range targets, program identity, notes, times, and stable IDs. Reimporting the same workouts skips duplicates. Legacy Lifting CSV is accepted with inferred exercise types and no duration. Other apps' proprietary CSV formats are not currently mapped. JSON backup is the complete device backup, including active workouts and settings.
+Logged-set CSV is a separate format for history, with actual values, rep-range targets, program identity, notes, times, linked groups, muscle snapshots, source fields, and stable IDs. Reimporting the same workouts skips duplicates. Legacy Lifting CSV is accepted with inferred exercise types and no duration. JSON backup is the complete device backup, including active workouts, settings, and warm-up presets.
+
+## Importing other apps
+
+Settings > Import workout data detects Strong, Hevy, and FitNotes CSV headers. Confirm unspecified units, date format, and column assignments, then review the workouts before adding them. Other CSVs can use the same column mapper. Flat set-record JSON and Hevy-style nested workout/exercise/set JSON are also supported. No login, API key, or server is required.
+
+Imports preserve units, actual values, supported set types, notes, groups, available duration, and source fields. Familiar exercise names with equipment suffixes can map to the existing catalog; day-specific tracks remain separate. Reimporting an unchanged export skips its workouts. Optionally build a program from each latest logged day. These reconstructed days use exported results; the file cannot supply saved prescriptions or progression rules that the source app omitted. Ambiguous dates, invalid values, encrypted files, and proprietary database backups are rejected rather than guessed. GreySkull-specific binary/cloud backup formats have not been validated.
+
+## Optional folder backup and sync
+
+In Settings, choose the same iCloud Drive folder on each device. Automatic backup and Device sync are separate switches, both off initially. A local folder works for backup; cross-device transport requires iCloud Drive or another folder provider. This approach needs no CloudKit container or backend subscription. iCloud includes 5 GB free, shared with the user's other iCloud data; extra storage is not free.
+
+The app checks the folder while open, after changes, and on foreground activation. OS/provider upload and download timing is outside the app's control. Routines, exercises, variants, programs, warm-up presets, and completed history merge by stable identity and logical revision. Each device writes its own replica. Deletion markers prevent stale copies from reviving removed records. Concurrent changes to the same record resolve deterministically; pre-merge recovery files retain the previous local version. A merge that breaks references is rejected for review and leaves local data intact. Import backup also accepts a device replica to recover its shared library.
+
+Active workouts and device preferences stay local. Completed history merges after the active workout ends. Automatic backups include the active workout and settings, with a latest copy and 14 daily copies per device. Recovery keeps 30 pre-merge copies per device. Files are in `Lifting Sync/Devices`, `Backups`, and `Recovery` inside the chosen folder. Turning both switches off stops further automatic access; Disconnect folder releases the saved bookmark without deleting files.
+
+Apple references: [directory access](https://developer.apple.com/documentation/uikit/providing-access-to-directories), [free iCloud storage](https://support.apple.com/en-us/108047). Native CloudKit instead requires an active Apple Developer Program membership and private data consumes the user's iCloud quota, so it was not chosen for this no-backend-cost implementation.
 
 ## Checks
 

@@ -118,7 +118,8 @@ public extension TrainingData {
             variant.label = Self.uniqueName(base, among: variants.filter { $0.exerciseID == variant.exerciseID }.map(\.label))
             variant.progression.failures = 0
             variant.sets = variant.sets.map { plan in var p = plan; p.id = UUID(); return p }
-            variants.append(variant); copy.slots.append(RoutineSlot(variantID: variant.id, group: slot.group))
+            var linkedSlot = slot; linkedSlot.id = UUID(); linkedSlot.variantID = variant.id
+            variants.append(variant); copy.slots.append(linkedSlot)
         }
         routines.append(copy)
         return copy

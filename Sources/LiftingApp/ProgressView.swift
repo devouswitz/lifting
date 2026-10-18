@@ -12,6 +12,7 @@ struct ProgressView: View {
     @State private var selectedProgramID: UUID?
     @State private var selectedExerciseID: UUID?
     @State private var initialized = false
+    @State private var muscles = false
 
     var body: some View {
         let history = ProgressHistory(data: store.data, programID: selectedProgramID)
@@ -21,11 +22,13 @@ struct ProgressView: View {
         }
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 20) {
+                Picker("View", selection: $muscles) { Text("Exercises").tag(false); Text("Muscles").tag(true) }.pickerStyle(.segmented).labelsHidden().accessibilityIdentifier("progress.view")
                 VStack(alignment: .leading, spacing: 16) {
                     Picker("Program", selection: $selectedProgramID) {
                         Text("All programs").tag(UUID?.none)
                         ForEach(store.data.recordedPrograms) { program in Text(program.name).tag(Optional(program.id)) }
                     }.pickerStyle(.menu).accessibilityIdentifier("progress.program")
+                    if !muscles {
                     HStack {
                         Picker("Exercise", selection: $selectedExerciseID) {
                             Text("All").tag(UUID?.none)
@@ -39,12 +42,16 @@ struct ProgressView: View {
                         Spacer(minLength: 8)
                         ProgressMetricPicker(metric: $metric, metrics: Metric.allCases)
                     }
+                    }
                     ProgressRangePicker(range: $range)
+                    if muscles { MuscleAnalyticsView(programID: selectedProgramID, since: range.since) }
+                    else {
                     ProgressLineChart(tracks: tracks, metric: metric, unit: store.data.settings.unit, height: 270)
+                    }
                 }
                 .card()
 
-                VStack(alignment: .leading, spacing: 14) {
+                if !muscles { VStack(alignment: .leading, spacing: 14) {
                     Text("Records").font(.title2.weight(.semibold))
                     HStack(spacing: 8) {
                         Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
@@ -74,6 +81,7 @@ struct ProgressView: View {
                     }
                 }
                 .card()
+                }
             }
             .padding(16)
         }

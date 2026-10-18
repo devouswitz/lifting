@@ -6,6 +6,271 @@ import Foundation
 #endif
 
 final class TrainingTests: XCTestCase {
+    func testTimedStrengthImportsRemainStrengthAndMatchCatalog() throws {
+        let bytes = CSVCodec.render([["title", "start_time", "exercise_title", "duration_seconds", "weight_kg", "reps"],
+            ["Upper", "2026-10-18T10:00:00Z", "Plank", "60", "", ""],
+            ["Upper", "2026-10-18T10:00:00Z", "Bench Press (Barbell)", "30", "60", "8"]])
+        let bundle = try ExternalHistoryCSV.decode(bytes, options: ExternalHistoryCSV.detect(try CSVCodec.parse(bytes)[0]))
+        let items = bundle.content.sessions[0].exercises
+        XCTAssertEqual(items[0].mode, .bodyweight); XCTAssertEqual(items[1].mode, .strength)
+        var local = TrainingData.starter(); try local.importHistory(bundle)
+        XCTAssertEqual(local.muscleSummary().reduce(0) { $0 + $1.directSets }, 2)
+        XCTAssertEqual(local.muscleSummary().first { $0.name == "Chest" }?.volume, 480)
+    }
+    func testFailureTagUsesCompletedRepsForProgression() throws {
+        for reps in [4, 5] {
+            var data = TrainingData.starter(); let day = data.dayTemplates[0], v = data.variants.firstIndex { $0.id == day.slots[0].variantID }!
+            data.variants[v].sets = [SetPlan(kind: .failure, reps: 5, repCeiling: nil)]
+            data.variants[v].progression.mode = .linear; data.variants[v].workingWeight = 100
+            try data.start(routineID: day.id)
+            let item = data.activeSession!.exercises[0]
+            data.activeSession!.exercises[0].sets[0].reps = reps
+            try data.toggleSet(exerciseID: item.id, setID: item.sets[0].id); try data.finish()
+            XCTAssertEqual(data.variants[v].workingWeight, reps == 5 ? 100 + data.variants[v].progression.increment : 100)
+        }
+    }
+    func testNamedWarmupPresetsApplyIndependentCopiesAndKeepCompletedSets() throws {
+        var data = TrainingData.starter()
+        let preset = WarmupPreset(name: "Descending", sets: [80.0, 60, 40].map { SetPlan(kind: .warmup, load: .percent, percent: $0, reps: 5, repCeiling: 8, rpe: 6) })
+        try data.saveWarmupPreset(preset)
+        let day = data.dayTemplates[0], variantID = day.slots[0].variantID
+        let originalWork = data.variant(variantID)!.sets.filter { $0.kind != .warmup }
+        try data.applyWarmupPreset(preset.id, toVariants: [variantID])
+        XCTAssertEqual(data.variant(variantID)!.sets.prefix(3).map(\.percent), [80, 60, 40])
+        XCTAssertEqual(data.variant(variantID)!.sets.filter { $0.kind != .warmup }, originalWork)
+        XCTAssertTrue(Set(data.variant(variantID)!.sets.map(\.id)).isDisjoint(with: Set(preset.sets.map(\.id))))
+        try data.start(routineID: day.id)
+        let item = data.activeSession!.exercises[0]
+        try data.toggleSet(exerciseID: item.id, setID: item.sets[0].id)
+        let completed = data.activeSession!.exercises[0].sets[0]
+        try data.applyWarmupPreset(preset.id, toSessionExercises: [item.id], replacing: true, saveFuture: false)
+        let live = data.activeSession!.exercises[0]
+        XCTAssertEqual(live.sets.first?.id, completed.id); XCTAssertEqual(live.sets.first?.completedAt, completed.completedAt)
+        XCTAssertEqual(live.sets.filter { $0.plan.kind == .warmup && $0.completedAt == nil }.count, 3)
+        XCTAssertNil(live.sets.first { $0.completedAt == nil }?.reps)
+        XCTAssertEqual(data.variant(variantID)!.sets.filter { $0.kind == .warmup }.count, 3)
+        var edited = preset; edited.sets[0].percent = 25; try data.saveWarmupPreset(edited)
+        XCTAssertEqual(data.variant(variantID)!.sets[0].percent, 80)
+        XCTAssertEqual(try LocalRepository.decode(LocalRepository.encode(data)).warmupPresets[0].sets[0].percent, 25)
+    }
+
+    func testWarmupPresetSyncAndFutureScope() throws {
+        var a = TrainingData.starter(), state = DeviceSyncState()
+        let preset = WarmupPreset(name: "RPE only", sets: [SetPlan(kind: .warmup, load: .none, reps: nil, repCeiling: nil, rpe: 5)])
+        try a.saveWarmupPreset(preset)
+        let day = a.dayTemplates[0]
+        try a.start(routineID: day.id)
+        let item = a.activeSession!.exercises[0], otherVariant = day.slots[1].variantID, original = a.variant(otherVariant)!
+        try a.applyWarmupPreset(preset.id, toSessionExercises: [item.id], replacing: true, saveFuture: true)
+        XCTAssertEqual(a.variant(item.variantID)!.sets[0].rpe, 5); XCTAssertNil(a.variant(item.variantID)!.sets[0].reps)
+        XCTAssertEqual(a.variant(otherVariant), original)
+        try state.capture(a)
+        var receiver = DeviceSyncState(); let b = try receiver.merge([state], into: TrainingData())
+        XCTAssertEqual(b.warmupPresets, a.warmupPresets)
+        XCTAssertNil(b.activeSession)
+        XCTAssertNoThrow(try b.validated())
+    }
+
+    func testNestedJSONAndFitNotesImportsUseTheSameValidatedPipeline() throws {
+        let json = Data("""
+        {"workouts":[{"id":"abc","title":"Lower","start_time":"2026-10-18T09:00:00Z","end_time":"2026-10-18T10:00:00Z","exercises":[{"title":"Run","sets":[{"type":"normal","distance_meters":2500,"duration_seconds":900,"rpe":7}]}]}]}
+        """.utf8)
+        let bytes = try ExternalHistoryJSON.csv(json), options = ExternalHistoryCSV.detect(try CSVCodec.parse(bytes)[0])
+        let imported = try ExternalHistoryCSV.decode(bytes, options: options).content
+        XCTAssertEqual(imported.sessions[0].exercises[0].sets[0].meters, 2500)
+        XCTAssertEqual(imported.sessions[0].exercises[0].sets[0].seconds, 900)
+        let fit = CSVCodec.render([["Date", "Exercise", "Category", "Weight", "Weight Unit", "Reps", "Distance", "Distance Unit", "Time", "Comment"], ["2026-10-18", "Curl", "Biceps", "10", "kg", "8", "", "", "", "note"]])
+        let fitOptions = ExternalHistoryCSV.detect(try CSVCodec.parse(fit)[0])
+        XCTAssertEqual(fitOptions.source, "FitNotes")
+        let fitBundle = try ExternalHistoryCSV.decode(fit, options: fitOptions)
+        XCTAssertEqual(fitBundle.content.sessions[0].exercises[0].muscle, "Biceps")
+        XCTAssertThrowsError(try ExternalHistoryJSON.csv(Data("{\"schemaVersion\":1}".utf8)))
+    }
+
+    func testForeignImportMatchesKnownEquipmentAndKeepsDayTracksSeparate() throws {
+        let bytes = CSVCodec.render([["Date", "Workout Name", "Exercise Name", "Weight", "Reps"],
+            ["2026-10-18", "Upper", "Bench Press (Barbell)", "40", "8"], ["2026-10-19", "Push", "Bench Press (Barbell)", "50", "5"]])
+        let bundle = try ExternalHistoryCSV.decode(bytes, options: ExternalHistoryCSV.detect(try CSVCodec.parse(bytes)[0]))
+        var local = TrainingData.starter()
+        let bench = local.exercises.first { $0.name == "Bench press" }!
+        try local.importHistory(bundle)
+        XCTAssertEqual(Set(local.sessions.flatMap(\.exercises).map(\.exerciseID)), [bench.id])
+        XCTAssertEqual(Set(local.sessions.flatMap(\.exercises).map(\.variantID)).count, 2)
+        XCTAssertEqual(local.muscleSummary().first?.name, "Chest")
+    }
+
+    func testLinkedFlowWarmupsRoundsUnevenSetsAndDropChains() throws {
+        var data = TrainingData.starter()
+        let day = data.dayTemplates[0], ids = Set(day.slots.prefix(2).map(\.id))
+        try data.linkRoutineExercises(routineID: day.id, slots: ids, rest: 75, transition: 5)
+        for slot in day.slots.prefix(2) {
+            let i = data.variants.firstIndex { $0.id == slot.variantID }!
+            data.variants[i].sets = [SetPlan(reps: 8, repCeiling: nil), SetPlan(reps: 8, repCeiling: nil)]
+        }
+        let first = data.variants.firstIndex { $0.id == day.slots[0].variantID }!
+        data.variants[first].sets.insert(SetPlan(kind: .warmup, reps: 5, repCeiling: nil), at: 0)
+        data.variants[first].sets.insert(SetPlan(kind: .drop, reps: 8, repCeiling: nil, restSeconds: 0), at: 2)
+        data.variants[first].sets.append(SetPlan(reps: 8, repCeiling: nil))
+        try data.start(routineID: day.id)
+        let a = data.activeSession!.exercises[0], b = data.activeSession!.exercises[1], now = Date(timeIntervalSince1970: 1000)
+        XCTAssertEqual(data.activeSession!.linkTitle(for: a.id), "Superset")
+        try data.toggleSet(exerciseID: a.id, setID: a.sets[0].id, now: now)
+        XCTAssertEqual(data.activeSession!.exercises[0].collapsed, false)
+        try data.toggleSet(exerciseID: a.id, setID: a.sets[1].id, now: now)
+        XCTAssertEqual(data.activeSession!.exercises[0].collapsed, false)
+        try data.toggleSet(exerciseID: a.id, setID: a.sets[2].id, now: now)
+        XCTAssertEqual(data.activeSession!.exercises[1].collapsed, false)
+        XCTAssertEqual(data.restDeadline, now.addingTimeInterval(5))
+        try data.toggleSet(exerciseID: b.id, setID: b.sets[0].id, now: now)
+        XCTAssertEqual(data.activeSession!.exercises[0].collapsed, false)
+        XCTAssertEqual(data.restDeadline, now.addingTimeInterval(75))
+        try data.toggleSet(exerciseID: a.id, setID: a.sets[3].id, now: now)
+        try data.toggleSet(exerciseID: b.id, setID: b.sets[1].id, now: now)
+        XCTAssertEqual(data.activeSession!.exercises[0].collapsed, false)
+        XCTAssertEqual(data.restDeadline, now.addingTimeInterval(75))
+        try data.toggleSet(exerciseID: a.id, setID: a.sets[4].id, now: now)
+        XCTAssertNoThrow(try data.validated())
+        try data.toggleSet(exerciseID: b.id, setID: b.sets[1].id, now: now)
+        XCTAssertNil(data.restDeadline)
+    }
+
+    func testCircuitSettingsSurviveCopiesCSVAndSubstitution() throws {
+        var data = TrainingData.starter(); let day = data.dayTemplates[0]
+        try data.linkRoutineExercises(routineID: day.id, slots: Set(day.slots.map(\.id)), rest: 63, transition: 7)
+        let copyID = try data.saveDayAsTemplate(day.id)
+        XCTAssertEqual(data.routine(copyID)!.slots[0].groupRestSeconds, 63)
+        let csv = try RoutineCSV.decode(RoutineCSV.export(data, dayID: day.id)).content
+        XCTAssertEqual(csv.routines[0].slots[0].transitionSeconds, 7)
+        var imported = TrainingData(); try imported.importRoutines(RoutineBundle(content: csv))
+        XCTAssertEqual(imported.routines[0].slots[0].groupRestSeconds, 63)
+        try data.start(routineID: day.id)
+        let first = data.activeSession!.exercises[0]
+        XCTAssertEqual(data.activeSession!.linkTitle(for: first.id), "Circuit")
+        let alternate = data.exercises.first { $0.name == "Dumbbell lateral raise" }!
+        try data.substitute(sessionExerciseID: first.id, with: alternate.id, future: false)
+        XCTAssertEqual(data.activeSession!.exercises[0].group, first.group)
+        XCTAssertEqual(data.activeSession!.exercises[0].groupRestSeconds, 63)
+        XCTAssertEqual(try LocalRepository.decode(LocalRepository.encode(data)).activeSession!.exercises[0].transitionSeconds, 7)
+        data.unlinkSessionGroup(first.group!, saveFuture: true)
+        XCTAssertTrue(data.activeSession!.exercises.allSatisfy { $0.group == nil })
+        XCTAssertTrue(data.routine(day.id)!.slots.allSatisfy { $0.group.isEmpty })
+        XCTAssertFalse(data.routine(copyID)!.slots[0].group.isEmpty)
+    }
+
+    func testMuscleAnalyticsUsesCompletedSnapshotsAndNoInventedVolume() throws {
+        var data = TrainingData.starter(); let day = data.dayTemplates[0]
+        let exerciseID = data.variant(day.slots[0].variantID)!.exerciseID
+        let e = data.exercises.firstIndex { $0.id == exerciseID }!
+        data.exercises[e].secondaryMuscles = ["Triceps", "Chest", "triceps"]
+        try data.start(routineID: day.id)
+        var session = data.activeSession!; session.endedAt = session.startedAt
+        session.exercises = [session.exercises[0]]
+        for s in session.exercises[0].sets.indices {
+            session.exercises[0].sets[s].completedAt = session.startedAt
+            session.exercises[0].sets[s].weight = 100; session.exercises[0].sets[s].reps = s == 2 ? nil : 5
+        }
+        data.sessions = [session]; data.activeSession = nil
+        data.exercises[e].muscle = "Renamed later"
+        let result = data.muscleSummary()
+        let chest = result.first { $0.name == "Chest" }!, triceps = result.first { $0.name == "Triceps" }!
+        XCTAssertEqual(chest.directSets, 3); XCTAssertEqual(chest.volume, 1000)
+        XCTAssertEqual(triceps.secondarySets, 3); XCTAssertEqual(triceps.setCount(includeSecondary: true), 1.5)
+        XCTAssertTrue(data.muscleSummary(since: session.startedAt.addingTimeInterval(1)).isEmpty)
+        XCTAssertTrue(data.muscleSummary(programID: UUID()).isEmpty)
+    }
+
+    func testTechniqueRangesAndRPEOnlyUseSharedTargets() throws {
+        let drops = SetTechniques.drops(workingWeight: 100, rounding: 0, reductionPercent: 12.5, count: 2, reps: 12, repCeiling: 15, rpe: 8)
+        XCTAssertEqual(drops[0].percent, 87.5); XCTAssertEqual(drops[1].percent, 76.5625)
+        XCTAssertEqual(drops[0].repTarget, "12-15"); XCTAssertNil(drops[0].initialReps)
+        let myo = SetTechniques.myo(activation: SetPlan(reps: nil, repCeiling: nil, rpe: 9), mini: SetPlan(reps: 3, repCeiling: 5, rpe: 8), miniSets: 3, rest: 17)
+        XCTAssertNil(myo[0].reps); XCTAssertEqual(myo[0].rpe, 9)
+        XCTAssertEqual(myo[1].repTarget, "3-5"); XCTAssertEqual(myo[1].restSeconds, 17)
+    }
+
+    func testStrongImportUnitsTypesNotesAndStableDeduplication() throws {
+        let bytes = CSVCodec.render([
+            ["Date", "Workout Name", "Duration", "Exercise Name", "Set Order", "Weight", "Reps", "Distance", "Seconds", "Notes", "Workout Notes", "RPE"],
+            ["2026-10-18 09:30:00", "Upper", "1h 2m 3s", "Bench press", "W", "45", "5", "", "", "warm", "session", ""],
+            ["2026-10-18 09:30:00", "Upper", "1h 2m 3s", "Bench press", "F", "135", "8", "", "", "quoted, note\nsecond line", "session", "9"]])
+        var options = ExternalHistoryCSV.detect(try CSVCodec.parse(bytes)[0]); options.weightUnit = .lb
+        let bundle = try ExternalHistoryCSV.decode(bytes, options: options)
+        let session = bundle.content.sessions[0], sets = session.exercises[0].sets
+        XCTAssertEqual(options.source, "Strong"); XCTAssertEqual(session.endedAt!.timeIntervalSince(session.startedAt), 3723)
+        XCTAssertEqual(sets[1].weight!, WeightUnit.lb.kilograms(135), accuracy: 0.00001)
+        XCTAssertEqual(sets[0].plan.kind, .warmup); XCTAssertEqual(sets[1].plan.kind, .failure)
+        XCTAssertEqual(sets[1].sourceFields?["Notes"], "quoted, note\nsecond line")
+        var local = TrainingData(); XCTAssertEqual(try local.importHistory(bundle), 1)
+        XCTAssertEqual(try local.importHistory(ExternalHistoryCSV.decode(bytes, options: options)), 0)
+        try local.createProgramFromHistory(bundle, name: "Migrated")
+        XCTAssertEqual(local.activeProgram?.dayIDs.count, 1)
+        XCTAssertEqual(local.sessions(inProgram: local.activeProgramID).count, 1)
+        XCTAssertEqual(local.activeProgram?.dayIDs.first.flatMap(local.routine)?.slots.count, 1)
+        let migratedVariant = local.variant(local.activeProgram!.dayIDs.first.flatMap(local.routine)!.slots[0].variantID)!
+        XCTAssertEqual(migratedVariant.workingWeight, WeightUnit.lb.kilograms(135), accuracy: 0.00001)
+        XCTAssertEqual(migratedVariant.sets[0].load, .percent)
+        let roundTrip = try HistoryCSV.decode(HistoryCSV.export(local)).content
+        XCTAssertEqual(roundTrip.sessions[0].exercises[0].sets[1].sourceFields, sets[1].sourceFields)
+    }
+
+    func testHevyAndMappedCSVImportPreserveCardioAndRejectBadValues() throws {
+        let bytes = CSVCodec.render([
+            ["title", "start_time", "end_time", "description", "exercise_title", "superset_id", "exercise_notes", "set_index", "set_type", "weight_kg", "reps", "distance_km", "duration_seconds", "rpe"],
+            ["Legs", "18 Oct 2026, 09:00", "18 Oct 2026, 10:00", "Day note", "Run", "", "Exercise note", "0", "normal", "", "", "3.2", "1200", "7"]])
+        let options = ExternalHistoryCSV.detect(try CSVCodec.parse(bytes)[0]), bundle = try ExternalHistoryCSV.decode(bytes, options: options)
+        let item = bundle.content.sessions[0].exercises[0]
+        XCTAssertEqual(options.source, "Hevy"); XCTAssertEqual(item.mode, .cardio)
+        XCTAssertEqual(item.sets[0].meters, 3200); XCTAssertEqual(item.sets[0].seconds, 1200); XCTAssertEqual(item.sets[0].rpe, 7)
+        let generic = CSVCodec.render([["When", "Move", "Load", "Count"], ["18/10/2026", "Curl", "12,5", "10"]])
+        var map = ExternalCSVOptions(columns: [.date: "When", .exercise: "Move", .weight: "Load", .reps: "Count"]); map.dateFormat = "dd/MM/yyyy"
+        XCTAssertEqual(try ExternalHistoryCSV.decode(generic, options: map).content.sessions[0].exercises[0].sets[0].weight, 12.5)
+        XCTAssertThrowsError(try ExternalHistoryCSV.decode(CSVCodec.render([["When", "Move", "Load", "Count"], ["18/10/2026", "Curl", "nan", "10"]]), options: map))
+    }
+
+    func testDeviceSyncMergesIndependentEditsAndKeepsLocalPreferences() throws {
+        let original = TrainingData.starter(); var a = original, b = original
+        var left = DeviceSyncState(), right = DeviceSyncState()
+        try left.capture(original); _ = try right.merge([left], into: original)
+        a.routines[0].notes = "A"; b.routines[1].notes = "B"; b.settings.unit = .kg
+        try left.capture(a); try right.capture(b)
+        a = try left.merge([right], into: a); b = try right.merge([left], into: b)
+        XCTAssertEqual(a.routines.first { $0.id == original.routines[0].id }?.notes, "A")
+        XCTAssertEqual(a.routines.first { $0.id == original.routines[1].id }?.notes, "B")
+        XCTAssertEqual(b.settings.unit, .kg); XCTAssertEqual(a.settings.unit, .lb)
+        XCTAssertEqual(left.records, right.records)
+        XCTAssertEqual(try DeviceSyncState.decode(left.encoded()), left)
+    }
+
+    func testSyncTombstonesAndConcurrentEditsConvergeWithoutResurrection() throws {
+        var a = TrainingData.starter(), b = a
+        var left = DeviceSyncState(), right = DeviceSyncState()
+        try left.capture(a); b = try right.merge([left], into: b)
+        let stale = right, removed = a.routines[0].id
+        a.removeDay(removed); try left.capture(a)
+        b = try right.merge([left], into: b)
+        XCTAssertNil(b.routine(removed))
+        b = try right.merge([stale], into: b); XCTAssertNil(b.routine(removed))
+        let key = a.variants[0].id
+        a.variants[0].notes = "left"; b.variants[b.variants.firstIndex { $0.id == key }!].notes = "right"
+        try left.capture(a); try right.capture(b)
+        a = try left.merge([right], into: a); b = try right.merge([left], into: b)
+        XCTAssertEqual(a.variant(key)?.notes, b.variant(key)?.notes)
+    }
+
+    func testSyncRejectsBrokenReferencesAtomically() throws {
+        var data = TrainingData.starter(), state = DeviceSyncState()
+        try state.capture(data)
+        var remote = state
+        let key = "exercise/\(data.exercises[0].id.uuidString)"
+        remote.clock += 1; remote.records[key]!.payload = nil; remote.records[key]!.revision.counter = remote.clock
+        let before = state
+        XCTAssertThrowsError(try state.merge([remote], into: data))
+        XCTAssertEqual(state, before)
+        try data.start(routineID: data.dayTemplates[0].id)
+        var same = before; let restored = try same.merge([before], into: data)
+        XCTAssertEqual(restored.activeSession?.id, data.activeSession?.id)
+    }
+
     func testRepRangesCanBeCompletedWithoutInventingAnActualCount() throws {
         for rule in [LoadRule.none, .working] {
             var data = TrainingData.starter()

@@ -31,6 +31,7 @@ private struct CSVPreview: Identifiable {
     var id = UUID()
     var routines: RoutineBundle?
     var history: HistoryBundle?
+    var external: Data?
 }
 
 struct CSVImportModifier: ViewModifier {
@@ -40,28 +41,38 @@ struct CSVImportModifier: ViewModifier {
     func body(content: Content) -> some View {
         content.background {
         Color.clear.frame(width: 1, height: 1).allowsHitTesting(false)
-        .fileImporter(isPresented: $isPresented, allowedContentTypes: [.commaSeparatedText, .plainText], allowsMultipleSelection: false) { result in
+        .fileImporter(isPresented: $isPresented, allowedContentTypes: [.commaSeparatedText, .plainText, .json], allowsMultipleSelection: false) { result in
             do {
                 guard let url = try result.get().first else { return }
                 let access = url.startAccessingSecurityScopedResource()
                 defer { if access { url.stopAccessingSecurityScopedResource() } }
                 guard (try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0) <= 25_000_000 else { throw TrainingError.invalid("CSV files must be under 25 MB.") }
-                let bytes = try Data(contentsOf: url)
+                var bytes = try Data(contentsOf: url)
+                if url.pathExtension.lowercased() == "json" { bytes = try ExternalHistoryJSON.csv(bytes) }
                 let header = try CSVCodec.parse(bytes)[0].map { $0.lowercased().replacingOccurrences(of: " ", with: "_").trimmingCharacters(in: .whitespacesAndNewlines) }
                 if header.contains("day") { preview = CSVPreview(routines: try RoutineCSV.decode(bytes)) }
-                else { preview = CSVPreview(history: try HistoryCSV.decode(bytes)) }
+                else if ["date", "workout", "exercise", "weight_kg"].allSatisfy(header.contains) { preview = CSVPreview(history: try HistoryCSV.decode(bytes)) }
+                else { preview = CSVPreview(external: bytes) }
             } catch { store.error = "Import failed. \(error.localizedDescription)" }
         }
-        .sheet(item: $preview) { item in CSVImportPreview(routines: item.routines, history: item.history).environmentObject(store).sheetSize() }
+        .sheet(item: $preview) { item in
+            Group {
+                if let bytes = item.external { ExternalImportSetup(bytes: bytes) }
+                else { CSVImportPreview(routines: item.routines, history: item.history) }
+            }.environmentObject(store).sheetSize()
+        }
         }
     }
 }
 
-private struct CSVImportPreview: View {
+struct CSVImportPreview: View {
     @EnvironmentObject var store: AppStore
     @Environment(\.dismiss) var dismiss
     var routines: RoutineBundle?
     var history: HistoryBundle?
+    var onBack: (() -> Void)?
+    @State private var createProgram = false
+    @State private var programName = "Imported program"
     var body: some View {
         NavigationStack {
             Form {
@@ -95,13 +106,30 @@ private struct CSVImportPreview: View {
                     }
                     Section {
                         ForEach(bundle.content.sessions) { session in
-                            LabeledContent(session.name, value: session.startedAt.formatted(date: .abbreviated, time: .shortened))
+                            DisclosureGroup {
+                                ForEach(session.exercises) { exercise in
+                                    VStack(alignment: .leading, spacing: 5) {
+                                        Text(exercise.name).font(.headline)
+                                        Text(loggedExerciseSummary(exercise, unit: store.data.settings.unit)).font(.subheadline).monospacedDigit()
+                                        if !exercise.notes.isEmpty { Text(exercise.notes).font(.caption).foregroundStyle(.secondary) }
+                                    }
+                                }
+                            } label: { LabeledContent(bundle.content.title(for: session), value: session.startedAt.formatted(date: .abbreviated, time: .shortened)) }
                         }
                     }
-                    Button("Add to History") { if store.perform({ _ = try $0.importHistory(bundle) }) { dismiss() } }.disabled(count == 0).accessibilityIdentifier("csv.addHistory")
+                    Section {
+                        Toggle("Build program from latest workouts", isOn: $createProgram)
+                        if createProgram { TextField("Program name", text: $programName) }
+                    }
+                    Button(createProgram ? "Add History and Program" : "Add to History") {
+                        if store.perform({ data in
+                            _ = try data.importHistory(bundle)
+                            if createProgram { try data.createProgramFromHistory(bundle, name: programName) }
+                        }) { dismiss() }
+                    }.disabled(count == 0 || createProgram && programName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty).accessibilityIdentifier("csv.addHistory")
                 }
             }.formStyle(.grouped).navigationTitle("Import CSV").inlineTitle()
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .cancellationAction) { if let onBack { Button("Back", action: onBack) } else { Button("Cancel") { dismiss() } } } }
         }
     }
     func dayPreview(_ day: Routine, in data: TrainingData) -> some View {

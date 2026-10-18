@@ -2,6 +2,21 @@
 
 Verified on October 18, 2026.
 
+## Linked training, presets, analytics, imports, and optional sync
+
+- Core coverage now includes linked warm-up sequencing, transitions, round rest, uneven set counts, drop/MYO chains, unlinking/undo behavior, substitution, template copies, CSV/JSON persistence, named warm-up copies, live replacement retaining completed sets, and optional future scope.
+- Native Mac: linked Bench press and Barbell row with 75-second round rest. Applied the named Descending preset (80%, 60%, 40%) to the Upper day. Warm-ups resolved against each exercise's working weight. Completing each movement's warm-ups focused the next warm-up panel; working sets alternated panels and started a 1:15 timer after a round.
+- Native Mac: typed a 12.5% drop reduction and selected a 12-15 rep range. Preview showed 87.5% of working weight. Adding it live created an 82.5 lb drop from 95 lb, with optional actual reps. Live reapplication of a warm-up preset retained three completed warm-ups and the completed working set, replaced pending warm-ups, and left recurring prescriptions unchanged.
+- Native Mac: created and saved the Descending preset through the set editor. The library exposed named presets, and program/day/live application used independent copies. Native data read-back confirmed percentages, completed sets, round rest, and drop targets.
+- Muscle analytics rendered labeled bar charts and numerical distribution for logged sets and load volume, using program/date filters. Core checks cover warm-up/cardio exclusion, secondary half-set credits, muscle snapshots, and missing exact counts contributing no volume.
+- External import checks cover Strong, Hevy, FitNotes, mapped CSV, flat/nested JSON, units, notes, durations, set types, source fields, deterministic duplicate detection, exercise matching, day-track independence, and program reconstruction. Native Strong import added a workout and reconstructed program while preserving existing data. The history title included the new program name.
+- Native units check: selected kg for a Strong file with unspecified units. The expanded preview showed 60 kg as 132.3 lb and 45 kg as 99.2 lb. Saved data retained 60/45 kg, and program reconstruction used a 60 kg working load and 75% drop. The shared percentage editor rendered its typed value and stepper without duplicate field labels. Folder access survived relaunch, and its picker opened and canceled as one sheet.
+- Native optional backup/sync: both switches began off. Selected a dedicated local test folder, enabled them, and verified a latest backup, daily backup, and per-device replica on disk. A second replica added a workout and named warm-up preset. The app deferred merging during an active workout, then retained both completed histories (33 workouts total), imported the second preset, kept lb as the local unit, and wrote recovery copies. Active-workout backups included the current checked sets and live-only edits.
+- Core sync checks cover independent changes, deterministic concurrent resolution, tombstones, stale replicas, local preferences, warm-up presets, and atomic rejection of broken cross-record references. Same-record conflicts use one whole-record revision; recovery copies preserve the previous local state.
+- All native feature checks used an isolated demo data directory. The regular user library and its optional-sync preferences were not changed.
+
+Actual iCloud transport and physical multi-device delivery remain unverified. The native file picker reported insufficient iCloud upload quota on this account. Folder backup/merge behavior was tested through a local folder and two independent replica identities. iOS compilation and device checks remain deferred as below.
+
 ## Target and program refinements
 
 - Explicit No count, Reps, and Rep range controls in the shared prescription/live target editor. Native warm-up editing changed 50% to 65% of 95 lb, resolving to 60 lb after rounding.
@@ -24,7 +39,7 @@ Verified on October 18, 2026.
 
 ## Earlier feature checks
 
-- 44 core test cases, zero failures. The standalone harness runs the same test bodies as the Xcode XCTest target.
+- 59 core test cases, zero failures. The standalone harness runs the same test bodies as the Xcode XCTest target.
 - Native macOS release build using the same SwiftUI views and training engine as the iOS target.
 - Native UI: one-tap set completion, fractional weight editing, automatic rest, live drop sets, live MYO activation and mini-sets, changing mini-set count and rest, saving MYO settings to a single routine variant.
 - Native UI and persisted file read-back: active workout survives process termination and relaunch with completed sets and MYO settings intact.
@@ -58,4 +73,4 @@ The iOS app is not installed on an iPhone or distributed through TestFlight or t
 
 The implemented app covers the requested substitutions, independent day variants, flexible warm-ups, per-exercise notes, local storage, mixed cardio, drop sets, and MYO reps. It also includes ordered programs, reusable day templates, independent copies, day/program CSV sharing, additive history CSV import, editable exercises, rest timers, plate calculation, progression rules, graphs, history editing, and backup/restore.
 
-Not included: Apple Watch support, Health integration, superset management, variant merging, schedule calendars, or equipment-specific inventory counts.
+Not included: Apple Watch support, Health integration, variant merging, schedule calendars, or equipment-specific inventory counts. Proprietary/encrypted competitor backups, including GreySkull-specific binary/cloud backup formats, have not been validated. Folder sync runs while the app is open; active workouts and device preferences do not merge across devices.

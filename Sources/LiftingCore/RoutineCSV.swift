@@ -8,7 +8,7 @@ public struct RoutineBundle: Sendable {
 }
 
 public enum RoutineCSV {
-    public static let headers = ["format", "record_type", "program_id", "program", "program_notes", "day_order", "day_id", "day", "day_notes", "exercise_order", "slot_id", "exercise_id", "exercise", "mode", "muscle", "equipment", "variant_id", "variant", "working_weight_kg", "rounding_kg", "rest_seconds", "exercise_notes", "progression", "increment_kg", "deload_after", "deload_percent", "group", "set_order", "set_id", "set_type", "load_rule", "fixed_weight_kg", "percent", "reps_min", "reps_max", "seconds", "meters", "rpe", "amrap", "set_rest_seconds"]
+    public static let headers = ["format", "record_type", "program_id", "program", "program_notes", "day_order", "day_id", "day", "day_notes", "exercise_order", "slot_id", "exercise_id", "exercise", "mode", "muscle", "equipment", "variant_id", "variant", "working_weight_kg", "rounding_kg", "rest_seconds", "exercise_notes", "progression", "increment_kg", "deload_after", "deload_percent", "group", "set_order", "set_id", "set_type", "load_rule", "fixed_weight_kg", "percent", "reps_min", "reps_max", "seconds", "meters", "rpe", "amrap", "set_rest_seconds", "group_rest_seconds", "transition_seconds", "secondary_muscles"]
 
     public static func export(_ data: TrainingData, programID: UUID? = nil, dayID: UUID? = nil) throws -> Data {
         let owner = programID.flatMap(data.program)
@@ -27,6 +27,9 @@ public enum RoutineCSV {
                 guard let variant = data.variant(slot.variantID), let exercise = data.exercise(variant.exerciseID) else { throw TrainingError.invalid("An exercise is missing.") }
                 var values = dayValues
                 values.merge(["record_type": "set", "exercise_order": String(exerciseOrder + 1), "slot_id": slot.id.uuidString, "exercise_id": exercise.id.uuidString, "exercise": exercise.name, "mode": exercise.mode.rawValue, "muscle": exercise.muscle, "equipment": exercise.equipment, "variant_id": variant.id.uuidString, "variant": variant.label, "working_weight_kg": String(variant.workingWeight), "rounding_kg": String(variant.rounding), "rest_seconds": String(variant.restSeconds), "exercise_notes": variant.notes, "progression": variant.progression.mode.rawValue, "increment_kg": String(variant.progression.increment), "deload_after": String(variant.progression.deloadAfter), "deload_percent": String(variant.progression.deloadPercent), "group": slot.group]) { _, new in new }
+                values["group_rest_seconds"] = slot.groupRestSeconds.map(String.init) ?? ""
+                values["transition_seconds"] = slot.transitionSeconds.map(String.init) ?? ""
+                values["secondary_muscles"] = exercise.secondaryMuscles?.joined(separator: "|") ?? ""
                 for (setOrder, plan) in variant.sets.enumerated() {
                     var set = values
                     set["set_order"] = String(setOrder + 1); set["set_id"] = plan.id.uuidString
@@ -89,7 +92,8 @@ public enum RoutineCSV {
             let sourceExerciseID = try r.uuid("exercise_id")
             let exerciseKey = key(sourceExerciseID, "\(exerciseName)|\(r.text("equipment"))|\(mode.rawValue)")
             let exerciseID = exerciseIDs[exerciseKey] ?? sourceExerciseID ?? UUID(); exerciseIDs[exerciseKey] = exerciseID
-            let exercise = Exercise(id: exerciseID, name: exerciseName, muscle: r.text("muscle", default: "Other"), equipment: r.text("equipment"), mode: mode)
+            var exercise = Exercise(id: exerciseID, name: exerciseName, muscle: r.text("muscle", default: "Other"), equipment: r.text("equipment"), mode: mode)
+            exercise.secondaryMuscles = r.text("secondary_muscles").isEmpty ? nil : r.text("secondary_muscles").components(separatedBy: "|")
             if let existing = data.exercise(exerciseID) { guard existing == exercise else { throw TrainingError.invalid("Conflicting exercise details on row \(r.number).") } }
             else { data.exercises.append(exercise) }
             let sourceVariantID = try r.uuid("variant_id")
@@ -108,7 +112,9 @@ public enum RoutineCSV {
             let existingExerciseOrder = slotOrder[dayID]?.first { $0.value.variantID == variantID }?.key
             let exerciseOrder = try r.int("exercise_order", default: existingExerciseOrder ?? ((slotOrder[dayID]?.keys.max() ?? 0) + 1))!
             guard exerciseOrder > 0, slotOrder[dayID]?[exerciseOrder].map({ $0.variantID == variantID && $0.group == r.text("group") }) ?? true else { throw TrainingError.invalid("Conflicting exercise order on row \(r.number).") }
-            let slot = RoutineSlot(id: try r.uuid("slot_id") ?? slotOrder[dayID]?[exerciseOrder]?.id ?? UUID(), variantID: variantID, group: r.text("group"))
+            var slot = RoutineSlot(id: try r.uuid("slot_id") ?? slotOrder[dayID]?[exerciseOrder]?.id ?? UUID(), variantID: variantID, group: r.text("group"))
+            slot.groupRestSeconds = try r.int("group_rest_seconds"); slot.transitionSeconds = try r.int("transition_seconds")
+            if let existing = slotOrder[dayID]?[exerciseOrder], existing != slot { throw TrainingError.invalid("Conflicting linked exercise settings on row \(r.number).") }
             slotOrder[dayID, default: [:]][exerciseOrder] = slot
             guard let kind = SetKind(rawValue: r.text("set_type", default: "working")), let load = LoadRule(rawValue: r.text("load_rule", default: mode == .strength ? "working" : "none")) else { throw TrainingError.invalid("Invalid set_type or load_rule on row \(r.number).") }
             let plan = SetPlan(id: try r.uuid("set_id") ?? UUID(), kind: kind, load: load, fixedWeight: try r.double("fixed_weight_kg", default: 0)!, percent: try r.double("percent", default: 50, maximum: 1000)!, reps: try r.int("reps_min"), repCeiling: try r.int("reps_max"), seconds: try r.double("seconds"), meters: try r.double("meters"), rpe: try r.double("rpe", maximum: 10), amrap: try r.bool("amrap"), restSeconds: try r.int("set_rest_seconds"))
@@ -146,7 +152,7 @@ public extension TrainingData {
         for incoming in source.routines {
             var copy = Routine(name: incoming.name, notes: incoming.notes)
             if source.programForDay(incoming.id) == nil { copy.name = Self.uniqueName(copy.name, among: next.dayTemplates.map(\.name)) }
-            copy.slots = incoming.slots.map { RoutineSlot(variantID: variantMap[$0.variantID]!, group: $0.group) }
+            copy.slots = incoming.slots.map { value in var slot = value; slot.id = UUID(); slot.variantID = variantMap[value.variantID]!; return slot }
             next.routines.append(copy); dayMap[incoming.id] = copy.id
         }
         var imported: [UUID] = []
