@@ -64,6 +64,7 @@ public extension TrainingData {
             set.plan.kind = .myoMini; set.plan.amrap = false; set.plan.restSeconds = nil
             if item.sets.last?.plan.kind == .myoActivation { set.reps = 5; set.plan.reps = 5; set.plan.repCeiling = nil }
         }
+        if set.plan.repRange != nil || set.plan.reps == nil { set.reps = nil }
         activeSession!.exercises[e].sets.append(set)
     }
 }

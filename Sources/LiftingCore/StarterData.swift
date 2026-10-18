@@ -45,7 +45,7 @@ public extension TrainingData {
 
     static func demo(now: Date = Date()) -> TrainingData {
         var data = starter()
-        let days = data.dayTemplates
+        let days = data.activeProgram?.dayIDs.compactMap(data.routine) ?? data.dayTemplates
         for week in 0..<10 {
             for (day, routine) in days.enumerated() {
                 let date = now.addingTimeInterval(Double(-70 + week * 7 + day * 2) * 86400)
@@ -54,6 +54,7 @@ public extension TrainingData {
                     for e in session.exercises.indices {
                         for s in session.exercises[e].sets.indices {
                             session.exercises[e].sets[s].completedAt = date.addingTimeInterval(Double(s * 90))
+                            session.exercises[e].sets[s].reps = session.exercises[e].sets[s].plan.repCeiling ?? session.exercises[e].sets[s].plan.reps
                             if let weight = session.exercises[e].sets[s].weight, session.exercises[e].sets[s].plan.kind != .warmup { session.exercises[e].sets[s].weight = weight + WeightUnit.lb.kilograms(Double(week * 2)) }
                         }
                     }

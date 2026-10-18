@@ -170,7 +170,8 @@ func loggedExerciseSummary(_ exercise: SessionExercise, unit: WeightUnit) -> Str
     for set in sets {
         if let last = groups.last?.last,
            last.weight == set.weight, last.reps == set.reps, last.seconds == set.seconds,
-           last.meters == set.meters, last.rpe == set.rpe, last.plan.kind == set.plan.kind {
+           last.meters == set.meters, last.rpe == set.rpe, last.plan.kind == set.plan.kind,
+           (set.reps != nil || last.plan.repTarget == set.plan.repTarget) {
             groups[groups.count - 1].append(set)
         } else { groups.append([set]) }
     }
@@ -178,6 +179,7 @@ func loggedExerciseSummary(_ exercise: SessionExercise, unit: WeightUnit) -> Str
         guard let set = group.first else { return "" }
         var parts: [String] = []
         if let reps = set.reps { parts.append("\(group.count) × \(reps) reps") }
+        else if let range = set.plan.repRange { parts.append("\(group.count) × \(range.lowerBound)-\(range.upperBound) reps") }
         else { parts.append(counted(group.count, "set")) }
         if let weight = set.weight { parts.append("\(number(unit.display(weight))) \(unit.rawValue)") }
         if let seconds = set.seconds { parts.append(clockText(seconds)) }

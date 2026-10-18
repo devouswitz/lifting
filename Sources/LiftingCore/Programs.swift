@@ -124,3 +124,29 @@ public extension TrainingData {
         return copy
     }
 }
+
+public struct RecordedProgram: Identifiable, Equatable, Sendable {
+    public let id: UUID
+    public let name: String
+}
+
+public extension TrainingData {
+    var recordedPrograms: [RecordedProgram] {
+        var names = Dictionary(uniqueKeysWithValues: programs.map { ($0.id, $0.name) })
+        for session in sessions.sorted(by: { $0.startedAt > $1.startedAt }) {
+            if let id = session.programID, names[id] == nil { names[id] = session.programName ?? "Archived program" }
+        }
+        return names.map { RecordedProgram(id: $0.key, name: $0.value) }.sorted {
+            $0.name == $1.name ? $0.id.uuidString < $1.id.uuidString : $0.name.localizedStandardCompare($1.name) == .orderedAscending
+        }
+    }
+    func sessions(inProgram id: UUID?) -> [Session] {
+        guard let id else { return sessions }
+        let days = Set(program(id)?.dayIDs ?? [])
+        return sessions.filter { $0.programID == id || ($0.programID == nil && $0.routineID.map(days.contains) == true) }
+    }
+    func title(for session: Session) -> String {
+        let name = session.programName ?? session.programID.flatMap(program)?.name ?? session.routineID.flatMap(programForDay)?.name
+        return name.map { "\($0) - \(session.name)" } ?? session.name
+    }
+}

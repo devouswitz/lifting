@@ -197,15 +197,18 @@ struct WorkoutExerciseCard: View {
         }
     }
     func setGroup(_ item: SessionExercise, warmup: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
+        let columns = SetTableColumns(item: item, warmup: warmup)
+        return VStack(alignment: .leading, spacing: 2) {
             Text(warmup ? "Warm-up" : item.mode == .cardio ? "Intervals" : "Working sets").font(.caption.weight(.semibold)).foregroundStyle(.secondary).padding(.top, 4)
             if !typeSize.isAccessibilitySize {
                 HStack(spacing: 6) {
                     Text("SET").frame(width: 28)
                     Text("PREVIOUS").frame(width: 64)
-                    if item.mode != .cardio { Text(store.data.settings.unit.rawValue.uppercased()).frame(maxWidth: .infinity); Text("REPS").frame(maxWidth: .infinity) }
-                    else { Text("TIME").frame(maxWidth: .infinity); Text("METERS").frame(maxWidth: .infinity) }
-                    Text("RPE").frame(width: 42)
+                    if columns.weight { Text(store.data.settings.unit.rawValue.uppercased()).frame(maxWidth: .infinity) }
+                    if columns.reps { Text("REPS").frame(maxWidth: .infinity) }
+                    if columns.time { Text("TIME").frame(maxWidth: .infinity) }
+                    if columns.distance { Text("METERS").frame(maxWidth: .infinity) }
+                    Text("RPE").frame(maxWidth: columns.hasMeasurements ? 42 : .infinity)
                     Color.clear.frame(width: 40, height: 1)
                 }.font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary).padding(.horizontal, 2).padding(.top, 3)
             }
@@ -218,7 +221,9 @@ struct WorkoutExerciseCard: View {
     var autoCollapseReady: Bool { completed && item?.collapsed != true && item?.keepExpanded != true && technique == nil && editVariant == nil && !substituting && !workingWeight && !note && restEdit == nil && store.data.settings.autoCollapseCompleted == true }
     func compactSummary(_ item: SessionExercise) -> String {
         let count = "\(item.sets.filter { $0.completedAt != nil }.count)/\(item.sets.count) sets"
-        let best = item.sets.filter { $0.completedAt != nil }.max { ($0.weight ?? 0) < ($1.weight ?? 0) } ?? item.sets.first
+        let working = item.sets.filter { $0.plan.kind != .warmup }
+        let candidates = working.isEmpty ? item.sets : working
+        let best = candidates.filter { $0.completedAt != nil }.max { ($0.weight ?? 0) < ($1.weight ?? 0) } ?? candidates.first
         return best.map { loggedSetSummary($0, unit: store.data.settings.unit) } ?? count
     }
     func appendSet(_ item: SessionExercise, warmup: Bool = false) {

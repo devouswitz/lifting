@@ -35,7 +35,7 @@ public enum LoadRule: String, Codable, CaseIterable, Identifiable, Sendable {
     case working, percent, fixed, none
     public var id: String { rawValue }
     public var title: String {
-        switch self { case .working: return "Working weight"; case .percent: return "% of working weight"; case .fixed: return "Fixed weight"; case .none: return "No weight" }
+        switch self { case .working: return "Working weight"; case .percent: return "% of working set"; case .fixed: return "Fixed weight"; case .none: return "No weight" }
     }
 }
 
@@ -55,6 +55,15 @@ public struct SetPlan: Identifiable, Codable, Equatable, Sendable {
     public init(id: UUID = UUID(), kind: SetKind = .working, load: LoadRule = .working, fixedWeight: Double = 0, percent: Double = 50, reps: Int? = 8, repCeiling: Int? = 12, seconds: Double? = nil, meters: Double? = nil, rpe: Double? = nil, amrap: Bool = false, restSeconds: Int? = nil) {
         self.id = id; self.kind = kind; self.load = load; self.fixedWeight = fixedWeight; self.percent = percent
         self.reps = reps; self.repCeiling = repCeiling; self.seconds = seconds; self.meters = meters; self.rpe = rpe; self.amrap = amrap; self.restSeconds = restSeconds
+    }
+    public var repRange: ClosedRange<Int>? {
+        guard let reps, let repCeiling, repCeiling > reps else { return nil }
+        return reps...repCeiling
+    }
+    public var initialReps: Int? { repRange == nil ? reps : nil }
+    public var repTarget: String? {
+        guard let reps else { return nil }
+        return repRange.map { "\($0.lowerBound)-\($0.upperBound)" } ?? String(reps)
     }
     public func resolvedWeight(working: Double, increment: Double) -> Double? {
         switch load {
@@ -129,7 +138,7 @@ public struct LoggedSet: Identifiable, Codable, Equatable, Sendable {
     public init(plan: SetPlan, variant: Variant) {
         id = UUID(); self.plan = plan
         weight = plan.resolvedWeight(working: variant.workingWeight, increment: variant.rounding)
-        reps = plan.repCeiling ?? plan.reps; seconds = plan.seconds; meters = plan.meters; rpe = plan.rpe
+        reps = plan.initialReps; seconds = plan.seconds; meters = plan.meters; rpe = plan.rpe
     }
 }
 
@@ -167,6 +176,7 @@ public struct Session: Identifiable, Codable, Equatable, Sendable {
     public var id: UUID
     public var routineID: UUID?
     public var programID: UUID?
+    public var programName: String?
     public var advancesProgram: Bool?
     public var name: String
     public var startedAt: Date

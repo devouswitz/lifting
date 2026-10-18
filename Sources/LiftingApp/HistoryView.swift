@@ -13,7 +13,7 @@ struct HistoryView: View {
     private var sortedSessions: [Session] { store.data.sessions.sorted { $0.startedAt > $1.startedAt } }
     private var matchingSessions: [Session] {
         sortedSessions.filter { session in
-            search.isEmpty || "\(session.name) \(session.notes) \(session.exercises.map { "\($0.name) \($0.label) \($0.notes)" }.joined(separator: " "))".localizedCaseInsensitiveContains(search)
+            search.isEmpty || "\(store.data.title(for: session)) \(session.notes) \(session.exercises.map { "\($0.name) \($0.label) \($0.notes)" }.joined(separator: " "))".localizedCaseInsensitiveContains(search)
         }
     }
     private var visibleSessions: [Session] {
@@ -80,7 +80,7 @@ struct HistoryView: View {
         VStack(spacing: 0) {
             ForEach(Array(sessions.enumerated()), id: \.element.id) { index, session in
                 NavigationLink { SessionDetail(sessionID: session.id) } label: {
-                    HistoryWorkoutRow(session: session, unit: store.data.settings.unit)
+                    HistoryWorkoutRow(session: session, title: store.data.title(for: session), unit: store.data.settings.unit)
                 }.buttonStyle(.plain).accessibilityIdentifier("history.workout.\(session.id)")
                 if index < sessions.count - 1 { Divider().padding(.leading, 58) }
             }
@@ -95,6 +95,7 @@ private enum HistoryMode: String, CaseIterable, Identifiable {
 
 private struct HistoryWorkoutRow: View {
     let session: Session
+    let title: String
     let unit: WeightUnit
 
     var body: some View {
@@ -105,7 +106,7 @@ private struct HistoryWorkoutRow: View {
                     Text(session.startedAt, format: .dateTime.weekday(.abbreviated)).font(.caption2).foregroundStyle(.secondary)
                 }.frame(width: 30)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(session.name).font(.headline).foregroundStyle(.primary)
+                    Text(title).font(.headline).foregroundStyle(.primary)
                     Text("\(counted(session.completedSets, "set")) · \(clockText(max(0, (session.endedAt ?? session.startedAt).timeIntervalSince(session.startedAt)))) · \(number(unit.display(session.volume), decimals: 0)) \(unit.rawValue)")
                         .font(.caption).foregroundStyle(.secondary).monospacedDigit()
                 }
@@ -153,7 +154,7 @@ struct SessionDetail: View {
                 else { workoutDetail(session) }
             } else { EmptyState(symbol: "clock", text: "Workout unavailable.") }
         }
-        .navigationTitle(session?.name ?? "Workout").inlineTitle()
+        .navigationTitle(session.map { store.data.title(for: $0) } ?? "Workout").inlineTitle()
         .toolbar { if session != nil { Button(editing ? "Done" : "Edit") { editing.toggle() }.accessibilityIdentifier("history.edit") } }
         .confirmationDialog("Delete this workout?", isPresented: $deleting) {
             Button("Delete workout", role: .destructive) {
@@ -177,7 +178,7 @@ struct SessionDetail: View {
                 }.padding(16).background(Palette.surface(scheme), in: RoundedRectangle(cornerRadius: 12))
                 ForEach(session.exercises) { exercise in
                     VStack(alignment: .leading, spacing: 13) {
-                        NavigationLink { ExerciseProgress(exerciseID: exercise.exerciseID, initialVariantID: exercise.variantID) } label: {
+                        NavigationLink { ExerciseProgress(exerciseID: exercise.exerciseID, initialVariantID: exercise.variantID, programID: session.programID) } label: {
                             HStack(alignment: .firstTextBaseline) {
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text(exercise.name).font(.headline)
@@ -313,7 +314,7 @@ private enum HistorySetColumn: CaseIterable, Identifiable, Hashable {
     func value(_ set: LoggedSet, unit: WeightUnit) -> String? {
         switch self {
         case .weight: return set.weight.map { number(unit.display($0)) }
-        case .reps: return set.reps.map(String.init)
+        case .reps: return set.reps.map(String.init) ?? (set.plan.repRange != nil ? set.plan.repTarget : nil)
         case .time: return set.seconds.map(clockText)
         case .distance: return set.meters.map { number($0) }
         case .rpe: return set.rpe.map { number($0) }

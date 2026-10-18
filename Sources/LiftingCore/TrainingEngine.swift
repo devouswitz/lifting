@@ -11,6 +11,7 @@ public extension TrainingData {
         let owner = programForDay(routine.id)
         activeSession = Session(routineID: routine.id, name: routine.name, startedAt: now, exercises: items)
         activeSession?.programID = owner?.id
+        activeSession?.programName = owner?.name
         activeSession?.advancesProgram = owner?.nextDayID == routine.id
         for index in activeSession!.exercises.indices { activeSession!.exercises[index].collapsed = index != 0 }
         activeSession?.notes = routine.notes
@@ -102,9 +103,11 @@ public extension TrainingData {
             // Preserve today's structure, including edited targets, drop sets, and MYO mini-sets.
             item.sets = pending.map { logged in
                 var plan = logged.plan; plan.id = UUID()
-                plan.reps = logged.reps; plan.repCeiling = nil; plan.seconds = logged.seconds; plan.meters = logged.meters; plan.rpe = logged.rpe
+                plan.seconds = logged.seconds; plan.meters = logged.meters; plan.rpe = logged.rpe
                 if plan.load == .fixed { plan.fixedWeight = 0 }
-                return LoggedSet(plan: plan, variant: replacement)
+                var replacementSet = LoggedSet(plan: plan, variant: replacement)
+                replacementSet.reps = logged.reps
+                return replacementSet
             }
             item.restSeconds = old.restSeconds
         }
@@ -150,7 +153,7 @@ public extension TrainingData {
         }
         if let reps = set.reps, !(0...10000).contains(reps) { throw TrainingError.invalid("Reps must be between 0 and 10,000.") }
         if let rpe = set.rpe, !rpe.isFinite || !(0...10).contains(rpe) { throw TrainingError.invalid("RPE must be between 0 and 10.") }
-        guard set.reps != nil || set.seconds != nil || set.meters != nil || set.rpe != nil || set.weight != nil else { throw TrainingError.invalid("Enter reps, time, distance, weight, or RPE.") }
+        guard set.reps != nil || set.seconds != nil || set.meters != nil || set.rpe != nil || set.weight != nil || set.plan.reps != nil else { throw TrainingError.invalid("Enter reps, time, distance, weight, or RPE.") }
     }
 
     func validated() throws -> TrainingData {
@@ -178,7 +181,7 @@ public extension TrainingData {
               routines.allSatisfy({ r in !r.name.isEmpty && r.name.count <= 200 && unique(r.slots) && r.slots.allSatisfy { variant($0.variantID) != nil } }),
               number(settings.barWeight), (settings.platesLB + settings.platesKG).allSatisfy({ number($0) && $0 > 0 }), ["system", "light", "dark"].contains(settings.theme) else { throw TrainingError.invalid("The backup contains invalid exercises or prescriptions.") }
         for session in sessions + [activeSession].compactMap({ $0 }) {
-            guard unique(session.exercises), session.endedAt.map({ $0 >= session.startedAt }) ?? true else { throw TrainingError.invalid("Invalid session records.") }
+            guard (session.programName?.count ?? 0) <= 200, unique(session.exercises), session.endedAt.map({ $0 >= session.startedAt }) ?? true else { throw TrainingError.invalid("Invalid session records.") }
             for item in session.exercises {
                 guard variant(item.variantID)?.exerciseID == item.exerciseID, exercise(item.exerciseID) != nil, unique(item.sets), (0...86400).contains(item.restSeconds), number(item.timerElapsed), item.workingWeight.map({ number($0) }) ?? true, item.roundingIncrement.map({ number($0) }) ?? true, item.sets.allSatisfy({ plan($0.plan) }) else { throw TrainingError.invalid("A session references a missing exercise or variant.") }
                 for set in item.sets { try Self.validateLoggedSet(set) }

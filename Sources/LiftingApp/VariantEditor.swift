@@ -80,33 +80,64 @@ struct VariantEditor: View {
 struct PlanEditor: View {
     @Binding var plan: SetPlan
     let unit: WeightUnit
+    @State private var repSelection: RepTargetMode
+    init(plan: Binding<SetPlan>, unit: WeightUnit) {
+        _plan = plan; self.unit = unit
+        _repSelection = State(initialValue: plan.wrappedValue.reps == nil ? .none : plan.wrappedValue.repRange == nil ? .exact : .range)
+    }
     var body: some View {
         Form {
             StoreErrorRow()
             Section("Set") {
                 Picker("Type", selection: $plan.kind) { ForEach(SetKind.allCases) { Text($0.title).tag($0) } }
-                Picker("Load", selection: $plan.load) { ForEach(LoadRule.allCases) { Text($0.title).tag($0) } }
-                if plan.load == .percent { HStack { Text("% of working weight"); TextField("50", value: $plan.percent, format: .number).multilineTextAlignment(.trailing).accessibilityLabel("Percent of working weight").accessibilityIdentifier("plan.percent") } }
-                if plan.load == .fixed { HStack { Text("Weight (\(unit.rawValue))"); TextField("0", value: Binding(get: { unit.display(plan.fixedWeight) }, set: { plan.fixedWeight = unit.kilograms($0) }), format: .number).multilineTextAlignment(.trailing) } }
+            }
+            Section(plan.kind == .warmup ? "Warm-up weight" : "Weight") {
+                Picker("Based on", selection: $plan.load) { ForEach(LoadRule.allCases) { Text($0.title).tag($0) } }
+                if plan.load == .percent { HStack { Text("Percent of working set"); TextField("50", value: $plan.percent, format: .number).multilineTextAlignment(.trailing).labelsHidden().accessibilityLabel("Percent of working set").accessibilityIdentifier("plan.percent") } }
+                if plan.load == .fixed { HStack { Text("Weight (\(unit.rawValue))"); TextField("0", value: Binding(get: { unit.display(plan.fixedWeight) }, set: { plan.fixedWeight = unit.kilograms($0) }), format: .number).multilineTextAlignment(.trailing).labelsHidden() } }
             }
             Section("Targets") {
-                HStack { Text("Reps"); OptionalNumberField(title: "Optional", value: Binding(get: { plan.reps.map(Double.init) }, set: { plan.reps = $0.map { Int($0) } }), integer: true).accessibilityLabel("Reps").accessibilityIdentifier("plan.reps") }
-                HStack { Text("Top of rep range"); OptionalNumberField(title: "Optional", value: Binding(get: { plan.repCeiling.map(Double.init) }, set: { plan.repCeiling = $0.map { Int($0) } }), integer: true).accessibilityLabel("Top of rep range").accessibilityIdentifier("plan.repCeiling") }
-                Toggle("AMRAP", isOn: $plan.amrap)
-                HStack { Text("Time (minutes)"); OptionalNumberField(title: "Optional", value: $plan.seconds, factor: 60).accessibilityLabel("Time in minutes").accessibilityIdentifier("plan.seconds") }
-                HStack { Text("Distance (meters)"); OptionalNumberField(title: "Optional", value: $plan.meters).accessibilityLabel("Distance in meters").accessibilityIdentifier("plan.meters") }
-                HStack { Text("RPE"); OptionalNumberField(title: "Optional", value: $plan.rpe).accessibilityLabel("RPE").accessibilityIdentifier("plan.rpe") }
+                Picker("Rep target", selection: repMode) { ForEach(RepTargetMode.allCases) { Text($0.rawValue).tag($0) } }.accessibilityIdentifier("plan.repMode")
+                if repSelection != .none {
+                    HStack { Text(repSelection == .range ? "Minimum reps" : "Target reps"); TextField("Reps", value: Binding(get: { plan.reps ?? 8 }, set: { plan.reps = $0 }), format: .number).multilineTextAlignment(.trailing).labelsHidden().accessibilityLabel("Target reps").accessibilityIdentifier("plan.reps") }
+                    if repSelection == .range {
+                        HStack { Text("Maximum reps"); TextField("Reps", value: Binding(get: { plan.repCeiling ?? 12 }, set: { plan.repCeiling = $0 }), format: .number).multilineTextAlignment(.trailing).labelsHidden().accessibilityLabel("Maximum reps").accessibilityIdentifier("plan.repCeiling") }
+                    }
+                    Toggle("AMRAP", isOn: $plan.amrap)
+                }
+                HStack { Text("RPE"); OptionalNumberField(title: "Optional", value: $plan.rpe).labelsHidden().accessibilityLabel("RPE").accessibilityIdentifier("plan.rpe") }
+                HStack { Text("Time (minutes)"); OptionalNumberField(title: "Optional", value: $plan.seconds, factor: 60).labelsHidden().accessibilityLabel("Time in minutes").accessibilityIdentifier("plan.seconds") }
+                HStack { Text("Distance (meters)"); OptionalNumberField(title: "Optional", value: $plan.meters).labelsHidden().accessibilityLabel("Distance in meters").accessibilityIdentifier("plan.meters") }
             }
             Section("Rest after this set") {
-                HStack { Text("Seconds"); OptionalNumberField(title: "Exercise default", value: Binding(get: { plan.restSeconds.map(Double.init) }, set: { plan.restSeconds = $0.map { Int($0) } }), integer: true).accessibilityLabel("Rest in seconds").accessibilityIdentifier("plan.rest") }
+                HStack { Text("Seconds"); OptionalNumberField(title: "Exercise default", value: Binding(get: { plan.restSeconds.map(Double.init) }, set: { plan.restSeconds = $0.map { Int($0) } }), integer: true).labelsHidden().accessibilityLabel("Rest in seconds").accessibilityIdentifier("plan.rest") }
             }
         }.formStyle(.grouped).navigationTitle(plan.kind.title).inlineTitle()
+        #if os(iOS)
+        .keyboardType(.decimalPad)
+        #endif
     }
+    private var repMode: Binding<RepTargetMode> {
+        Binding(get: { repSelection }, set: { mode in
+            repSelection = mode
+            switch mode {
+            case .none: plan.reps = nil; plan.repCeiling = nil; plan.amrap = false
+            case .exact: plan.reps = plan.reps ?? 8; plan.repCeiling = nil
+            case .range: plan.reps = plan.reps ?? 8; plan.repCeiling = max((plan.reps ?? 8) + 1, plan.repCeiling ?? 12)
+            }
+        })
+    }
+
+}
+
+private enum RepTargetMode: String, CaseIterable, Identifiable {
+    case none = "No count", exact = "Reps", range = "Rep range"
+    var id: Self { self }
 }
 
 func setPlanSummary(_ plan: SetPlan, unit: WeightUnit) -> String {
     var parts: [String] = []
-    switch plan.load { case .percent: parts.append("\(number(plan.percent))%"); case .fixed: parts.append("\(number(unit.display(plan.fixedWeight))) \(unit.rawValue)"); case .working: parts.append("Working weight"); case .none: break }
+    switch plan.load { case .percent: parts.append("\(number(plan.percent))% of working set"); case .fixed: parts.append("\(number(unit.display(plan.fixedWeight))) \(unit.rawValue)"); case .working: parts.append("Working weight"); case .none: break }
     if let reps = plan.reps { parts.append(plan.repCeiling != nil && plan.repCeiling != reps ? "\(reps)-\(plan.repCeiling!) reps" : "\(reps) reps") }
     if plan.amrap { parts.append("AMRAP") }
     if let seconds = plan.seconds { parts.append(clockText(seconds)) }

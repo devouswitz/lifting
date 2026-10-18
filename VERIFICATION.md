@@ -2,6 +2,14 @@
 
 Verified on October 18, 2026.
 
+## Target and program refinements
+
+- Explicit No count, Reps, and Rep range controls in the shared prescription/live target editor. Native warm-up editing changed 50% to 65% of 95 lb, resolving to 60 lb after rounding.
+- Native range logging: one 8-10 target completed with no exact count; a second set recorded 9. The saved volume was 585 lb, counting only 65 × 9. An RPE-only set with no load or reps saved successfully.
+- Native program filtering: selecting Test Program showed only its two logged exercises, including a 7 RPE record. Starter history stayed independent. The record sparklines were removed.
+- Native history showed Test Program - Upper and Starter - Push titles. Rep ranges and optional exact counts appeared separately in the saved results.
+- Core tests cover range-only and RPE-only completion, optional count entry, no invented volume or progression, target/actual separation when adding and substituting sets, program scope, snapshot names after program rename/removal, and CSV/JSON compatibility.
+
 ## Current redesign
 
 - The official GreySkull LP by Nazim Ashraf App Store screenshots guided history and graphs. The current redesign used Codex implementation agents and direct native verification.
@@ -16,7 +24,7 @@ Verified on October 18, 2026.
 
 ## Earlier feature checks
 
-- 40 core test cases, zero failures. The standalone harness runs the same test bodies as the Xcode XCTest target.
+- 44 core test cases, zero failures. The standalone harness runs the same test bodies as the Xcode XCTest target.
 - Native macOS release build using the same SwiftUI views and training engine as the iOS target.
 - Native UI: one-tap set completion, fractional weight editing, automatic rest, live drop sets, live MYO activation and mini-sets, changing mini-set count and rest, saving MYO settings to a single routine variant.
 - Native UI and persisted file read-back: active workout survives process termination and relaunch with completed sets and MYO settings intact.

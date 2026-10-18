@@ -6,6 +6,109 @@ import Foundation
 #endif
 
 final class TrainingTests: XCTestCase {
+    func testRepRangesCanBeCompletedWithoutInventingAnActualCount() throws {
+        for rule in [LoadRule.none, .working] {
+            var data = TrainingData.starter()
+            let day = data.dayTemplates[0]
+            let id = day.slots[0].variantID
+            let v = data.variants.firstIndex { $0.id == id }!
+            data.variants[v].workingWeight = 100
+            data.variants[v].progression.mode = .double
+            data.variants[v].sets = [SetPlan(load: rule, reps: 12, repCeiling: 15)]
+            try data.start(routineID: day.id)
+            let item = data.activeSession!.exercises[0]
+            XCTAssertNil(item.sets[0].reps)
+            try data.toggleSet(exerciseID: item.id, setID: item.sets[0].id)
+            try data.finish()
+            XCTAssertEqual(data.variant(id)!.workingWeight, 100)
+            XCTAssertTrue(data.points(exerciseID: item.exerciseID, metric: .reps).isEmpty)
+            XCTAssertTrue(data.points(exerciseID: item.exerciseID, metric: .volume).isEmpty)
+            let restored = try LocalRepository.decode(LocalRepository.encode(data))
+            XCTAssertEqual(restored.sessions[0].exercises[0].sets[0].plan.repTarget, "12-15")
+            XCTAssertNil(restored.sessions[0].exercises[0].sets[0].reps)
+            let csv = try HistoryCSV.decode(HistoryCSV.export(data)).content
+            XCTAssertNil(csv.sessions[0].exercises[0].sets[0].reps)
+            XCTAssertEqual(csv.sessions[0].exercises[0].sets[0].plan.repTarget, "12-15")
+            data.sessions[0].exercises[0].sets[0].reps = 14
+            XCTAssertEqual(data.points(exerciseID: item.exerciseID, metric: .reps).first?.value, 14)
+            XCTAssertEqual(data.sessions[0].exercises[0].sets[0].plan.repTarget, "12-15")
+            XCTAssertNoThrow(try data.validated())
+        }
+    }
+
+    func testAddingAndSubstitutingRangeSetsKeepTargetsSeparateFromActualCounts() throws {
+        var data = TrainingData.starter()
+        let day = data.dayTemplates[0]
+        let v = data.variants.firstIndex { $0.id == day.slots[0].variantID }!
+        data.variants[v].sets = [SetPlan(reps: 12, repCeiling: 15)]
+        try data.start(routineID: day.id)
+        let item = data.activeSession!.exercises[0]
+        data.activeSession!.exercises[0].sets[0].reps = 13
+        try data.addSessionSet(to: item.id)
+        XCTAssertEqual(data.activeSession!.exercises[0].sets[0].reps, 13)
+        XCTAssertNil(data.activeSession!.exercises[0].sets[1].reps)
+        try data.substitute(sessionExerciseID: item.id, with: data.exercises.first { $0.name == "Incline dumbbell press" }!.id, future: false)
+        let sets = data.activeSession!.exercises[0].sets
+        XCTAssertEqual(sets[0].reps, 13)
+        XCTAssertNil(sets[1].reps)
+        XCTAssertEqual(sets.map { $0.plan.repTarget }, ["12-15", "12-15"])
+        XCTAssertNoThrow(try data.validated())
+    }
+
+    func testRPEOnlyTargetsAndLiveRangeEditsRemainIndependent() throws {
+        var data = TrainingData.starter()
+        let day = data.dayTemplates[0]
+        let v = data.variants.firstIndex { $0.id == day.slots[0].variantID }!
+        data.variants[v].sets = [SetPlan(load: .none, reps: nil, repCeiling: nil, rpe: 7)]
+        try data.start(routineID: day.id)
+        let item = data.activeSession!.exercises[0]
+        XCTAssertNil(item.sets[0].reps)
+        XCTAssertNil(item.sets[0].weight)
+        try data.replaceSetPlan(exerciseID: item.id, setID: item.sets[0].id, plan: SetPlan(load: .none, reps: 12, repCeiling: 15, rpe: 8))
+        XCTAssertNil(data.activeSession!.exercises[0].sets[0].reps)
+        try data.substitute(sessionExerciseID: item.id, with: data.exercises.first { $0.name == "Dumbbell lateral raise" }!.id, future: false)
+        let replacement = data.activeSession!.exercises[0]
+        XCTAssertEqual(replacement.sets[0].plan.repTarget, "12-15")
+        XCTAssertNil(replacement.sets[0].reps)
+        try data.replaceSetPlan(exerciseID: replacement.id, setID: replacement.sets[0].id, plan: SetPlan(load: .none, reps: nil, repCeiling: nil, rpe: 7))
+        try data.toggleSet(exerciseID: replacement.id, setID: replacement.sets[0].id)
+        try data.finish()
+        XCTAssertEqual(data.points(exerciseID: replacement.exerciseID, metric: .rpe).first?.value, 7)
+        XCTAssertTrue(data.points(exerciseID: replacement.exerciseID, metric: .reps).isEmpty)
+        XCTAssertNoThrow(try HistoryCSV.decode(HistoryCSV.export(data)))
+    }
+
+    func testProgramHistoryFilteringAndTitlesSurviveRenameRemovalAndCSV() throws {
+        var data = TrainingData.starter()
+        let program = data.activeProgram!
+        let dayID = program.dayIDs[0]
+        try data.start(routineID: dayID)
+        let item = data.activeSession!.exercises[0]
+        try data.toggleSet(exerciseID: item.id, setID: item.sets[0].id)
+        try data.finish()
+        let recorded = data.sessions[0]
+        XCTAssertEqual(data.title(for: recorded), "Starter - Upper")
+        var legacy = recorded; legacy.id = UUID(); legacy.programID = nil; legacy.programName = nil
+        var other = recorded; other.id = UUID(); other.programID = UUID(); other.programName = "Other"
+        data.sessions += [legacy, other]
+        XCTAssertEqual(data.sessions(inProgram: program.id).count, 2)
+        XCTAssertEqual(data.sessions(inProgram: other.programID).count, 1)
+        XCTAssertEqual(data.sessions(inProgram: nil).count, 3)
+        data.programs[0].name = "Renamed"
+        XCTAssertEqual(data.title(for: recorded), "Starter - Upper")
+        let csv = try HistoryCSV.decode(HistoryCSV.export(data))
+        var target = TrainingData.starter()
+        XCTAssertEqual(try target.importHistory(csv), 3)
+        XCTAssertEqual(target.sessions(inProgram: program.id).count, 1)
+        XCTAssertEqual(target.title(for: target.sessions.first { $0.id == recorded.id }!), "Starter - Upper")
+        XCTAssertEqual(target.recordedPrograms.first { $0.id == program.id }?.name, "Starter")
+        data.removeProgram(program.id)
+        XCTAssertEqual(data.sessions(inProgram: program.id).count, 1)
+        XCTAssertEqual(data.title(for: recorded), "Starter - Upper")
+        let restored = try LocalRepository.decode(LocalRepository.encode(data))
+        XCTAssertEqual(restored.recordedPrograms.first { $0.id == program.id }?.name, "Starter")
+    }
+
     func testSubstitutionDoesNotBorrowAnUnrelatedTrackWithTheSameLabel() throws {
         var data = TrainingData.starter()
         let day = data.dayTemplates[0]
@@ -615,7 +718,12 @@ final class TrainingTests: XCTestCase {
         let other = data.variant(otherID)!
         try data.start(routineID: data.routines[0].id)
         let exercise = data.activeSession!.exercises.last!
-        for set in exercise.sets { try data.toggleSet(exerciseID: exercise.id, setID: set.id) }
+        for set in exercise.sets {
+            let e = data.activeSession!.exercises.count - 1
+            let index = data.activeSession!.exercises[e].sets.firstIndex { $0.id == set.id }!
+            data.activeSession!.exercises[e].sets[index].reps = 15
+            try data.toggleSet(exerciseID: exercise.id, setID: set.id)
+        }
         try data.finish()
         XCTAssertEqual(data.variants[i].workingWeight, before + data.variants[i].progression.increment)
         XCTAssertEqual(data.variant(otherID), other)
@@ -734,9 +842,10 @@ final class TrainingTests: XCTestCase {
         XCTAssertEqual(data.sessions.count, 30)
         XCTAssertNoThrow(try data.validated())
         let exercise = data.exercises.first { $0.name == "Cable lateral raise" }!
-        let variants = data.variants.filter { $0.exerciseID == exercise.id }
+        let variantID = data.sessions.flatMap(\.exercises).first { $0.exerciseID == exercise.id }!.variantID
         XCTAssertEqual(data.points(exerciseID: exercise.id, metric: .weight).count, 20)
-        XCTAssertEqual(data.points(exerciseID: exercise.id, variantID: variants[0].id, metric: .weight).count, 10)
+        XCTAssertEqual(data.points(exerciseID: exercise.id, variantID: variantID, metric: .weight).count, 10)
+        XCTAssertEqual(data.sessions(inProgram: data.activeProgramID).count, 30)
         let bytes = try LocalRepository.encode(data)
         XCTAssertEqual(try LocalRepository.decode(bytes).sessions.count, 30)
     }

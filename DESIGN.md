@@ -4,15 +4,15 @@
 
 Program and Templates are separate views. A flat program picker loads each program at its saved next day. The next day shows a compact exercise, rep, and load preview with one Start Workout button. Other days show their names, exercise summaries, and a direct start control. Program management contains day ordering and template copying.
 
-During a workout, each exercise is a collapsible panel. Opening one closes the others. Its warm-ups and working sets appear in separate tables with previous values, editable actual values, RPE, and completion checkboxes. Swap, rest, working load, Drop, MYO, and notes remain available within the expanded panel. Collapse after completion is opt-in.
+During a workout, each exercise is a collapsible panel. Opening one closes the others. Its warm-ups and working sets appear in separate tables with previous values, editable actual values, RPE, and completion checkboxes. Swap, rest, working load, Drop, MYO, and notes remain available within the expanded panel. Collapse after completion is opt-in. Warm-up rows display their working-set percentage. Rep target choices are No count, Reps, and Rep range. Ranges remain targets until an optional exact result is entered; RPE-only sets need no rep count.
 
 ## History
 
-Log shows month-grouped workouts with actual exercise results. Calendar shows workout dates, selected-day results, and current versus previous month statistics. Workout detail uses read-only set tables; Edit opens the existing date, notes, and set controls. Exercise titles link directly to the relevant progress track.
+Log shows month-grouped workouts with Program - Day titles and actual exercise results. Program names are captured when the workout starts. Calendar shows workout dates, selected-day results, and current versus previous month statistics. Workout detail uses read-only set tables; Edit opens the existing date, notes, and set controls. Exercise titles link directly to the relevant progress track.
 
 ## Progress
 
-The first screen is a multi-exercise chart with exercise, metric, and range filters. Each day variant has its own series. Records contain only logged exercises. Exercise detail offers separate tracks, latest/best/change values, dated results, and notes. Scrubbing a chart displays actual values from a recorded session.
+The first screen is a multi-exercise chart with program, exercise, metric, and range filters. Program selection scopes both charts and records, and remains in scope when opening exercise detail. Each day variant has its own series. Records contain only logged exercises and numeric results, without miniature graphs. Exercise detail offers separate tracks, latest/best/change values, dated results, and notes. Scrubbing a chart displays actual values from a recorded session.
 
 ## Storage and identity
 

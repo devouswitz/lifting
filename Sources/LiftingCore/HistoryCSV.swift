@@ -8,7 +8,7 @@ public struct HistoryBundle: Sendable {
 }
 
 public enum HistoryCSV {
-    public static let headers = ["date", "workout", "exercise", "variant", "variant_id", "kind", "weight_kg", "reps", "seconds", "meters", "rpe", "notes", "session_id", "ended_at", "workout_notes", "exercise_id", "mode", "muscle", "equipment", "session_exercise_id", "set_id", "recurring_notes", "rest_seconds", "exercise_rest_seconds", "completed_at"]
+    public static let headers = ["date", "workout", "exercise", "variant", "variant_id", "kind", "weight_kg", "reps", "seconds", "meters", "rpe", "notes", "session_id", "ended_at", "workout_notes", "exercise_id", "mode", "muscle", "equipment", "session_exercise_id", "set_id", "recurring_notes", "rest_seconds", "exercise_rest_seconds", "completed_at", "program_id", "program_name", "target_reps", "target_rep_ceiling"]
     public static func export(_ data: TrainingData) -> Data {
         let format = ISO8601DateFormatter(); format.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         var rows = [headers]
@@ -19,6 +19,7 @@ public enum HistoryCSV {
                     row += [set.weight.map { String($0) } ?? "", set.reps.map { String($0) } ?? "", set.seconds.map { String($0) } ?? "", set.meters.map { String($0) } ?? "", set.rpe.map { String($0) } ?? "", exercise.notes]
                     row += [session.id.uuidString, session.endedAt.map(format.string) ?? "", session.notes, exercise.exerciseID.uuidString, exercise.mode.rawValue, data.exercise(exercise.exerciseID)?.muscle ?? "", data.exercise(exercise.exerciseID)?.equipment ?? "", exercise.id.uuidString, set.id.uuidString, exercise.recurringNotes]
                     row += [set.plan.restSeconds.map { String($0) } ?? "", String(exercise.restSeconds), set.completedAt.map(format.string) ?? ""]
+                    row += [session.programID?.uuidString ?? "", session.programName ?? session.programID.flatMap(data.program)?.name ?? "", set.plan.reps.map(String.init) ?? "", set.plan.repCeiling.map(String.init) ?? ""]
                     rows.append(row)
                 }
             }
@@ -60,10 +61,12 @@ public enum HistoryCSV {
             let variantID = try r.uuid("variant_id") ?? stableID("variant|\(exerciseID)|\(label)")
             if let existing = data.variant(variantID) { guard existing.exerciseID == exerciseID else { throw TrainingError.invalid("Conflicting variant on row \(r.number).") } }
             else { data.variants.append(Variant(id: variantID, exerciseID: exerciseID, label: label, restSeconds: try r.int("exercise_rest_seconds", default: 90)!, notes: r.text("recurring_notes"), sets: [])) }
+            let programID = try r.uuid("program_id")
+            let programName = r.text("program_name").isEmpty ? nil : r.text("program_name")
             if let existing = data.sessions.first(where: { $0.id == sessionID }) {
-                guard existing.name == workout, existing.startedAt == started, existing.endedAt == ended, existing.notes == r.text("workout_notes") else { throw TrainingError.invalid("Conflicting workout details on row \(r.number).") }
+                guard existing.name == workout, existing.startedAt == started, existing.endedAt == ended, existing.notes == r.text("workout_notes"), existing.programID == programID, existing.programName == programName else { throw TrainingError.invalid("Conflicting workout details on row \(r.number).") }
             } else {
-                var session = Session(id: sessionID, name: workout, startedAt: started, endedAt: ended); session.notes = r.text("workout_notes"); data.sessions.append(session)
+                var session = Session(id: sessionID, name: workout, startedAt: started, endedAt: ended); session.notes = r.text("workout_notes"); session.programID = programID; session.programName = programName; data.sessions.append(session)
             }
             let s = data.sessions.firstIndex { $0.id == sessionID }!
             let sessionExerciseID = try r.uuid("session_exercise_id") ?? stableID("session-exercise|\(sessionID)|\(variantID)")
@@ -77,8 +80,10 @@ public enum HistoryCSV {
             let e = data.sessions[s].exercises.firstIndex { $0.id == sessionExerciseID }!
             guard let kind = SetKind(rawValue: r.text("kind", default: "working")) else { throw TrainingError.invalid("Invalid kind on row \(r.number).") }
             let weight = try r.double("weight_kg"), reps = try r.int("reps")
-            let plan = SetPlan(kind: kind, load: weight == nil ? .none : .fixed, fixedWeight: weight ?? 0, reps: reps, repCeiling: nil, seconds: try r.double("seconds"), meters: try r.double("meters"), rpe: try r.double("rpe", maximum: 10), restSeconds: try r.int("rest_seconds"))
+            let targetReps = header.contains("target_reps") ? try r.int("target_reps") : reps
+            let plan = SetPlan(kind: kind, load: weight == nil ? .none : .fixed, fixedWeight: weight ?? 0, reps: targetReps, repCeiling: try r.int("target_rep_ceiling"), seconds: try r.double("seconds"), meters: try r.double("meters"), rpe: try r.double("rpe", maximum: 10), restSeconds: try r.int("rest_seconds"))
             var logged = LoggedSet(plan: plan, variant: data.variant(variantID)!)
+            logged.reps = reps
             logged.id = try r.uuid("set_id") ?? stableID("set|\(sessionExerciseID)|\(data.sessions[s].exercises[e].sets.count)")
             logged.completedAt = r.text("completed_at").isEmpty ? started : try date(r.text("completed_at"), row: r.number)
             data.sessions[s].exercises[e].sets.append(logged)
@@ -140,7 +145,7 @@ public extension TrainingData {
             if link == nil { next.historyImports.append(HistoryImportLink(sourceVariantID: variant.id, variantID: variantMap[variant.id]!, sourceExerciseID: variant.exerciseID, exerciseID: exerciseMap[variant.exerciseID]!)) }
         }
         for var session in incoming {
-            session.routineID = nil; session.programID = nil; session.advancesProgram = nil
+            session.routineID = nil; session.advancesProgram = nil
             for e in session.exercises.indices { session.exercises[e].exerciseID = exerciseMap[session.exercises[e].exerciseID]!; session.exercises[e].variantID = variantMap[session.exercises[e].variantID]! }
             next.sessions.append(session)
         }

@@ -50,7 +50,7 @@ public extension TrainingData {
         activeSession!.exercises[e].sets[s].plan = plan
         if item.sets[s].completedAt == nil {
             activeSession!.exercises[e].sets[s].weight = plan.resolvedWeight(working: item.workingLoad(fallback: variant.workingWeight), increment: item.roundingIncrement ?? variant.rounding)
-            activeSession!.exercises[e].sets[s].reps = plan.repCeiling ?? plan.reps
+            activeSession!.exercises[e].sets[s].reps = plan.initialReps
             activeSession!.exercises[e].sets[s].seconds = plan.seconds
             activeSession!.exercises[e].sets[s].meters = plan.meters
             activeSession!.exercises[e].sets[s].rpe = plan.rpe
