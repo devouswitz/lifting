@@ -1,6 +1,18 @@
 import Foundation
 
 public extension TrainingData {
+    mutating func addExerciseToSession(_ exerciseID: UUID) throws {
+        guard let session = activeSession, let exercise = exercise(exerciseID) else { throw TrainingError.invalid("Workout or exercise unavailable.") }
+        let current = session.exercises.first { $0.exerciseID == exerciseID }.flatMap { variant($0.variantID) }
+        let prescribed = session.routineID.flatMap(routine)?.slots.compactMap { variant($0.variantID) }.first { $0.exerciseID == exerciseID }
+        let previous = sessions.sorted { $0.startedAt > $1.startedAt }.lazy.filter { $0.routineID == session.routineID && (session.routineID != nil || $0.name == session.name) }
+            .flatMap(\.exercises).first { $0.exerciseID == exerciseID && $0.mode == exercise.mode }.flatMap { variant($0.variantID) }
+        let base = [session.programID.flatMap(program)?.name, session.name].compactMap { $0 }.joined(separator: " · ")
+        let selected = current ?? prescribed ?? previous ?? Variant.standard(for: exercise, label: Self.uniqueName(base, among: variants.filter { $0.exerciseID == exerciseID }.map(\.label)))
+        if variant(selected.id) == nil { variants.append(selected) }
+        activeSession!.exercises.append(SessionExercise(variant: selected, exercise: exercise))
+    }
+
     mutating func setExerciseExpanded(_ exerciseID: UUID, expanded: Bool, focus: Bool = false) {
         guard var session = activeSession, let index = session.exercises.firstIndex(where: { $0.id == exerciseID }) else { return }
         if focus { for i in session.exercises.indices { session.exercises[i].collapsed = i != index } }
@@ -19,7 +31,7 @@ public extension TrainingData {
     }
 
     @discardableResult mutating func collapseCompletedExercise(_ exerciseID: UUID) -> UUID? {
-        guard settings.autoCollapseCompleted != false, var session = activeSession,
+        guard settings.autoCollapseCompleted == true, var session = activeSession,
               let index = session.exercises.firstIndex(where: { $0.id == exerciseID }),
               !session.exercises[index].sets.isEmpty, session.exercises[index].sets.allSatisfy({ $0.completedAt != nil }), session.exercises[index].keepExpanded != true else { return nil }
         session.exercises[index].collapsed = true
@@ -48,5 +60,14 @@ public extension TrainingData {
     mutating func moveSessionExercise(_ exerciseID: UUID, offset: Int) {
         guard let index = activeSession?.exercises.firstIndex(where: { $0.id == exerciseID }), activeSession!.exercises.indices.contains(index + offset) else { return }
         activeSession!.exercises.swapAt(index, index + offset)
+    }
+}
+
+public extension Variant {
+    static func standard(for exercise: Exercise, label: String) -> Variant {
+        var variant = Variant(exerciseID: exercise.id, label: label)
+        if exercise.mode == .cardio { variant.sets = [SetPlan(load: .none, reps: nil, repCeiling: nil, seconds: 1200, rpe: 6)]; variant.restSeconds = 0 }
+        if exercise.mode == .bodyweight { variant.sets = (0..<3).map { _ in SetPlan(load: .none) } }
+        return variant
     }
 }

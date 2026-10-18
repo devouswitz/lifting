@@ -32,14 +32,15 @@ open -n '../Lifting Preview.app' --args --demo
 - Train: load a Program and start its next Day. Each program remembers its place. Completing another day does not skip the next one.
 - Programs: add blank days or copy day templates, then reorder, edit, duplicate, or export. Templates stay reusable; each copy has independent prescriptions and tracking.
 - Prescription: configure working load, each set, percentage warm-ups, rep ranges, AMRAP, time, distance, RPE, rest, notes, and optional progression.
-- Workout: tap the circle to log a set, tap a value to edit, tap the working load to update remaining work and percentage warm-ups.
+- Workout: tap the checkbox to log a set, tap a value to edit, tap the working load to update remaining work and percentage warm-ups.
 - Substitute: choose Today only or Future sessions, then an exercise. Completed sets stay on the original exercise. Future changes affect this day slot only.
 - Drop: choose reductions, number of drops, and reps. Recurring drop loads stay relative to working weight.
 - MYO: choose activation reps, mini-set count, mini-set reps, and rest. Replace remaining work sets if desired. Add mini-sets, change values, or remove sets during the workout.
 - Save to this day variant: makes live load or drop/MYO changes recur. Otherwise they apply to the current workout.
-- Tap the leading chevron to collapse an exercise. Completed exercises collapse automatically and open the next incomplete exercise. Manually reopening a completed exercise keeps it open. Workout options include Collapse All and Expand All.
+- Tap an exercise header to expand or collapse it. Opening one focuses that exercise. Warm-ups and working sets have separate compact tables. Automatic collapse after completion is optional in Settings. Workout options include Collapse All and Expand All.
 - Each set's menu edits today's targets, load rule, percentage, type, and rest. Tap a value to edit the actual result.
-- Progress: select an exercise, variant, metric, and date range. All variants draws separate series. Sessions beneath the graph provide the same data as readable text.
+- History: browse dated results or a selectable monthly calendar with comparisons to the previous month. Open a workout to inspect or edit its sets and notes.
+- Progress: compare separate exercise and day tracks, choose a metric and date range, or scrub a graph for actual recorded values. Exercise details include dated results.
 - Settings: units, appearance, rest preferences, plate sizes, JSON backup/restore, and CSV import/export.
 
 Weights are stored in kilograms and converted for display. Warm-up and drop percentages round down to the variant's increment. RPE is a user-entered target or observation.
@@ -70,4 +71,4 @@ This compiles and runs the actual XCTest case bodies with a small compatibility 
 
 The current host's Command Line Tools contain mismatched public and private SwiftPM interfaces. The Mac build was verified using a workspace copy of ManifestAPI with the stale private interfaces removed. No system toolchain files were changed. A normal Xcode installation should use the commands above directly.
 
-See `VERIFICATION.md` for completed checks and remaining device checks. `DESIGN.md` and `DESIGN-REFINEMENT.md` record the Claude Opus UI specifications; it includes design proposals beyond the implemented features.
+See `VERIFICATION.md` for completed checks and remaining device checks. `DESIGN.md` describes the current UI; `RESEARCH.md` lists its references.

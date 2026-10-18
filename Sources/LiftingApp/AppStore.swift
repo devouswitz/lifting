@@ -87,19 +87,10 @@ final class AppStore: ObservableObject {
         }
     }
     func addToWorkout(_ exercise: Exercise) {
-        perform { d in
-            guard d.activeSession != nil else { return }
-            let label = d.activeSession!.name
-            let variant = d.variants.first { $0.exerciseID == exercise.id && $0.label == label } ?? Self.newVariant(exercise, label: label)
-            if !d.variants.contains(where: { $0.id == variant.id }) { d.variants.append(variant) }
-            d.activeSession!.exercises.append(SessionExercise(variant: variant, exercise: exercise))
-        }
+        perform { try $0.addExerciseToSession(exercise.id) }
     }
     static func newVariant(_ exercise: Exercise, label: String) -> Variant {
-        var variant = Variant(exerciseID: exercise.id, label: label)
-        if exercise.mode == .cardio { variant.sets = [SetPlan(load: .none, reps: nil, repCeiling: nil, seconds: 1200, rpe: 6)]; variant.restSeconds = 0 }
-        if exercise.mode == .bodyweight { variant.sets = (0..<3).map { _ in SetPlan(load: .none) } }
-        return variant
+        Variant.standard(for: exercise, label: label)
     }
     func importBackup(_ next: TrainingData) {
         do {
@@ -168,4 +159,37 @@ func planSummary(_ variant: Variant, unit: WeightUnit) -> String {
     if let seconds = first.seconds { parts.append(clockText(seconds)) }
     if let rpe = first.rpe { parts.append("RPE \(number(rpe))") }
     return parts.joined(separator: " · ")
+}
+
+func loggedExerciseSummary(_ exercise: SessionExercise, unit: WeightUnit) -> String {
+    let completed = exercise.sets.filter { $0.completedAt != nil }
+    let working = completed.filter { $0.plan.kind != .warmup }
+    let sets = working.isEmpty ? completed : working
+    guard !sets.isEmpty else { return "0 sets" }
+    var groups: [[LoggedSet]] = []
+    for set in sets {
+        if let last = groups.last?.last,
+           last.weight == set.weight, last.reps == set.reps, last.seconds == set.seconds,
+           last.meters == set.meters, last.rpe == set.rpe, last.plan.kind == set.plan.kind {
+            groups[groups.count - 1].append(set)
+        } else { groups.append([set]) }
+    }
+    return groups.map { group in
+        guard let set = group.first else { return "" }
+        var parts: [String] = []
+        if let reps = set.reps { parts.append("\(group.count) × \(reps) reps") }
+        else { parts.append(counted(group.count, "set")) }
+        if let weight = set.weight { parts.append("\(number(unit.display(weight))) \(unit.rawValue)") }
+        if let seconds = set.seconds { parts.append(clockText(seconds)) }
+        if let meters = set.meters { parts.append("\(number(meters)) m") }
+        if let rpe = set.rpe { parts.append("@\(number(rpe))") }
+        switch set.plan.kind {
+        case .working: break
+        case .warmup: parts.append("Warm-up")
+        case .drop: parts.append("Drop")
+        case .myoActivation: parts.append("Activation")
+        case .myoMini: parts.append("Mini-set")
+        }
+        return parts.joined(separator: " · ")
+    }.joined(separator: "\n")
 }

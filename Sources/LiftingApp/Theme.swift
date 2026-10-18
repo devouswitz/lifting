@@ -3,9 +3,9 @@ import SwiftUI
 enum Palette {
     static let accent = Color(red: 0.118, green: 0.435, blue: 0.361)
     static let darkAccent = Color(red: 0.298, green: 0.788, blue: 0.651)
-    static func background(_ scheme: ColorScheme) -> Color { scheme == .dark ? Color(hex: 0x121211) : Color(hex: 0xF7F6F3) }
-    static func surface(_ scheme: ColorScheme) -> Color { scheme == .dark ? Color(hex: 0x1C1C1A) : .white }
-    static func secondary(_ scheme: ColorScheme) -> Color { scheme == .dark ? Color(hex: 0x262624) : Color(hex: 0xEFEDE8) }
+    static func background(_ scheme: ColorScheme) -> Color { scheme == .dark ? Color(hex: 0x0D0D0F) : Color(hex: 0xF4F5F7) }
+    static func surface(_ scheme: ColorScheme) -> Color { scheme == .dark ? Color(hex: 0x19191C) : .white }
+    static func secondary(_ scheme: ColorScheme) -> Color { scheme == .dark ? Color(hex: 0x242427) : Color(hex: 0xECEEF1) }
     static func tint(_ scheme: ColorScheme) -> Color { scheme == .dark ? darkAccent : accent }
 }
 extension Color { init(hex: UInt) { self.init(red: Double((hex >> 16) & 255) / 255, green: Double((hex >> 8) & 255) / 255, blue: Double(hex & 255) / 255) } }
@@ -13,8 +13,8 @@ extension Color { init(hex: UInt) { self.init(red: Double((hex >> 16) & 255) / 2
 struct CardStyle: ViewModifier {
     @Environment(\.colorScheme) var scheme
     func body(content: Content) -> some View {
-        content.padding(16).background(Palette.surface(scheme), in: RoundedRectangle(cornerRadius: 14))
-            .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(.primary.opacity(0.07), lineWidth: 0.5))
+        content.padding(12).background(Palette.surface(scheme), in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.primary.opacity(0.07), lineWidth: 0.5))
     }
 }
 extension View {
@@ -109,5 +109,15 @@ struct StoreErrorRow: View {
                 Button("Dismiss") { store.error = nil }
             }
         }
+    }
+}
+
+extension View {
+    @ViewBuilder func compactMenu() -> some View {
+        #if os(macOS)
+        self.menuStyle(.borderlessButton).menuIndicator(.hidden)
+        #else
+        self.menuIndicator(.hidden)
+        #endif
     }
 }

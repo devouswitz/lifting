@@ -105,21 +105,39 @@ public extension TrainingData {
         let incoming = source.sessions.filter { !known.contains($0.id) }
         guard !incoming.isEmpty else { return 0 }
         var next = self
+        // Recover identities for CSVs imported before import links were stored.
+        let existingSessions = Dictionary(uniqueKeysWithValues: sessions.map { ($0.id, $0) })
+        for session in source.sessions where known.contains(session.id) {
+            guard let existing = existingSessions[session.id] else { continue }
+            for item in session.exercises {
+                guard !next.historyImports.contains(where: { $0.sourceVariantID == item.variantID }),
+                      let old = existing.exercises.first(where: { $0.id == item.id }) else { continue }
+                next.historyImports.append(HistoryImportLink(sourceVariantID: item.variantID, variantID: old.variantID, sourceExerciseID: item.exerciseID, exerciseID: old.exerciseID))
+            }
+        }
         let neededVariants = Set(incoming.flatMap(\.exercises).map(\.variantID))
         let neededExercises = Set(incoming.flatMap(\.exercises).map(\.exerciseID))
         var exerciseMap: [UUID: UUID] = [:], variantMap: [UUID: UUID] = [:]
         for exercise in source.exercises where neededExercises.contains(exercise.id) {
-            if let existing = next.exercise(exercise.id) ?? next.exercises.first(where: { $0.name.caseInsensitiveCompare(exercise.name) == .orderedSame && $0.mode == exercise.mode && $0.equipment.caseInsensitiveCompare(exercise.equipment) == .orderedSame }) { exerciseMap[exercise.id] = existing.id }
+            let linkedID = next.historyImports.first(where: { $0.sourceExerciseID == exercise.id })?.exerciseID
+            if let existing = linkedID.flatMap(next.exercise) ?? next.exercise(exercise.id) ?? next.exercises.first(where: { $0.name.caseInsensitiveCompare(exercise.name) == .orderedSame && $0.mode == exercise.mode && $0.equipment.caseInsensitiveCompare(exercise.equipment) == .orderedSame }) { exerciseMap[exercise.id] = existing.id }
             else { var copy = exercise; copy.id = UUID(); next.exercises.append(copy); exerciseMap[exercise.id] = copy.id }
         }
         for variant in source.variants where neededVariants.contains(variant.id) {
-            if let existing = next.variant(variant.id), existing.exerciseID == exerciseMap[variant.exerciseID] { variantMap[variant.id] = existing.id }
+            let link = next.historyImports.first { $0.sourceVariantID == variant.id }
+            if let link {
+                guard link.sourceExerciseID == variant.exerciseID, link.exerciseID == exerciseMap[variant.exerciseID] else { throw TrainingError.invalid("An imported track refers to a different exercise than its previous import.") }
+                variantMap[variant.id] = link.variantID
+            }
+            else if let existing = next.variant(variant.id), existing.exerciseID == exerciseMap[variant.exerciseID] { variantMap[variant.id] = existing.id }
             else {
                 var copy = variant; copy.id = UUID(); copy.exerciseID = exerciseMap[variant.exerciseID]!
+                copy.substitutionSourceID = nil
                 copy.label = Self.uniqueName(copy.label, among: next.variants.filter { $0.exerciseID == copy.exerciseID }.map(\.label))
                 copy.sets = copy.sets.map { value in var plan = value; plan.id = UUID(); return plan }
                 next.variants.append(copy); variantMap[variant.id] = copy.id
             }
+            if link == nil { next.historyImports.append(HistoryImportLink(sourceVariantID: variant.id, variantID: variantMap[variant.id]!, sourceExerciseID: variant.exerciseID, exerciseID: exerciseMap[variant.exerciseID]!)) }
         }
         for var session in incoming {
             session.routineID = nil; session.programID = nil; session.advancesProgram = nil

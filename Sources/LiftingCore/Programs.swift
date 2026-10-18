@@ -113,6 +113,7 @@ public extension TrainingData {
         for slot in source.slots {
             guard var variant = variant(slot.variantID) else { throw TrainingError.invalid("Exercise unavailable.") }
             variant.id = UUID()
+            variant.substitutionSourceID = nil
             let base = [context, clean].compactMap { $0 }.joined(separator: " · ")
             variant.label = Self.uniqueName(base, among: variants.filter { $0.exerciseID == variant.exerciseID }.map(\.label))
             variant.progression.failures = 0

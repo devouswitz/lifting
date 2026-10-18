@@ -107,6 +107,7 @@ struct RestBar: View {
 
 struct WorkoutExerciseCard: View {
     @EnvironmentObject var store: AppStore
+    @Environment(\.colorScheme) private var scheme
     @Environment(\.dynamicTypeSize) var typeSize
     let exerciseID: UUID
     @State private var substituting = false
@@ -116,64 +117,62 @@ struct WorkoutExerciseCard: View {
     @State private var plates = false
     @State private var removing = false
     @State private var workingWeight = false
+    @State private var restEdit: NumericEdit?
     var item: SessionExercise? { store.data.activeSession?.exercises.first { $0.id == exerciseID } }
     var body: some View {
         if let item {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(alignment: .top, spacing: 4) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 4) {
                     Button {
-                        store.perform { $0.setExerciseExpanded(exerciseID, expanded: item.collapsed == true) }
+                        store.perform { $0.setExerciseExpanded(exerciseID, expanded: item.collapsed == true, focus: item.collapsed == true) }
                     } label: {
-                        HStack(alignment: .top, spacing: 10) {
-                            Image(systemName: item.collapsed == true ? "chevron.right" : "chevron.down").font(.subheadline.weight(.semibold)).frame(width: 18, height: 26)
-                            VStack(alignment: .leading, spacing: 6) {
-                                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                                    if completed { Image(systemName: "checkmark.circle.fill").foregroundStyle(.tint) }
-                                    Text(item.name).font(.title3.weight(.semibold))
-                                    if !item.notes.isEmpty { Image(systemName: "note.text").font(.caption).foregroundStyle(.secondary) }
-                                }
-                                if item.collapsed == true {
-                                    Text(compactSummary(item)).font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.leading)
-                                } else { Chip(title: item.label) }
+                        HStack(spacing: 10) {
+                            Image(systemName: item.collapsed == true ? "chevron.right" : "chevron.down").font(.caption.weight(.bold)).frame(width: 16)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(item.name).font(.headline)
+                                if item.collapsed == true { Text(compactSummary(item)).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
                             }
-                            Spacer(minLength: 0)
-                        }.frame(minHeight: 44, alignment: .top).contentShape(Rectangle())
+                            Spacer(minLength: 4)
+                            if completed { Image(systemName: "checkmark.circle.fill").foregroundStyle(Palette.tint(scheme)) }
+                            else { Text("\(item.sets.filter { $0.completedAt != nil }.count)/\(item.sets.count)").font(.caption).monospacedDigit().foregroundStyle(.secondary) }
+                        }.frame(minHeight: 44).contentShape(Rectangle())
                     }.buttonStyle(.plain).accessibilityLabel("\(item.collapsed == true ? "Expand" : "Collapse") \(item.name)").accessibilityIdentifier("workout.\(exerciseID).collapse").accessibilityValue("\(item.collapsed == true ? "Collapsed" : "Expanded"), \(item.sets.filter { $0.completedAt != nil }.count) of \(item.sets.count) sets")
                     Menu {
-                        Button("Focus This Exercise") { store.perform { $0.setExerciseExpanded(exerciseID, expanded: true, focus: true) } }
+                        Button("Substitute") { substituting = true }
+                        Button("Add Warm-up") { appendSet(item, warmup: true); store.perform { $0.setExerciseExpanded(exerciseID, expanded: true, focus: true) } }
+                        Button("Prescription") { editVariant = store.data.variant(item.variantID) }
+                        Button("Plate Calculator") { plates = true }.disabled(item.mode == .cardio)
+                        Divider()
                         Button("Move up") { store.perform { $0.moveSessionExercise(exerciseID, offset: -1) } }
                         Button("Move down") { store.perform { $0.moveSessionExercise(exerciseID, offset: 1) } }
-                        Divider()
-                        Button("Edit Saved Prescription") { editVariant = store.data.variant(item.variantID) }
-                        Button("Add warm-up") { appendSet(item, warmup: true); store.perform { $0.setExerciseExpanded(exerciseID, expanded: true) } }
-                        Button("Plate calculator") { plates = true }.disabled(item.mode == .cardio)
-                        Button("Remove from workout", role: .destructive) { removing = true }
-                    } label: { Image(systemName: "ellipsis.circle").frame(width: 44, height: 44) }.accessibilityLabel("Options for \(item.name)").accessibilityIdentifier("workout.\(exerciseID).options")
+                        Button("Remove", role: .destructive) { removing = true }
+                    } label: { Image(systemName: "ellipsis").frame(width: 28, height: 44) }.compactMenu().accessibilityLabel("Options for \(item.name)").accessibilityIdentifier("workout.\(exerciseID).options")
                 }
                 if item.collapsed != true {
-                HStack {
-                    Button { substituting = true } label: { Label("Substitute", systemImage: "arrow.triangle.2.circlepath") }.buttonStyle(.bordered).accessibilityIdentifier("workout.\(item.id).substitute")
-                    Spacer()
-                    if item.mode == .strength { Button { workingWeight = true } label: { Label("\(number(store.data.settings.unit.display(item.workingLoad(fallback: store.data.variant(item.variantID)?.workingWeight ?? 0)))) \(store.data.settings.unit.rawValue)", systemImage: "scalemass") }.buttonStyle(.bordered).accessibilityLabel("Set working weight for \(item.name)").accessibilityIdentifier("workout.\(exerciseID).workingWeight") }
-                }
-                Text("Rest \(clockText(Double(item.restSeconds)))").font(.caption).foregroundStyle(.secondary)
-                if let from = item.substitutedFrom { Label("Instead of \(from)", systemImage: "arrow.left.arrow.right").font(.caption).foregroundStyle(.secondary) }
-                if !item.recurringNotes.isEmpty { Label(item.recurringNotes, systemImage: "pin.fill").font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
-                if item.mode == .cardio || item.sets.contains(where: { $0.seconds != nil }) { CardioTimer(exerciseID: exerciseID) }
-                VStack(spacing: 4) {
-                    ForEach(Array(item.sets.enumerated()), id: \.element.id) { index, set in
-                        LiveSetRow(exerciseID: exerciseID, setID: set.id, index: index)
-                    }
-                }
-                if item.mode != .cardio {
-                    HStack(spacing: 8) {
-                        Button { appendSet(item) } label: { Label(item.sets.last?.plan.kind == .myoMini ? "Mini-set" : "Set", systemImage: "plus") }.buttonStyle(.bordered)
-                        Button { technique = .drop } label: { Label("Drop", systemImage: "arrow.down.right") }.buttonStyle(.bordered).accessibilityIdentifier("workout.\(exerciseID).addDrop")
-                        Button { technique = .myo } label: { Label("MYO", systemImage: "repeat") }.buttonStyle(.bordered).accessibilityIdentifier("workout.\(exerciseID).addMyo")
-                    }.font(.subheadline)
-                } else { Button { appendSet(item) } label: { Label("Add interval", systemImage: "plus") }.buttonStyle(.bordered) }
-                Button { note.toggle() } label: { Label(item.notes.isEmpty ? "Note for today" : item.notes, systemImage: "note.text").font(.subheadline).multilineTextAlignment(.leading) }.buttonStyle(.plain).foregroundStyle(.secondary).accessibilityLabel("Note for \(item.name): \(item.notes)").accessibilityIdentifier("workout.\(exerciseID).note")
-                if note { TextField("Note for today", text: Binding(get: { self.item?.notes ?? "" }, set: { value in store.editExercise(exerciseID) { $0.notes = value } }), axis: .vertical).textFieldStyle(.roundedBorder).lineLimit(2...6).accessibilityIdentifier("workout.\(exerciseID).noteField") }
+                    HStack(spacing: 14) {
+                        Button { substituting = true } label: { Label("Swap", systemImage: "arrow.triangle.2.circlepath") }.accessibilityLabel("Substitute \(item.name)").accessibilityIdentifier("workout.\(item.id).substitute")
+                        Spacer(minLength: 2)
+                        Button { restEdit = NumericEdit(title: "Rest (seconds)", value: Double(item.restSeconds), step: 15, maximum: 86400, integer: true) { value in store.editExercise(exerciseID) { $0.restSeconds = Int(value ?? 0) } } } label: { Label(clockText(Double(item.restSeconds)), systemImage: "timer") }.accessibilityLabel("Exercise rest")
+                        if item.mode == .strength {
+                            Button { workingWeight = true } label: { Text("\(number(store.data.settings.unit.display(item.workingLoad(fallback: store.data.variant(item.variantID)?.workingWeight ?? 0)))) \(store.data.settings.unit.rawValue)").monospacedDigit() }.accessibilityLabel("Set working weight for \(item.name)").accessibilityIdentifier("workout.\(exerciseID).workingWeight")
+                        }
+                    }.font(.subheadline).buttonStyle(.plain).foregroundStyle(Palette.tint(scheme)).frame(minHeight: 32)
+                    if let from = item.substitutedFrom { Text("Instead of \(from)").font(.caption).foregroundStyle(.secondary) }
+                    if !item.recurringNotes.isEmpty { Label(item.recurringNotes, systemImage: "pin").font(.caption).foregroundStyle(.secondary) }
+                    if item.mode == .cardio || item.sets.contains(where: { $0.seconds != nil }) { CardioTimer(exerciseID: exerciseID) }
+                    if item.sets.contains(where: { $0.plan.kind == .warmup }) { setGroup(item, warmup: true) }
+                    if item.sets.contains(where: { $0.plan.kind != .warmup }) { setGroup(item, warmup: false) }
+                    HStack(spacing: 18) {
+                        Button { appendSet(item) } label: { Label(item.mode == .cardio ? "Interval" : item.sets.last?.plan.kind == .myoMini ? "Mini-set" : "Set", systemImage: "plus") }
+                        if item.mode != .cardio {
+                            Button("Drop") { technique = .drop }.accessibilityIdentifier("workout.\(exerciseID).addDrop")
+                            Button("MYO") { technique = .myo }.accessibilityIdentifier("workout.\(exerciseID).addMyo")
+                        }
+                        Spacer(minLength: 0)
+                        Button { note.toggle() } label: { Image(systemName: item.notes.isEmpty ? "note.text.badge.plus" : "note.text") }.accessibilityLabel("Note for \(item.name)").accessibilityIdentifier("workout.\(exerciseID).note")
+                    }.font(.subheadline).buttonStyle(.plain).foregroundStyle(Palette.tint(scheme)).frame(minHeight: 36)
+                    if note { TextField("Note for today", text: Binding(get: { self.item?.notes ?? "" }, set: { value in store.editExercise(exerciseID) { $0.notes = value } }), axis: .vertical).textFieldStyle(.roundedBorder).lineLimit(2...5).accessibilityIdentifier("workout.\(exerciseID).noteField") }
+                    else if !item.notes.isEmpty { Text(item.notes).font(.caption).foregroundStyle(.secondary) }
                 }
             }.card()
             .task(id: autoCollapseReady) {
@@ -193,15 +192,34 @@ struct WorkoutExerciseCard: View {
             .sheet(item: $editVariant) { VariantEditor(variant: $0).environmentObject(store).sheetSize() }
             .sheet(isPresented: $plates) { PlateView(initialWeight: store.data.settings.unit.display(item.sets.last?.weight ?? 0)).environmentObject(store).sheetSize() }
             .sheet(isPresented: $workingWeight) { WorkingWeightEditor(exerciseID: exerciseID).environmentObject(store).sheetSize() }
+            .sheet(item: $restEdit) { NumericPad(edit: $0).sheetSize() }
             .confirmationDialog("Remove \(item.name)?", isPresented: $removing) { Button("Remove from workout", role: .destructive) { store.editActive { $0.exercises.removeAll { $0.id == exerciseID } } } } message: { Text("This removes its sets from the current workout.") }
         }
     }
+    func setGroup(_ item: SessionExercise, warmup: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(warmup ? "Warm-up" : item.mode == .cardio ? "Intervals" : "Working sets").font(.caption.weight(.semibold)).foregroundStyle(.secondary).padding(.top, 4)
+            if !typeSize.isAccessibilitySize {
+                HStack(spacing: 6) {
+                    Text("SET").frame(width: 28)
+                    Text("PREVIOUS").frame(width: 64)
+                    if item.mode != .cardio { Text(store.data.settings.unit.rawValue.uppercased()).frame(maxWidth: .infinity); Text("REPS").frame(maxWidth: .infinity) }
+                    else { Text("TIME").frame(maxWidth: .infinity); Text("METERS").frame(maxWidth: .infinity) }
+                    Text("RPE").frame(width: 42)
+                    Color.clear.frame(width: 40, height: 1)
+                }.font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary).padding(.horizontal, 2).padding(.top, 3)
+            }
+            ForEach(Array(item.sets.enumerated()).filter { ($0.element.plan.kind == .warmup) == warmup }, id: \.element.id) { index, set in
+                LiveSetRow(exerciseID: exerciseID, setID: set.id, index: index)
+            }
+        }
+    }
     var completed: Bool { guard let item else { return false }; return !item.sets.isEmpty && item.sets.allSatisfy { $0.completedAt != nil } }
-    var autoCollapseReady: Bool { completed && item?.collapsed != true && item?.keepExpanded != true && technique == nil && editVariant == nil && !substituting && !workingWeight && !note && store.data.settings.autoCollapseCompleted != false }
+    var autoCollapseReady: Bool { completed && item?.collapsed != true && item?.keepExpanded != true && technique == nil && editVariant == nil && !substituting && !workingWeight && !note && restEdit == nil && store.data.settings.autoCollapseCompleted == true }
     func compactSummary(_ item: SessionExercise) -> String {
         let count = "\(item.sets.filter { $0.completedAt != nil }.count)/\(item.sets.count) sets"
         let best = item.sets.filter { $0.completedAt != nil }.max { ($0.weight ?? 0) < ($1.weight ?? 0) } ?? item.sets.first
-        return [count, best.map { loggedSetSummary($0, unit: store.data.settings.unit) } ?? ""].filter { !$0.isEmpty }.joined(separator: " · ")
+        return best.map { loggedSetSummary($0, unit: store.data.settings.unit) } ?? count
     }
     func appendSet(_ item: SessionExercise, warmup: Bool = false) {
         store.perform { try $0.addSessionSet(to: exerciseID, warmup: warmup) }

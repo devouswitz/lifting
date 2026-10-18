@@ -93,6 +93,7 @@ public struct Variant: Identifiable, Codable, Equatable, Sendable {
     public var notes: String
     public var sets: [SetPlan]
     public var progression: Progression
+    public var substitutionSourceID: UUID?
     public init(id: UUID = UUID(), exerciseID: UUID, label: String, workingWeight: Double = 0, rounding: Double = WeightUnit.lb.kilograms(2.5), restSeconds: Int = 90, notes: String = "", sets: [SetPlan] = [SetPlan(), SetPlan(), SetPlan()], progression: Progression = Progression()) {
         self.id = id; self.exerciseID = exerciseID; self.label = label; self.workingWeight = workingWeight; self.rounding = rounding
         self.restSeconds = restSeconds; self.notes = notes; self.sets = sets; self.progression = progression
@@ -194,6 +195,17 @@ public struct Settings: Codable, Equatable, Sendable {
     public init() {}
 }
 
+public struct HistoryImportLink: Codable, Equatable, Sendable {
+    public var sourceVariantID: UUID
+    public var variantID: UUID
+    public var sourceExerciseID: UUID
+    public var exerciseID: UUID
+    public init(sourceVariantID: UUID, variantID: UUID, sourceExerciseID: UUID, exerciseID: UUID) {
+        self.sourceVariantID = sourceVariantID; self.variantID = variantID
+        self.sourceExerciseID = sourceExerciseID; self.exerciseID = exerciseID
+    }
+}
+
 public struct TrainingData: Codable, Equatable, Sendable {
     public var schemaVersion: Int = 1
     public var exercises: [Exercise] = []
@@ -202,11 +214,12 @@ public struct TrainingData: Codable, Equatable, Sendable {
     public var programs: [TrainingProgram] = []
     public var activeProgramID: UUID?
     public var sessions: [Session] = []
+    public var historyImports: [HistoryImportLink] = []
     public var activeSession: Session?
     public var restDeadline: Date?
     public var settings: Settings = Settings()
     public init() {}
-    enum CodingKeys: String, CodingKey { case schemaVersion, exercises, variants, routines, programs, activeProgramID, sessions, activeSession, restDeadline, settings }
+    enum CodingKeys: String, CodingKey { case schemaVersion, exercises, variants, routines, programs, activeProgramID, sessions, historyImports, activeSession, restDeadline, settings }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         schemaVersion = try c.decode(Int.self, forKey: .schemaVersion)
@@ -216,6 +229,7 @@ public struct TrainingData: Codable, Equatable, Sendable {
         programs = try c.decodeIfPresent([TrainingProgram].self, forKey: .programs) ?? []
         activeProgramID = try c.decodeIfPresent(UUID.self, forKey: .activeProgramID)
         sessions = try c.decode([Session].self, forKey: .sessions)
+        historyImports = try c.decodeIfPresent([HistoryImportLink].self, forKey: .historyImports) ?? []
         activeSession = try c.decodeIfPresent(Session.self, forKey: .activeSession)
         restDeadline = try c.decodeIfPresent(Date.self, forKey: .restDeadline)
         settings = try c.decode(Settings.self, forKey: .settings)

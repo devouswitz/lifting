@@ -74,11 +74,13 @@ public extension TrainingData {
         guard old.exerciseID != exerciseID else { return }
         let pending = old.sets.filter { $0.completedAt == nil }
         guard !pending.isEmpty else { throw TrainingError.invalid("All sets are complete. Add another exercise instead.") }
+        let originID = source.substitutionSourceID ?? source.id
         var replacement: Variant
-        if let existing = variants.first(where: { $0.exerciseID == exerciseID && $0.label == source.label }) {
+        if let existing = variants.first(where: { $0.exerciseID == exerciseID && ($0.substitutionSourceID ?? $0.id) == originID }) {
             replacement = existing
         } else {
-            replacement = Variant(exerciseID: exerciseID, label: source.label, restSeconds: source.restSeconds)
+            replacement = Variant(exerciseID: exerciseID, label: Self.uniqueName(source.label, among: variants.filter { $0.exerciseID == exerciseID }.map(\.label)), restSeconds: source.restSeconds)
+            replacement.substitutionSourceID = originID
             if exercise.mode == old.mode {
                 replacement.sets = source.sets.map { plan in
                     var copy = plan; copy.id = UUID(); copy.fixedWeight = 0
@@ -95,6 +97,7 @@ public extension TrainingData {
         var item = SessionExercise(variant: replacement, exercise: exercise, slotID: old.slotID)
         item.substitutedFrom = old.name
         let completed = old.sets.filter { $0.completedAt != nil }
+        if completed.isEmpty { item.notes = old.notes }
         if exercise.mode == old.mode {
             // Preserve today's structure, including edited targets, drop sets, and MYO mini-sets.
             item.sets = pending.map { logged in
@@ -154,6 +157,12 @@ public extension TrainingData {
         guard schemaVersion == 1 else { throw TrainingError.invalid("This backup uses an unsupported version.") }
         func unique<T: Identifiable>(_ values: [T]) -> Bool where T.ID == UUID { Set(values.map(\.id)).count == values.count }
         guard unique(exercises), unique(variants), unique(routines), unique(sessions), sessions.count <= 100_000 else { throw TrainingError.invalid("The backup contains duplicate or excessive records.") }
+        guard historyImports.count <= 100_000, Set(historyImports.map(\.sourceVariantID)).count == historyImports.count,
+              historyImports.allSatisfy({ link in exercise(link.exerciseID) != nil && variant(link.variantID)?.exerciseID == link.exerciseID }),
+              Dictionary(grouping: historyImports, by: \.sourceExerciseID).values.allSatisfy({ Set($0.map(\.exerciseID)).count == 1 }) else { throw TrainingError.invalid("The backup contains invalid history import references.") }
+        let substitutionKeys = variants.map { "\($0.substitutionSourceID ?? $0.id)|\($0.exerciseID)" }
+        guard Set(substitutionKeys).count == substitutionKeys.count,
+              variants.allSatisfy({ value in value.substitutionSourceID.map { origin in variant(origin).map { $0.substitutionSourceID == nil } ?? false } ?? true }) else { throw TrainingError.invalid("The backup contains invalid substitution references.") }
         let ownedDays = programs.flatMap(\.dayIDs)
         guard unique(programs), Set(ownedDays).count == ownedDays.count,
               programs.allSatisfy({ p in !p.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && p.name.count <= 200 && p.dayIDs.allSatisfy { routine($0) != nil } && (p.dayIDs.isEmpty ? p.nextDayIndex == 0 : p.dayIDs.indices.contains(p.nextDayIndex)) }),

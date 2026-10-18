@@ -25,7 +25,7 @@ struct SettingsView: View {
             }
             Section("Workout") {
                 Toggle("Auto-start rest timer", isOn: setting(\.autoRest))
-                Toggle("Collapse completed exercises", isOn: Binding(get: { store.data.settings.autoCollapseCompleted != false }, set: { value in store.perform { $0.settings.autoCollapseCompleted = value } }))
+                Toggle("Auto-collapse completed exercises", isOn: Binding(get: { store.data.settings.autoCollapseCompleted == true }, set: { value in store.perform { $0.settings.autoCollapseCompleted = value } }))
                 Toggle("Haptics", isOn: setting(\.haptics))
                 Toggle("Keep screen awake", isOn: setting(\.keepAwake))
                 #if os(iOS)

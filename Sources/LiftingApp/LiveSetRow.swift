@@ -14,44 +14,47 @@ struct LiveSetRow: View {
     var set: LoggedSet? { item?.sets.first { $0.id == setID } }
     var previous: LoggedSet? {
         guard let item, let set else { return nil }
-        let sets = (store.data.sessions.reversed().compactMap { $0.exercises.first { $0.variantID == item.variantID } }.first?.sets ?? []).filter { $0.plan.kind == set.plan.kind }
+        let sets = (store.data.sessions.sorted { $0.startedAt > $1.startedAt }.compactMap { $0.exercises.first { $0.variantID == item.variantID } }.first?.sets ?? []).filter { $0.plan.kind == set.plan.kind }
         let ordinal = item.sets.prefix(index).filter { $0.plan.kind == set.plan.kind }.count
         if sets.indices.contains(ordinal), sets[ordinal].completedAt != nil { return sets[ordinal] }
         return nil
     }
     var body: some View {
         if let set, let item {
-            VStack(alignment: .leading, spacing: 4) {
-                let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6)) : AnyLayout(HStackLayout(spacing: 6))
+            VStack(alignment: .leading, spacing: 3) {
+                let stacked = typeSize.isAccessibilitySize || (item.mode == .cardio && (set.weight != nil || set.reps != nil))
+                let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6)) : AnyLayout(HStackLayout(spacing: 6))
                 layout {
                     Menu {
                         Button("Edit Set Targets") { holdExpanded(); editingPlan = true }
                         Divider()
                         ForEach(SetKind.allCases) { kind in Button(kind.title) { store.editSet(exerciseID, setID) { $0.plan.kind = kind } } }
                         Button("Delete set", role: .destructive) { store.editExercise(exerciseID) { $0.sets.removeAll { $0.id == setID } } }
-                    } label: { Text(setLabel(set, item: item)).font(.caption.weight(.semibold)).foregroundStyle(.secondary).frame(minWidth: 28, minHeight: 44) }.accessibilityLabel("\(set.plan.kind.title), set \(index + 1), options")
+                    } label: {
+                        VStack(spacing: 2) {
+                            Text(setLabel(set, item: item)).font(.caption.weight(.semibold))
+                            if set.plan.load == .percent { Text("\(number(set.plan.percent))%").font(.system(size: 9)) }
+                        }.foregroundStyle(.secondary).frame(width: 28, height: 44)
+                    }.compactMenu().accessibilityLabel("\(set.plan.kind.title), set \(index + 1), options")
                     HStack(spacing: 6) {
-                        if item.mode != .cardio || set.weight != nil {
-                            cell(title: store.data.settings.unit.rawValue.uppercased(), value: set.weight.map { number(store.data.settings.unit.display($0)) }, field: .weight)
+                        if !stacked {
+                            if let previous {
+                                Button { copy(previous) } label: { Text(previousValue(previous)).font(.caption).monospacedDigit().foregroundStyle(.secondary).frame(width: 64, height: 44) }.buttonStyle(.plain).accessibilityLabel("Copy previous: \(loggedSetSummary(previous, unit: store.data.settings.unit))")
+                            } else { Text("·").foregroundStyle(.tertiary).frame(width: 64, height: 44) }
                         }
-                        if item.mode != .cardio || set.reps != nil { cell(title: set.plan.amrap ? "AMRAP" : "REPS", value: set.reps.map(String.init), field: .reps) }
-                        if item.mode == .cardio || set.seconds != nil { cell(title: "TIME", value: set.seconds.map(clockText), field: .time) }
-                        if item.mode == .cardio || set.meters != nil { cell(title: "METERS", value: set.meters.map { number($0) }, field: .distance) }
-                        cell(title: "RPE", value: set.rpe.map { number($0) }, field: .rpe)
+                        if item.mode != .cardio || set.weight != nil { cell(title: store.data.settings.unit.rawValue.uppercased(), value: set.weight.map { number(store.data.settings.unit.display($0)) }, field: .weight, labeled: stacked) }
+                        if item.mode != .cardio || set.reps != nil { cell(title: set.plan.amrap ? "AMRAP" : "REPS", value: set.reps.map(String.init), field: .reps, labeled: stacked) }
+                        if item.mode == .cardio || set.seconds != nil { cell(title: "TIME", value: set.seconds.map(clockText), field: .time, labeled: stacked) }
+                        if item.mode == .cardio || set.meters != nil { cell(title: "METERS", value: set.meters.map { number($0) }, field: .distance, labeled: stacked) }
+                        cell(title: "RPE", value: set.rpe.map { number($0) }, field: .rpe, labeled: stacked).frame(maxWidth: stacked ? .infinity : 42)
                         Button { store.toggle(exerciseID, setID) } label: {
-                            Image(systemName: set.completedAt == nil ? "circle" : "checkmark.circle.fill").font(.system(size: 27)).foregroundStyle(set.completedAt == nil ? Color.secondary.opacity(0.65) : Palette.tint(scheme)).frame(width: 44, height: 48)
+                            Image(systemName: set.completedAt == nil ? "square" : "checkmark.square.fill").font(.system(size: 23)).foregroundStyle(set.completedAt == nil ? Color.secondary.opacity(0.6) : Palette.tint(scheme)).frame(width: 40, height: 44)
                         }.buttonStyle(.plain).accessibilityLabel(set.completedAt == nil ? "Complete set \(index + 1)" : "Undo set \(index + 1)").accessibilityIdentifier("workout.\(exerciseID).\(setID).complete")
                     }
                 }
-                HStack(spacing: 8) {
-                    if set.plan.load == .percent { Text("\(number(set.plan.percent))% working").font(.caption2).foregroundStyle(.secondary) }
-                    if let rest = set.plan.restSeconds { Text("\(rest)s rest").font(.caption2).foregroundStyle(.secondary) }
-                    if let previous { Button("Previous: \(loggedSetSummary(previous, unit: store.data.settings.unit))") {
-                        store.editSet(exerciseID, setID) { s in s.weight = previous.weight; s.reps = previous.reps; s.seconds = previous.seconds; s.meters = previous.meters; s.rpe = previous.rpe }
-                    }.buttonStyle(.plain).font(.caption2).foregroundStyle(.secondary).accessibilityLabel("Copy previous set: \(loggedSetSummary(previous, unit: store.data.settings.unit))") }
-                }
-            }.padding(.horizontal, 5).padding(.vertical, 6)
-            .background(set.completedAt != nil ? Palette.tint(scheme).opacity(0.09) : set.plan.kind == .warmup ? Palette.secondary(scheme).opacity(0.7) : .clear, in: RoundedRectangle(cornerRadius: 8))
+                if let rest = set.plan.restSeconds { Text("\(rest)s rest").font(.caption2).foregroundStyle(.secondary).padding(.leading, 34) }
+            }.padding(.horizontal, 2).padding(.vertical, 2)
+            .background(set.completedAt != nil ? Palette.tint(scheme).opacity(0.08) : .clear, in: RoundedRectangle(cornerRadius: 6))
             .contextMenu {
                 Button("Edit Set Targets") { holdExpanded(); editingPlan = true }
                 Button("Add time") { open(.time) }; Button("Add distance") { open(.distance) }
@@ -62,10 +65,23 @@ struct LiveSetRow: View {
             .sheet(isPresented: $editingPlan) { LivePlanEditor(exerciseID: exerciseID, setID: setID, initial: set.plan).environmentObject(store).sheetSize() }
         }
     }
-    func cell(title: String, value: String?, field: Field) -> some View {
+    func cell(title: String, value: String?, field: Field, labeled: Bool = false) -> some View {
         Button { open(field) } label: {
-            VStack(spacing: 4) { Text(title).font(.system(.caption2, design: .default).weight(.medium)).foregroundStyle(.secondary); Text(value ?? "·").font(.body.weight(.semibold)).monospacedDigit().foregroundStyle(value == nil ? .secondary : .primary) }.frame(maxWidth: .infinity, minHeight: 44)
+            VStack(spacing: 3) {
+                if labeled { Text(title).font(.caption2).foregroundStyle(.secondary) }
+                Text(value ?? "·").font(.body.weight(.medium)).monospacedDigit().foregroundStyle(value == nil ? .secondary : .primary)
+            }.frame(maxWidth: .infinity, minHeight: 38).background(Palette.secondary(scheme).opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
         }.buttonStyle(.plain).accessibilityLabel("Set \(index + 1), \(title), \(value ?? "not set")").accessibilityIdentifier("workout.\(exerciseID).\(setID).\(field.rawValue)")
+    }
+    func previousValue(_ set: LoggedSet) -> String {
+        if let weight = set.weight, let reps = set.reps { return "\(number(store.data.settings.unit.display(weight))) × \(reps)" }
+        if let seconds = set.seconds { return clockText(seconds) }
+        if let reps = set.reps { return "\(reps) reps" }
+        return "·"
+    }
+    func copy(_ previous: LoggedSet) {
+        holdExpanded()
+        store.editSet(exerciseID, setID) { s in s.weight = previous.weight; s.reps = previous.reps; s.seconds = previous.seconds; s.meters = previous.meters; s.rpe = previous.rpe }
     }
     enum Field: String { case weight, reps, time, distance, rpe, rest }
     func holdExpanded() {

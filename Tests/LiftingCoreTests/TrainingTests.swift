@@ -6,6 +6,164 @@ import Foundation
 #endif
 
 final class TrainingTests: XCTestCase {
+    func testSubstitutionDoesNotBorrowAnUnrelatedTrackWithTheSameLabel() throws {
+        var data = TrainingData.starter()
+        let day = data.dayTemplates[0]
+        let original = data.variant(day.slots.last!.variantID)!
+        let target = data.exercises.first { $0.name == "Dumbbell lateral raise" }!
+        let foreign = Variant(exerciseID: target.id, label: original.label, workingWeight: 80, notes: "Other day", sets: [SetPlan(reps: 3, repCeiling: nil)])
+        data.variants.append(foreign)
+        let otherDay = Routine(name: "Other", slots: [RoutineSlot(variantID: foreign.id)])
+        data.routines.append(otherDay)
+        try data.start(routineID: day.id)
+        let item = data.activeSession!.exercises.last!
+        try data.substitute(sessionExerciseID: item.id, with: target.id, future: true)
+        let replacement = data.activeSession!.exercises.last!
+        XCTAssertNotEqual(replacement.variantID, foreign.id)
+        XCTAssertEqual(replacement.sets[0].weight, 0)
+        try data.setWorkingWeight(10, for: replacement.id, saveFuture: true)
+        XCTAssertEqual(data.variant(foreign.id), foreign)
+        let storedID = replacement.variantID
+        try data.substitute(sessionExerciseID: replacement.id, with: original.exerciseID, future: true)
+        let returned = data.activeSession!.exercises.last!
+        XCTAssertEqual(returned.variantID, original.id)
+        try data.substitute(sessionExerciseID: returned.id, with: target.id, future: false)
+        XCTAssertEqual(data.activeSession!.exercises.last!.variantID, storedID)
+        XCTAssertEqual(data.activeSession!.exercises.last!.workingWeight, 10)
+        XCTAssertEqual(data.routine(otherDay.id), otherDay)
+        XCTAssertNoThrow(try data.validated())
+    }
+
+    func testIncrementalHistoryImportsKeepOneTrackAcrossRenamesAndBackupReload() throws {
+        var source = TrainingData.starter()
+        var target = TrainingData.starter()
+        let day = source.dayTemplates[0]
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        try source.start(routineID: day.id, now: start)
+        var item = source.activeSession!.exercises[0]
+        try source.toggleSet(exerciseID: item.id, setID: item.sets.first { $0.plan.kind == .working }!.id, now: start)
+        try source.finish(now: start.addingTimeInterval(600))
+        XCTAssertEqual(try target.importHistory(HistoryCSV.decode(HistoryCSV.export(source))), 1)
+        let first = target.sessions[0].exercises[0]
+        target = try LocalRepository.decode(LocalRepository.encode(target))
+        let e = source.exercises.firstIndex { $0.id == item.exerciseID }!
+        source.exercises[e].name = "Renamed press"
+        try source.start(routineID: day.id, now: start.addingTimeInterval(86400))
+        item = source.activeSession!.exercises[0]
+        try source.toggleSet(exerciseID: item.id, setID: item.sets.first { $0.plan.kind == .working }!.id, now: start.addingTimeInterval(86400))
+        try source.finish(now: start.addingTimeInterval(87000))
+        // Import just the new workout, without overlapping rows to infer from.
+        var delta = source; delta.sessions = [source.sessions[1]]
+        XCTAssertEqual(try target.importHistory(HistoryCSV.decode(HistoryCSV.export(delta))), 1)
+        let second = target.sessions[1].exercises[0]
+        XCTAssertEqual(second.variantID, first.variantID)
+        XCTAssertEqual(second.exerciseID, first.exerciseID)
+        XCTAssertEqual(second.name, "Renamed press")
+        XCTAssertEqual(target.points(exerciseID: first.exerciseID, variantID: first.variantID, metric: .weight).count, 2)
+        XCTAssertEqual(try target.importHistory(HistoryCSV.decode(HistoryCSV.export(source))), 0)
+        XCTAssertNoThrow(try target.validated())
+    }
+
+    func testLiveAddedExerciseUsesItsDayTrackRatherThanMatchingLabels() throws {
+        var data = TrainingData.starter()
+        let upper = data.dayTemplates[0], lower = data.dayTemplates[1]
+        let exercise = data.exercises.first { $0.name == "Dumbbell curl" }!
+        let foreign = Variant(exerciseID: exercise.id, label: upper.name, workingWeight: 90)
+        data.variants.append(foreign)
+        try data.start(routineID: upper.id)
+        try data.addExerciseToSession(exercise.id)
+        let added = data.activeSession!.exercises.last!
+        XCTAssertNotEqual(added.variantID, foreign.id)
+        try data.setWorkingWeight(12, for: added.id, saveFuture: true)
+        try data.toggleSet(exerciseID: added.id, setID: added.sets[0].id)
+        try data.finish()
+        try data.start(routineID: lower.id)
+        try data.addExerciseToSession(exercise.id)
+        let other = data.activeSession!.exercises.last!
+        XCTAssertNotEqual(other.variantID, added.variantID)
+        XCTAssertEqual(other.workingWeight, 0)
+        data.activeSession = nil
+        try data.start(routineID: upper.id)
+        data.activeSession!.name = "Renamed session"
+        try data.addExerciseToSession(exercise.id)
+        XCTAssertEqual(data.activeSession!.exercises.last!.variantID, added.variantID)
+        XCTAssertEqual(data.activeSession!.exercises.last!.workingWeight, 12)
+        data.activeSession = Session(name: upper.name)
+        try data.addExerciseToSession(exercise.id)
+        XCTAssertNotEqual(data.activeSession!.exercises.last!.variantID, added.variantID)
+        XCTAssertNotEqual(data.activeSession!.exercises.last!.variantID, foreign.id)
+        XCTAssertEqual(data.variant(foreign.id), foreign)
+        XCTAssertNoThrow(try data.validated())
+    }
+
+    func testLiveAddedExerciseUsesLatestDatedTrackWhenHistoryIsUnsorted() throws {
+        var data = TrainingData.starter()
+        let day = data.dayTemplates[0]
+        let exercise = data.exercises.first { $0.name == "Dumbbell curl" }!
+        let older = Variant(exerciseID: exercise.id, label: "Older", workingWeight: 9)
+        let newer = Variant(exerciseID: exercise.id, label: "Newer", workingWeight: 17)
+        data.variants += [older, newer]
+        func historical(_ variant: Variant, at time: Double) -> Session {
+            let date = Date(timeIntervalSince1970: time)
+            var item = SessionExercise(variant: variant, exercise: exercise)
+            item.sets[0].completedAt = date
+            return Session(routineID: day.id, name: day.name, startedAt: date, endedAt: date.addingTimeInterval(60), exercises: [item])
+        }
+        data.sessions = [historical(newer, at: 200), historical(older, at: 100)]
+        try data.start(routineID: day.id)
+        try data.addExerciseToSession(exercise.id)
+        XCTAssertEqual(data.activeSession!.exercises.last!.variantID, newer.id)
+        XCTAssertEqual(data.activeSession!.exercises.last!.workingWeight, 17)
+        XCTAssertEqual(data.variant(older.id), older)
+        XCTAssertNoThrow(try data.validated())
+    }
+
+    func testCopiedSubstitutedDayStartsAnIndependentSubstitutionFamily() throws {
+        var data = TrainingData.starter()
+        let day = data.dayTemplates[0]
+        let original = data.variant(day.slots.last!.variantID)!
+        let target = data.exercises.first { $0.name == "Dumbbell lateral raise" }!
+        try data.start(routineID: day.id)
+        let item = data.activeSession!.exercises.last!
+        data.activeSession!.exercises[data.activeSession!.exercises.count - 1].notes = "Shoulder note before swapping"
+        try data.substitute(sessionExerciseID: item.id, with: target.id, future: true)
+        XCTAssertEqual(data.activeSession!.exercises.last!.notes, "Shoulder note before swapping")
+        let replacementID = data.activeSession!.exercises.last!.variantID
+        let copyID = try data.saveDayAsTemplate(day.id, name: "Copied day")
+        data.activeSession = nil
+        try data.start(routineID: copyID)
+        let copied = data.activeSession!.exercises.last!
+        XCTAssertNotEqual(copied.variantID, replacementID)
+        try data.substitute(sessionExerciseID: copied.id, with: original.exerciseID, future: true)
+        XCTAssertNotEqual(data.activeSession!.exercises.last!.variantID, original.id)
+        XCTAssertEqual(data.routine(day.id)!.slots.last!.variantID, replacementID)
+        XCTAssertNoThrow(try data.validated())
+    }
+
+    func testLegacyHistoryImportRecoversTrackIdentityFromOverlappingSessions() throws {
+        var source = TrainingData.starter()
+        let dayID = source.dayTemplates[0].id
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        var target = TrainingData.starter()
+        var firstID: UUID?
+        for index in 0..<2 {
+            let now = start.addingTimeInterval(Double(index) * 86400)
+            try source.start(routineID: dayID, now: now)
+            let item = source.activeSession!.exercises[0]
+            try source.toggleSet(exerciseID: item.id, setID: item.sets.first { $0.plan.kind == .working }!.id, now: now)
+            try source.finish(now: now.addingTimeInterval(600))
+            XCTAssertEqual(try target.importHistory(HistoryCSV.decode(HistoryCSV.export(source))), 1)
+            if index == 0 { firstID = target.sessions[0].exercises[0].variantID; target.historyImports = [] }
+        }
+        XCTAssertEqual(target.sessions[1].exercises[0].variantID, firstID)
+        XCTAssertEqual(target.historyImports.count, 1)
+        let before = target
+        var broken = target
+        broken.historyImports[0].variantID = UUID()
+        XCTAssertThrowsError(try broken.validated())
+        XCTAssertEqual(target, before)
+    }
+
     func testHistoryCSVTransfersSnapshotsAndNotesWithoutChangingExistingPlans() throws {
         var source = TrainingData.starter()
         let start = Date(timeIntervalSince1970: 1_800_000_000)
@@ -181,8 +339,31 @@ final class TrainingTests: XCTestCase {
         XCTAssertEqual(data, before)
     }
 
+    func testCompletedExerciseStaysOpenByDefaultAndManualFocusPreservesResults() throws {
+        var data = TrainingData.starter()
+        try data.start(routineID: data.routines[0].id)
+        let item = data.activeSession!.exercises[0]
+        for set in item.sets { try data.toggleSet(exerciseID: item.id, setID: set.id) }
+        let completed = data.activeSession!.exercises[0].sets
+        XCTAssertNil(data.collapseCompletedExercise(item.id))
+        XCTAssertEqual(data.activeSession!.exercises[0].collapsed, false)
+        let next = data.activeSession!.exercises[1]
+        data.setExerciseExpanded(next.id, expanded: true, focus: true)
+        XCTAssertEqual(data.activeSession!.exercises[0].collapsed, true)
+        data.setExerciseExpanded(item.id, expanded: true, focus: true)
+        XCTAssertEqual(data.activeSession!.exercises[0].sets, completed)
+        XCTAssertEqual(data.activeSession!.exercises[1].collapsed, true)
+        let restored = try LocalRepository.decode(LocalRepository.encode(data))
+        XCTAssertEqual(restored.activeSession!.completedSets, item.sets.count)
+        XCTAssertEqual(restored.activeSession!.exercises[0].collapsed, false)
+        XCTAssertEqual(restored.activeSession!.exercises[1].collapsed, true)
+        XCTAssertEqual(restored.activeSession!.exercises[0].sets.map(\.weight), completed.map(\.weight))
+        XCTAssertEqual(restored.activeSession!.exercises[0].sets.map(\.reps), completed.map(\.reps))
+    }
+
     func testCollapseFocusAndManualExpansionDoNotChangeLoggedSets() throws {
         var data = TrainingData.starter()
+        data.settings.autoCollapseCompleted = true
         try data.start(routineID: data.routines[0].id)
         let items = data.activeSession!.exercises
         XCTAssertEqual(items[0].collapsed, false)
@@ -219,7 +400,7 @@ final class TrainingTests: XCTestCase {
         var data = TrainingData.starter()
         try data.start(routineID: data.routines[0].id)
         var json = try JSONSerialization.jsonObject(with: LocalRepository.encode(data)) as! [String: Any]
-        json.removeValue(forKey: "programs"); json.removeValue(forKey: "activeProgramID")
+        json.removeValue(forKey: "programs"); json.removeValue(forKey: "activeProgramID"); json.removeValue(forKey: "historyImports")
         var session = json["activeSession"] as! [String: Any]
         session.removeValue(forKey: "programID"); session.removeValue(forKey: "advancesProgram")
         var exercises = session["exercises"] as! [[String: Any]]

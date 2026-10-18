@@ -137,6 +137,7 @@ public extension TrainingData {
         for incoming in source.programs { programMap[incoming.id] = UUID() }
         for incoming in source.variants {
             var copy = incoming; copy.id = UUID(); copy.exerciseID = exerciseMap[incoming.exerciseID]!
+            copy.substitutionSourceID = nil
             copy.label = Self.uniqueName(incoming.label, among: next.variants.filter { $0.exerciseID == copy.exerciseID }.map(\.label))
             copy.progression.failures = 0
             copy.sets = incoming.sets.map { value in var plan = value; plan.id = UUID(); return plan }

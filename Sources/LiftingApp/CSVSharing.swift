@@ -38,7 +38,9 @@ struct CSVImportModifier: ViewModifier {
     @Binding var isPresented: Bool
     @State private var preview: CSVPreview?
     func body(content: Content) -> some View {
-        content.fileImporter(isPresented: $isPresented, allowedContentTypes: [.commaSeparatedText, .plainText], allowsMultipleSelection: false) { result in
+        content.background {
+        Color.clear.frame(width: 1, height: 1).allowsHitTesting(false)
+        .fileImporter(isPresented: $isPresented, allowedContentTypes: [.commaSeparatedText, .plainText], allowsMultipleSelection: false) { result in
             do {
                 guard let url = try result.get().first else { return }
                 let access = url.startAccessingSecurityScopedResource()
@@ -51,6 +53,7 @@ struct CSVImportModifier: ViewModifier {
             } catch { store.error = "Import failed. \(error.localizedDescription)" }
         }
         .sheet(item: $preview) { item in CSVImportPreview(routines: item.routines, history: item.history).environmentObject(store).sheetSize() }
+        }
     }
 }
 
