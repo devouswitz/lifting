@@ -31,25 +31,27 @@ struct RoutineEditor: View {
                                     VStack(alignment: .leading, spacing: 6) {
                                         Text(exercise.name).foregroundStyle(.primary).font(.headline)
                                         Text(planSummary(variant, unit: store.data.settings.unit)).font(.subheadline).foregroundStyle(.secondary)
-                                        Chip(title: variant.label)
-                                        if !slot.group.isEmpty, routine.slots.filter({ $0.group == slot.group }).count > 1 { Text(routine.slots.filter({ $0.group == slot.group }).count > 2 ? "Circuit" : "Superset").font(.caption).foregroundStyle(.secondary) }
+                                        HStack(spacing: 6) {
+                                            if variant.label != defaultTrackName(routine) { Chip(title: variant.label) }
+                                            if !slot.group.isEmpty, routine.slots.filter({ $0.group == slot.group }).count > 1 { Label(routine.slots.filter({ $0.group == slot.group }).count > 2 ? "Circuit" : "Superset", systemImage: "link").font(.caption).foregroundStyle(.secondary) }
+                                        }
                                     }
                                     Spacer(); Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
                                 }.padding(.vertical, 4)
                             }.buttonStyle(.plain)
                             .contextMenu {
-                                Button("Superset / Circuit") { linkedSlotID = slot.id; linking = true }
-                                Button("Move up") { update { r in if let i = r.slots.firstIndex(where: { $0.id == slot.id }), i > 0 { r.slots.swapAt(i, i - 1) } } }
-                                Button("Move down") { update { r in if let i = r.slots.firstIndex(where: { $0.id == slot.id }), i < r.slots.count - 1 { r.slots.swapAt(i, i + 1) } } }
-                                Button("Remove", role: .destructive) { update { $0.slots.removeAll { $0.id == slot.id } } }
+                                Button("Superset / Circuit", systemImage: "link") { linkedSlotID = slot.id; linking = true }
+                                Button("Move Up", systemImage: "arrow.up") { update { r in if let i = r.slots.firstIndex(where: { $0.id == slot.id }), i > 0 { r.slots.swapAt(i, i - 1) } } }
+                                Button("Move Down", systemImage: "arrow.down") { update { r in if let i = r.slots.firstIndex(where: { $0.id == slot.id }), i < r.slots.count - 1 { r.slots.swapAt(i, i + 1) } } }
+                                Button("Remove", systemImage: "trash", role: .destructive) { update { $0.slots.removeAll { $0.id == slot.id } } }
                             }
                         }
                     }
                     .onMove { source, target in update { $0.slots.move(fromOffsets: source, toOffset: target) } }
                     .onDelete { offsets in update { $0.slots.remove(atOffsets: offsets) } }
-                    Button { picker = true } label: { Label("Add exercise", systemImage: "plus") }
-                    if routine.slots.count > 1 { Button("Superset / Circuit") { linkedSlotID = nil; linking = true }.accessibilityIdentifier("routine.link") }
-                    if !routine.slots.isEmpty { Button("Apply warm-up preset") { warmups = true }.accessibilityIdentifier("routine.warmups") }
+                    Button { picker = true } label: { Label("Add Exercise", systemImage: "plus") }
+                    if routine.slots.count > 1 { Button { linkedSlotID = nil; linking = true } label: { Label("Superset / Circuit", systemImage: "link") }.accessibilityIdentifier("routine.link") }
+                    if !routine.slots.isEmpty { Button { warmups = true } label: { Label("Apply Warm-up Preset", systemImage: "flame") }.accessibilityIdentifier("routine.warmups") }
                 }
                 Section {
                     Button("Export CSV") { do { export = try .day(routineID, in: store.data) } catch { store.error = error.localizedDescription } }
@@ -69,7 +71,7 @@ struct RoutineEditor: View {
             EditButton()
             #endif
         }
-        .sheet(isPresented: $picker) { ExercisePicker(title: "Add exercise") { store.add($0, to: routineID) }.environmentObject(store).sheetSize() }
+        .sheet(isPresented: $picker) { ExercisePicker(title: "Add Exercise") { store.add($0, to: routineID) }.environmentObject(store).sheetSize() }
         .sheet(item: $editing) { VariantEditor(variant: $0).environmentObject(store).sheetSize() }
         .sheet(isPresented: $linking) { LinkedExerciseEditor(routineID: routineID, exerciseID: linkedSlotID).environmentObject(store).sheetSize() }
         .sheet(isPresented: $warmups) { ApplyWarmupPreset(routineID: routineID).environmentObject(store).sheetSize() }
@@ -78,6 +80,11 @@ struct RoutineEditor: View {
             Button("Delete", role: .destructive) { if store.perform({ $0.removeDay(routineID) }) { dismiss() } }
         } message: { Text("Workout history is kept.") }
     }
+}
+
+extension RoutineEditor {
+    /// The label new exercises get in this day; only differing labels are worth showing.
+    func defaultTrackName(_ routine: Routine) -> String { [store.data.programForDay(routine.id)?.name, routine.name].compactMap { $0 }.joined(separator: " · ") }
 }
 
 struct ExercisePicker: View {
@@ -104,7 +111,7 @@ struct ExercisePicker: View {
                 if substitution {
                     Section {
                         Picker("Scope", selection: $future) { Text("Today only").tag(false); Text("Future sessions").tag(true) }.pickerStyle(.segmented)
-                    } footer: { Text(future ? "Changes this routine slot only." : "Your routine stays unchanged.") }
+                    } footer: { Text(future ? "Future sessions of this day use the new exercise." : "The saved day stays unchanged.") }
                 }
                 Picker("Type", selection: $mode) { Text("All").tag("All"); ForEach(ExerciseMode.allCases) { Text($0.title).tag($0.title) } }.pickerStyle(.segmented)
                 ForEach(matches) { exercise in
@@ -120,7 +127,7 @@ struct ExercisePicker: View {
                         }.padding(.vertical, 6).contentShape(Rectangle())
                     }.buttonStyle(.plain)
                 }
-                Button { creating = true } label: { Label(search.isEmpty ? "Create exercise" : "Create \"\(search)\"", systemImage: "plus") }
+                Button { creating = true } label: { Label(search.isEmpty ? "Create Exercise" : "Create \"\(search)\"", systemImage: "plus") }
             }.searchable(text: $search, prompt: "Exercise, muscle, equipment")
             .navigationTitle(title).inlineTitle()
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
@@ -145,12 +152,16 @@ struct ExerciseEditor: View {
         NavigationStack {
             Form {
                 StoreErrorRow()
-                TextField("Name", text: $exercise.name)
-                Picker("Tracking", selection: $exercise.mode) { ForEach(ExerciseMode.allCases) { Text($0.title).tag($0) } }
-                TextField("Muscle group", text: $exercise.muscle)
-                TextField("Secondary muscles (comma separated)", text: Binding(get: { exercise.secondaryMuscles?.joined(separator: ", ") ?? "" }, set: { exercise.secondaryMuscles = $0.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty } }))
-                TextField("Equipment", text: $exercise.equipment)
-            }.formStyle(.grouped).navigationTitle(initialExercise == nil ? "New exercise" : "Edit exercise").inlineTitle()
+                Section {
+                    TextField("Name", text: $exercise.name)
+                    Picker("Type", selection: $exercise.mode) { ForEach(ExerciseMode.allCases) { Text($0.title).tag($0) } }
+                    TextField("Equipment", text: $exercise.equipment)
+                }
+                Section("Muscles") {
+                    TextField("Primary muscle", text: $exercise.muscle)
+                    TextField("Secondary muscles, comma separated", text: Binding(get: { exercise.secondaryMuscles?.joined(separator: ", ") ?? "" }, set: { exercise.secondaryMuscles = $0.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty } }))
+                }
+            }.formStyle(.grouped).navigationTitle(initialExercise == nil ? "New Exercise" : "Edit Exercise").inlineTitle()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) { Button("Save") { exercise.name = exercise.name.trimmingCharacters(in: .whitespacesAndNewlines); onSave(exercise); dismiss() }.disabled(exercise.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) }

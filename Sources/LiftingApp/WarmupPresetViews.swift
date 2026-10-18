@@ -21,7 +21,7 @@ struct WarmupPresetLibrary: View {
                 }
             }.onDelete { offsets in store.perform { $0.warmupPresets.remove(atOffsets: offsets) } }
             Button("New preset", systemImage: "plus") { editing = WarmupPreset(name: "", sets: [SetPlan(kind: .warmup, load: .percent, reps: 5, repCeiling: nil)]) }.accessibilityIdentifier("warmups.new")
-        }.formStyle(.grouped).navigationTitle("Warm-up presets").inlineTitle()
+        }.formStyle(.grouped).navigationTitle("Warm-up Presets").inlineTitle()
         .sheet(item: $editing) { WarmupPresetEditor(preset: $0).environmentObject(store).sheetSize() }
     }
 }
@@ -41,8 +41,8 @@ struct WarmupPresetEditor: View {
                             Text(setPlanSummary(plan, unit: store.data.settings.unit)).font(.subheadline)
                         }.accessibilityIdentifier("warmup.set.\(plan.id)")
                         .contextMenu {
-                            Button("Move up") { if let i = preset.sets.firstIndex(where: { $0.id == plan.id }), i > 0 { preset.sets.swapAt(i, i - 1) } }
-                            Button("Move down") { if let i = preset.sets.firstIndex(where: { $0.id == plan.id }), i + 1 < preset.sets.count { preset.sets.swapAt(i, i + 1) } }
+                            Button("Move Up") { if let i = preset.sets.firstIndex(where: { $0.id == plan.id }), i > 0 { preset.sets.swapAt(i, i - 1) } }
+                            Button("Move Down") { if let i = preset.sets.firstIndex(where: { $0.id == plan.id }), i + 1 < preset.sets.count { preset.sets.swapAt(i, i + 1) } }
                             Button("Duplicate") { var copy = plan; copy.id = UUID(); if let i = preset.sets.firstIndex(where: { $0.id == plan.id }) { preset.sets.insert(copy, at: i + 1) } }
                             Button("Delete", role: .destructive) { preset.sets.removeAll { $0.id == plan.id } }
                         }
@@ -52,7 +52,7 @@ struct WarmupPresetEditor: View {
                         set.id = UUID(); preset.sets.append(set)
                     }.accessibilityIdentifier("warmups.addSet")
                 }
-            }.formStyle(.grouped).navigationTitle("Warm-up preset").inlineTitle()
+            }.formStyle(.grouped).navigationTitle(preset.name.isEmpty ? "New Preset" : preset.name).inlineTitle()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) { Button("Save") {
@@ -103,9 +103,9 @@ struct ApplyWarmupPreset: View {
                 }
                 Section {
                     Toggle(routineID == nil ? "Replace pending warm-ups" : "Replace warm-ups", isOn: $replacing)
-                    if routineID == nil { Toggle("Save to these day variants", isOn: $future) }
+                    if routineID == nil { Toggle("Save to this day", isOn: $future) }
                 }
-            }.formStyle(.grouped).navigationTitle("Apply warm-up preset").inlineTitle()
+            }.formStyle(.grouped).navigationTitle("Apply Warm-up Preset").inlineTitle()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) { Button("Apply") {

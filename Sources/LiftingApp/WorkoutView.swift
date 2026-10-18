@@ -41,9 +41,10 @@ struct WorkoutView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     HStack(spacing: 12) {
                     Menu {
-                        Button("Workout Note", systemImage: "note.text") { sessionNotes = true }.accessibilityIdentifier("workout.note")
+                        Button("Name and Note", systemImage: "note.text") { sessionNotes = true }.accessibilityIdentifier("workout.note")
                         Button("Superset / Circuit", systemImage: "link") { linking = true }.disabled((store.data.activeSession?.exercises.count ?? 0) < 2).accessibilityIdentifier("workout.link")
-                        Button("Apply warm-up preset") { warmups = true }
+                        Button("Apply Warm-up Preset", systemImage: "flame") { warmups = true }
+                        Divider()
                         Button("Collapse All", systemImage: "chevron.up") { store.perform { $0.setAllExercisesExpanded(false) } }.accessibilityIdentifier("workout.collapseAll")
                         Button("Expand All", systemImage: "chevron.down") { store.perform { $0.setAllExercisesExpanded(true) } }.accessibilityIdentifier("workout.expandAll")
                     } label: { Image(systemName: "ellipsis.circle") }.accessibilityLabel("Workout options").accessibilityIdentifier("workout.options")
@@ -58,10 +59,13 @@ struct WorkoutView: View {
             .sheet(isPresented: $finishing) { finishSheet }
             .sheet(isPresented: $sessionNotes) {
                 NavigationStack {
-                    Form { TextField("Workout name", text: Binding(get: { store.data.activeSession?.name ?? "" }, set: { value in if !value.isEmpty { store.editActive { $0.name = value } } })); TextField("Workout note", text: Binding(get: { store.data.activeSession?.notes ?? "" }, set: { value in store.editActive { $0.notes = value } }), axis: .vertical).lineLimit(5...12) }.formStyle(.grouped).navigationTitle("Workout note").toolbar { Button("Done") { sessionNotes = false } }
+                    Form {
+                        Section("Name") { SavedNameField(name: store.data.activeSession?.name ?? "") { value in store.editActive { $0.name = value } } }
+                        Section("Note") { TextField("Workout note", text: Binding(get: { store.data.activeSession?.notes ?? "" }, set: { value in store.editActive { $0.notes = value } }), axis: .vertical).lineLimit(5...12) }
+                    }.formStyle(.grouped).navigationTitle("Workout").inlineTitle()
+                    .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { sessionNotes = false } } }
                 }.sheetSize()
             }
-            .confirmationDialog("Discard this workout?", isPresented: $discard) { Button("Discard workout", role: .destructive, action: store.discard) }
         }.tint(Palette.tint(scheme))
         .alert("Could not complete action", isPresented: Binding(get: { store.error != nil }, set: { if !$0 { store.error = nil } })) { Button("OK") { store.error = nil } } message: { Text(store.error ?? "") }
         .onAppear {
@@ -80,15 +84,29 @@ struct WorkoutView: View {
             Form {
                 if let session = store.data.activeSession {
                     Section {
-                        HStack { MetricTile(value: "\(session.completedSets)", label: "Sets"); MetricTile(value: "\(number(store.data.settings.unit.display(session.volume), decimals: 0))", label: "Volume (\(store.data.settings.unit.rawValue))") }
-                        Text("Duration: \(clockText(Date().timeIntervalSince(session.startedAt)))").foregroundStyle(.secondary)
-                        if session.completedSets < session.totalSets { Text("\(session.totalSets - session.completedSets) sets will be saved as skipped.").font(.subheadline).foregroundStyle(.secondary) }
+                        HStack {
+                            MetricTile(value: "\(session.completedSets)", label: "Sets")
+                            MetricTile(value: clockText(Date().timeIntervalSince(session.startedAt)), label: "Duration")
+                            MetricTile(value: "\(number(store.data.settings.unit.display(session.volume), decimals: 0))", label: "Volume (\(store.data.settings.unit.rawValue))")
+                        }.padding(.vertical, 4)
+                    } footer: {
+                        if session.completedSets == 0 { Text("Log at least one set to save this workout.") }
+                        else if session.completedSets < session.totalSets { Text("\(counted(session.totalSets - session.completedSets, "unchecked set")) will be saved as skipped.") }
                     }
                     Section("Workout note") { TextField("Note", text: Binding(get: { store.data.activeSession?.notes ?? "" }, set: { value in store.editActive { $0.notes = value } }), axis: .vertical).lineLimit(3...6) }
-                    Button("Save workout") { store.finish(); finishing = false }.disabled(session.completedSets == 0).accessibilityIdentifier("workout.save")
-                    Button("Discard workout", role: .destructive) { finishing = false; discard = true }
+                    Section {
+                        Button { store.finish(); finishing = false } label: { Text("Save Workout").frame(maxWidth: .infinity, minHeight: 26) }.buttonStyle(AccentButtonStyle()).disabled(session.completedSets == 0).accessibilityIdentifier("workout.save")
+                            .listRowBackground(Color.clear).listRowInsets(EdgeInsets())
+                    }
+                    Section { Button("Discard Workout", role: .destructive) { discard = true }.frame(maxWidth: .infinity) }
                 }
-            }.formStyle(.grouped).navigationTitle("Finish workout").inlineTitle().toolbar { ToolbarItem(placement: .cancellationAction) { Button("Back") { finishing = false } } }
+            }.formStyle(.grouped).navigationTitle("Finish Workout").inlineTitle()
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Back") { finishing = false } }
+            }
+            .confirmationDialog("Discard this workout?", isPresented: $discard, titleVisibility: .visible) {
+                Button("Discard Workout", role: .destructive) { finishing = false; store.discard() }
+            } message: { Text("Logged sets in this workout will not be saved.") }
         }.sheetSize()
     }
 }
@@ -147,16 +165,17 @@ struct WorkoutExerciseCard: View {
                         }.frame(minHeight: 44).contentShape(Rectangle())
                     }.buttonStyle(.plain).accessibilityLabel("\(item.collapsed == true ? "Expand" : "Collapse") \(item.name)").accessibilityIdentifier("workout.\(exerciseID).collapse").accessibilityValue("\(item.collapsed == true ? "Collapsed" : "Expanded"), \(item.sets.filter { $0.completedAt != nil }.count) of \(item.sets.count) sets")
                     Menu {
-                        Button("Substitute") { substituting = true }
-                        Button("Superset / Circuit") { linking = true }
-                        Button("Add Warm-up") { appendSet(item, warmup: true); store.perform { $0.setExerciseExpanded(exerciseID, expanded: true, focus: true) } }
-                        Button("Apply warm-up preset") { warmups = true }.disabled(item.mode == .cardio)
-                        Button("Prescription") { editVariant = store.data.variant(item.variantID) }
-                        Button("Plate Calculator") { plates = true }.disabled(item.mode == .cardio)
+                        Button("Substitute", systemImage: "arrow.triangle.2.circlepath") { substituting = true }
+                        Button("Superset / Circuit", systemImage: "link") { linking = true }
                         Divider()
-                        Button("Move up") { store.perform { $0.moveSessionExercise(exerciseID, offset: -1) } }
-                        Button("Move down") { store.perform { $0.moveSessionExercise(exerciseID, offset: 1) } }
-                        Button("Remove", role: .destructive) { removing = true }
+                        Button("Add Warm-up Set", systemImage: "plus") { appendSet(item, warmup: true); store.perform { $0.setExerciseExpanded(exerciseID, expanded: true, focus: true) } }.disabled(item.mode == .cardio)
+                        Button("Apply Warm-up Preset", systemImage: "flame") { warmups = true }.disabled(item.mode == .cardio)
+                        Button("Edit Prescription", systemImage: "slider.horizontal.3") { editVariant = store.data.variant(item.variantID) }
+                        Button("Plate Calculator", systemImage: "circle.grid.2x1") { plates = true }.disabled(item.mode == .cardio)
+                        Divider()
+                        Button("Move Up", systemImage: "arrow.up") { store.perform { $0.moveSessionExercise(exerciseID, offset: -1) } }.disabled(store.data.activeSession?.exercises.first?.id == exerciseID)
+                        Button("Move Down", systemImage: "arrow.down") { store.perform { $0.moveSessionExercise(exerciseID, offset: 1) } }.disabled(store.data.activeSession?.exercises.last?.id == exerciseID)
+                        Button("Remove from Workout", systemImage: "trash", role: .destructive) { removing = true }
                     } label: { Image(systemName: "ellipsis").frame(width: 28, height: 44) }.compactMenu().accessibilityLabel("Options for \(item.name)").accessibilityIdentifier("workout.\(exerciseID).options")
                 }
                 if item.collapsed != true {
@@ -165,7 +184,7 @@ struct WorkoutExerciseCard: View {
                         Spacer(minLength: 2)
                         Button { restEdit = NumericEdit(title: "Rest (seconds)", value: Double(item.restSeconds), step: 15, maximum: 86400, integer: true) { value in store.editExercise(exerciseID) { $0.restSeconds = Int(value ?? 0) } } } label: { Label(clockText(Double(item.restSeconds)), systemImage: "timer") }.accessibilityLabel("Exercise rest")
                         if item.mode == .strength {
-                            Button { workingWeight = true } label: { Text("\(number(store.data.settings.unit.display(item.workingLoad(fallback: store.data.variant(item.variantID)?.workingWeight ?? 0)))) \(store.data.settings.unit.rawValue)").monospacedDigit() }.accessibilityLabel("Set working weight for \(item.name)").accessibilityIdentifier("workout.\(exerciseID).workingWeight")
+                            Button { workingWeight = true } label: { Label("\(number(store.data.settings.unit.display(item.workingLoad(fallback: store.data.variant(item.variantID)?.workingWeight ?? 0)))) \(store.data.settings.unit.rawValue)", systemImage: "scalemass").monospacedDigit() }.accessibilityLabel("Set working weight for \(item.name)").accessibilityIdentifier("workout.\(exerciseID).workingWeight")
                         }
                     }.font(.subheadline).buttonStyle(.plain).foregroundStyle(Palette.tint(scheme)).frame(minHeight: 32)
                     if let from = item.substitutedFrom { Text("Instead of \(from)").font(.caption).foregroundStyle(.secondary) }
@@ -260,12 +279,14 @@ struct WorkingWeightEditor: View {
     var body: some View {
         NavigationStack {
             Form {
-                HStack { Text("Weight (\(store.data.settings.unit.rawValue))"); TextField("0", value: $weight, format: .number).multilineTextAlignment(.trailing) }
-                Toggle("Save to this day variant", isOn: $future)
-            }.formStyle(.grouped).navigationTitle("Working weight").inlineTitle()
+                Section {
+                    HStack { Text("Weight (\(store.data.settings.unit.rawValue))"); Spacer(); TextField("0", value: $weight, format: .number).labelsHidden().multilineTextAlignment(.trailing).frame(maxWidth: 110) }
+                } footer: { Text("Updates remaining working sets and percentage-based sets in this workout.") }
+                Section { Toggle("Save to this day", isOn: $future) }
+            }.formStyle(.grouped).navigationTitle("Working Weight").inlineTitle()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) { Button("Apply") { store.perform { try $0.setWorkingWeight($0.settings.unit.kilograms(weight), for: exerciseID, saveFuture: future) }; dismiss() }.disabled(!weight.isFinite || weight < 0) }
+                ToolbarItem(placement: .confirmationAction) { Button("Apply") { if store.perform({ try $0.setWorkingWeight($0.settings.unit.kilograms(weight), for: exerciseID, saveFuture: future) }) { dismiss() } }.disabled(!weight.isFinite || weight < 0) }
             }
         }.onAppear { if let item = store.data.activeSession?.exercises.first(where: { $0.id == exerciseID }) { weight = store.data.settings.unit.display(item.workingLoad(fallback: store.data.variant(item.variantID)?.workingWeight ?? 0)) } }
     }

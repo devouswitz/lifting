@@ -40,13 +40,13 @@ open -n '../Lifting Preview.app' --args --demo
 - Drop/MYO targets use the same exact reps, rep ranges, no-count, RPE, time, and distance controls as ordinary sets. Percentage fields accept typed values and 5-point adjustments. Failure is also available as a set type.
 - Superset / Circuit: link two or more exercises in a day editor or live workout. Choose transition and round rest. Logging advances the focused panel around the group; warm-ups and drop/MYO chains finish before moving on. Uneven set counts skip completed movements. Live links can be saved to the day.
 - Warm-up presets: create named, ordered schemes in Settings, or save a prescription's current warm-ups. Apply a preset to selected day exercises or live exercises. Replace or append warm-ups, and optionally save live changes to the day variants. Completed warm-ups are retained. Presets copy their plans, so editing a preset does not rewrite existing days.
-- Save to this day variant: makes live load or drop/MYO changes recur. Otherwise they apply to the current workout.
+- Save to this day: makes live load, drop/MYO, warm-up, or link changes recur. Otherwise they apply to the current workout.
 - Tap an exercise header to expand or collapse it. Opening one focuses that exercise. Warm-ups and working sets have separate compact tables. Automatic collapse after completion is optional in Settings. Workout options include Collapse All and Expand All.
-- Each set's menu edits today's targets, load rule, percentage, type, and rest. Range targets stay visible without assuming an exact rep count. Tap the range to optionally record reps completed. Uncounted reps do not contribute to rep totals, volume, estimated max, or automatic progression.
-- History: browse dated results or a selectable monthly calendar with comparisons to the previous month. Open a workout to inspect or edit its sets and notes.
+- Each set's menu (tap the set number, or long-press the row) edits today's targets, logs reps, time, or distance, sets rest, changes type, or deletes the set. Range targets stay visible without assuming an exact rep count. Tap the range to optionally record reps completed. Uncounted reps do not contribute to rep totals, volume, estimated max, or automatic progression.
+- History: browse dated results or a selectable monthly calendar with comparisons to the previous month. Rest days count only days that have passed. Open a workout to inspect or edit its sets and notes; swipe a set in Edit to delete it.
 - Progress: choose a program or All programs, then compare separate exercise and day tracks, choose a metric and date range, or scrub a graph for actual recorded values. Exercise details include dated results.
 - Progress > Muscles: compare logged sets or load volume by primary muscle, with optional half-set credit for secondary muscles. Program and date filters apply. Warm-ups and cardio are excluded; drop/MYO sets count individually. Unknown rep counts contribute no invented volume. Muscle assignments can be edited with an exercise; new sessions snapshot them.
-- Settings: units, appearance, rest preferences, plate sizes, JSON backup/restore, and CSV import/export.
+- Settings: units and appearance, workout preferences, plate sizes, folder backup/sync, JSON backup/restore, and CSV import/export.
 
 Weights are stored in kilograms and converted for display. Warm-up and drop percentages round down to the variant's increment. RPE is a user-entered target or observation.
 

@@ -20,4 +20,4 @@ All state stays in local JSON. Exercise definitions and day variants have separa
 
 ## Appearance
 
-Neutral grouped surfaces, compact tables, and a single green action accent. No decorative headings or promotional copy. Native SwiftUI navigation, sheets, and controls support light and dark themes.
+Neutral grouped surfaces with one card style (12 pt corners, hairline border), compact tables, and a single green action accent. Menus use title-case items with SF Symbols. Prescription rows show the resolved load (for example 47.5 lb (50%) × 5) with the same W1/1/D1/A/M1/F set badges as the live workout. While a workout is active, the Train screen offers Resume instead of disabled Start controls, and a resume bar sits above the tab bar. No decorative headings or promotional copy. Native SwiftUI navigation, sheets, and controls support light and dark themes.

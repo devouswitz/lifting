@@ -84,7 +84,7 @@ struct HistoryView: View {
                 }.buttonStyle(.plain).accessibilityIdentifier("history.workout.\(session.id)")
                 if index < sessions.count - 1 { Divider().padding(.leading, 58) }
             }
-        }.background(Palette.surface(scheme), in: RoundedRectangle(cornerRadius: 12))
+        }.card(padding: 0)
     }
 }
 
@@ -155,7 +155,7 @@ struct SessionDetail: View {
             } else { EmptyState(symbol: "clock", text: "Workout unavailable.") }
         }
         .navigationTitle(session.map { store.data.title(for: $0) } ?? "Workout").inlineTitle()
-        .toolbar { if session != nil { Button(editing ? "Done" : "Edit") { editing.toggle() }.accessibilityIdentifier("history.edit") } }
+        .toolbar { if session != nil { Button(editing ? "Done" : "Edit") { editing.toggle() }.fontWeight(editing ? .semibold : .regular).accessibilityIdentifier("history.edit") } }
         .confirmationDialog("Delete this workout?", isPresented: $deleting) {
             Button("Delete workout", role: .destructive) {
                 store.perform { $0.sessions.removeAll { $0.id == sessionID } }
@@ -175,7 +175,7 @@ struct SessionDetail: View {
                         detailMetric("Volume (\(store.data.settings.unit.rawValue))", value: number(store.data.settings.unit.display(session.volume), decimals: 0))
                     }
                     if !session.notes.isEmpty { Text(session.notes).font(.subheadline).textSelection(.enabled) }
-                }.padding(16).background(Palette.surface(scheme), in: RoundedRectangle(cornerRadius: 12))
+                }.card(padding: 16)
                 ForEach(session.exercises) { exercise in
                     VStack(alignment: .leading, spacing: 13) {
                         NavigationLink { ExerciseProgress(exerciseID: exercise.exerciseID, initialVariantID: exercise.variantID, programID: session.programID) } label: {
@@ -192,7 +192,7 @@ struct SessionDetail: View {
                         HistorySetTable(sets: exercise.sets, unit: store.data.settings.unit)
                         if !exercise.recurringNotes.isEmpty { Label(exercise.recurringNotes, systemImage: "pin.fill").font(.caption).foregroundStyle(.secondary) }
                         if !exercise.notes.isEmpty { Text(exercise.notes).font(.subheadline).textSelection(.enabled) }
-                    }.padding(16).background(Palette.surface(scheme), in: RoundedRectangle(cornerRadius: 12))
+                    }.card(padding: 16)
                 }
                 Button("Delete workout", role: .destructive) { deleting = true }.font(.subheadline).padding(.horizontal, 4)
             }.padding(16)
@@ -216,7 +216,7 @@ struct SessionDetail: View {
                         value.endedAt = date.addingTimeInterval(duration)
                     }
                 }))
-                TextField("Name", text: Binding(get: { self.session?.name ?? "" }, set: { value in update { $0.name = value } }))
+                SavedNameField(name: session.name) { value in update { $0.name = value } }
                 TextField("Workout note", text: Binding(get: { self.session?.notes ?? "" }, set: { value in update { $0.notes = value } }), axis: .vertical)
             }
             ForEach(session.exercises) { exercise in
@@ -232,6 +232,9 @@ struct SessionDetail: View {
                                 }
                             }), unit: store.data.settings.unit)
                         } label: { setRow(set) }
+                    }.onDelete { offsets in
+                        let ids = offsets.map { exercise.sets[$0].id }
+                        update { value in if let index = value.exercises.firstIndex(where: { $0.id == exercise.id }) { value.exercises[index].sets.removeAll { ids.contains($0.id) } } }
                     }
                     TextField("Note for this exercise", text: Binding(get: { self.session?.exercises.first { $0.id == exercise.id }?.notes ?? "" }, set: { value in
                         update { session in

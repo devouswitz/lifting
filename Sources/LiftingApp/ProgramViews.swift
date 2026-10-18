@@ -22,8 +22,8 @@ struct ProgramLibrary: View {
                         if program.id == store.data.activeProgramID { Image(systemName: "checkmark").foregroundStyle(.tint).accessibilityLabel("Loaded") }
                         else { Button("Load") { if store.perform({ try $0.loadProgram(program.id) }) { dismiss() } }.buttonStyle(.bordered) }
                     }.contextMenu {
-                        Button("Move up") { moveProgram(program.id, by: -1) }
-                        Button("Move down") { moveProgram(program.id, by: 1) }
+                        Button("Move Up") { moveProgram(program.id, by: -1) }
+                        Button("Move Down") { moveProgram(program.id, by: 1) }
                     }
                 }.onMove { source, target in store.perform { $0.programs.move(fromOffsets: source, toOffset: target) } }
                 Button("New Program", systemImage: "plus") { creating = true }
@@ -98,8 +98,8 @@ struct ProgramEditor: View {
                             NavigationLink { RoutineEditor(routineID: id) } label: { HStack { Text(day.name); Spacer(); if program.nextDayID == id { Chip(title: "Next") } } }
                                 .contextMenu {
                                     Button("Set as Next") { store.perform { try $0.selectNextDay(id, in: programID) } }
-                                    Button("Move up") { move(id, by: -1) }
-                                    Button("Move down") { move(id, by: 1) }
+                                    Button("Move Up") { move(id, by: -1) }
+                                    Button("Move Down") { move(id, by: 1) }
                                     Button("Save as Template") { store.perform { _ = try $0.saveDayAsTemplate(id) } }
                                     Button("Remove Day", role: .destructive) { store.perform { $0.removeDay(id) } }
                                 }

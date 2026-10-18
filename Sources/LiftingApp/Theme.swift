@@ -12,13 +12,14 @@ extension Color { init(hex: UInt) { self.init(red: Double((hex >> 16) & 255) / 2
 
 struct CardStyle: ViewModifier {
     @Environment(\.colorScheme) var scheme
+    var padding: CGFloat = 12
     func body(content: Content) -> some View {
-        content.padding(12).background(Palette.surface(scheme), in: RoundedRectangle(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.primary.opacity(0.07), lineWidth: 0.5))
+        content.padding(padding).background(Palette.surface(scheme), in: RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.primary.opacity(0.07), lineWidth: 0.5))
     }
 }
 extension View {
-    func card() -> some View { modifier(CardStyle()) }
+    func card(padding: CGFloat = 12) -> some View { modifier(CardStyle(padding: padding)) }
     @ViewBuilder func inlineTitle() -> some View {
         #if os(iOS)
         self.navigationBarTitleDisplayMode(.inline)
@@ -31,8 +32,13 @@ extension View {
 
 struct Chip: View {
     let title: String
+    var accent = false
     @Environment(\.colorScheme) var scheme
-    var body: some View { Text(title).font(.caption.weight(.medium)).padding(.horizontal, 9).padding(.vertical, 5).background(Palette.secondary(scheme), in: Capsule()) }
+    var body: some View {
+        Text(title).font(.caption.weight(.medium)).padding(.horizontal, 8).padding(.vertical, 3)
+            .foregroundStyle(accent ? Palette.tint(scheme) : .primary)
+            .background(accent ? Palette.tint(scheme).opacity(0.14) : Palette.secondary(scheme), in: Capsule())
+    }
 }
 
 struct EmptyState: View {

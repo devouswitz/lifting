@@ -13,22 +13,26 @@ struct VariantEditor: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Variant") {
-                    Text(exercise?.name ?? "Exercise").font(.headline)
-                    TextField("Variant name", text: $variant.label)
-                }
+                Section {
+                    TextField("Track name", text: $variant.label)
+                } header: { Text("Track") }
                 Section("Load and rest") {
-                    HStack { Text("Working weight (\(unit.rawValue))"); Spacer(); TextField("0", value: Binding(get: { unit.display(variant.workingWeight) }, set: { variant.workingWeight = unit.kilograms($0) }), format: .number).multilineTextAlignment(.trailing).frame(maxWidth: 110) }
-                    HStack { Text("Rounding down (\(unit.rawValue))"); Spacer(); TextField("0", value: Binding(get: { unit.display(variant.rounding) }, set: { variant.rounding = unit.kilograms($0) }), format: .number).multilineTextAlignment(.trailing).frame(maxWidth: 110) }
-                    Stepper("Rest: \(clockText(Double(variant.restSeconds)))", value: $variant.restSeconds, in: 0...3600, step: 15)
+                    if exercise?.mode != .cardio {
+                        HStack { Text("Working weight (\(unit.rawValue))"); Spacer(); TextField("0", value: Binding(get: { unit.display(variant.workingWeight) }, set: { variant.workingWeight = unit.kilograms($0) }), format: .number).labelsHidden().multilineTextAlignment(.trailing).frame(maxWidth: 110) }
+                        HStack { Text("Round % weights down to (\(unit.rawValue))"); Spacer(); TextField("0", value: Binding(get: { unit.display(variant.rounding) }, set: { variant.rounding = unit.kilograms($0) }), format: .number).labelsHidden().multilineTextAlignment(.trailing).frame(maxWidth: 80) }
+                    }
+                    Stepper("Rest between sets: \(clockText(Double(variant.restSeconds)))", value: $variant.restSeconds, in: 0...3600, step: 15)
                 }
                 Section("Sets") {
-                    ForEach($variant.sets) { $plan in
+                    ForEach(Array($variant.sets.enumerated()), id: \.element.id) { index, $plan in
                         NavigationLink { PlanEditor(plan: $plan, unit: unit) } label: {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(plan.kind.title).font(.headline)
-                                Text(setPlanSummary(plan, unit: unit)).font(.subheadline).foregroundStyle(.secondary)
-                            }.padding(.vertical, 3)
+                            HStack(spacing: 12) {
+                                Text(setBadge(variant.sets.map(\.kind), index: index)).font(.subheadline.weight(.semibold)).monospacedDigit().foregroundStyle(.secondary).frame(minWidth: 26)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(prescribedSetSummary(plan, variant: variant, unit: unit)).font(.subheadline).monospacedDigit()
+                                    if ![.warmup, .working].contains(plan.kind) { Text(plan.kind.title).font(.caption).foregroundStyle(.secondary) }
+                                }
+                            }.padding(.vertical, 2)
                         }
                         .contextMenu {
                             Button("Duplicate") { var copy = plan; copy.id = UUID(); if let i = variant.sets.firstIndex(where: { $0.id == plan.id }) { variant.sets.insert(copy, at: i + 1) } }
@@ -38,30 +42,32 @@ struct VariantEditor: View {
                     .onDelete { variant.sets.remove(atOffsets: $0) }
                     .onMove { variant.sets.move(fromOffsets: $0, toOffset: $1) }
                     Menu {
-                        Button("Working set") { variant.sets.append(SetPlan(load: exercise?.mode == .strength ? .working : .none, reps: exercise?.mode == .cardio ? nil : 8, repCeiling: exercise?.mode == .cardio ? nil : 12, seconds: exercise?.mode == .cardio ? 1200 : nil)) }
-                        Button("Warm-up set") { variant.sets.insert(SetPlan(kind: .warmup, load: .percent, reps: 5, repCeiling: nil), at: 0) }
-                        Button("Drop sets") { technique = .drop }.disabled(exercise?.mode == .cardio)
-                        Button("MYO reps") { technique = .myo }.disabled(exercise?.mode == .cardio)
-                    } label: { Label("Add sets", systemImage: "plus") }
-                    Menu("Warm-up presets") {
+                        Button(exercise?.mode == .cardio ? "Interval" : "Working Set") { addWorkingSet() }
+                        if exercise?.mode != .cardio {
+                            Button("Warm-up Set") { addWarmup() }
+                            Button("Drop Sets") { technique = .drop }
+                            Button("MYO Reps") { technique = .myo }
+                        }
+                    } label: { Label("Add Sets", systemImage: "plus") }
+                    if exercise?.mode != .cardio { Menu {
                         ForEach(store.data.warmupPresets) { preset in Button(preset.name) { variant.sets = TrainingData.applyingWarmups(preset.sets, to: variant.sets, replacing: true) } }
                         Button("50% × 8, 70% × 5, 85% × 2") { variant.sets.removeAll { $0.kind == .warmup }; variant.sets.insert(contentsOf: [(50.0, 8), (70.0, 5), (85.0, 2)].map { SetPlan(kind: .warmup, load: .percent, percent: $0.0, reps: $0.1, repCeiling: nil) }, at: 0) }
                         Button("Save current warm-ups as preset") { savingWarmups = true }.disabled(!variant.sets.contains { $0.kind == .warmup })
-                        Button("Remove warm-ups") { variant.sets.removeAll { $0.kind == .warmup } }
-                    }
+                        Button("Remove warm-ups", role: .destructive) { variant.sets.removeAll { $0.kind == .warmup } }.disabled(!variant.sets.contains { $0.kind == .warmup })
+                    } label: { Label("Warm-up Presets", systemImage: "flame") } }
                 }
                 Section("Progression") {
                     Picker("Rule", selection: $variant.progression.mode) { ForEach(ProgressionMode.allCases) { Text($0.title).tag($0) } }
                     if variant.progression.mode != .manual {
-                        HStack { Text("Increase (\(unit.rawValue))"); Spacer(); TextField("0", value: Binding(get: { unit.display(variant.progression.increment) }, set: { variant.progression.increment = unit.kilograms($0) }), format: .number).multilineTextAlignment(.trailing).frame(maxWidth: 100) }
-                        Stepper("Deload after \(variant.progression.deloadAfter) misses", value: $variant.progression.deloadAfter, in: 0...10)
-                        HStack { Text("Deload %"); TextField("10", value: $variant.progression.deloadPercent, format: .number).multilineTextAlignment(.trailing) }
+                        HStack { Text("Increase (\(unit.rawValue))"); Spacer(); TextField("0", value: Binding(get: { unit.display(variant.progression.increment) }, set: { variant.progression.increment = unit.kilograms($0) }), format: .number).labelsHidden().multilineTextAlignment(.trailing).frame(maxWidth: 100) }
+                        Stepper(variant.progression.deloadAfter == 0 ? "Never deload" : "Deload after \(counted(variant.progression.deloadAfter, "miss"))", value: $variant.progression.deloadAfter, in: 0...10)
+                        if variant.progression.deloadAfter > 0 { HStack { Text("Deload by (%)"); Spacer(); TextField("10", value: $variant.progression.deloadPercent, format: .number).labelsHidden().multilineTextAlignment(.trailing).frame(maxWidth: 80) } }
                         Text(variant.progression.mode == .double ? "Adds weight next time when every working set reaches the top of its rep range." : "Adds weight next time when every working set reaches its target reps.").font(.footnote).foregroundStyle(.secondary)
                     }
                 }
-                Section("Recurring note") { TextField("Note for this variant", text: $variant.notes, axis: .vertical).lineLimit(3...8) }
+                Section("Note shown every session") { TextField("Optional", text: $variant.notes, axis: .vertical).lineLimit(3...8) }
                 if let validationError { Text(validationError).foregroundStyle(.red) }
-            }.formStyle(.grouped).navigationTitle("Prescription").inlineTitle()
+            }.formStyle(.grouped).navigationTitle(exercise?.name ?? "Prescription").inlineTitle()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) { Button("Save") {
@@ -78,6 +84,23 @@ struct VariantEditor: View {
             }.sheetSize() }
             .sheet(isPresented: $savingWarmups) { WarmupPresetEditor(preset: WarmupPreset(name: variant.label + " warm-up", sets: variant.sets.filter { $0.kind == .warmup })).environmentObject(store).sheetSize() }
         }
+    }
+}
+
+extension VariantEditor {
+    /// Copies the last working set so a new set keeps this exercise's targets.
+    func addWorkingSet() {
+        if var copy = variant.sets.last(where: { $0.kind != .warmup }) {
+            copy.id = UUID(); if [.drop, .myoActivation, .myoMini].contains(copy.kind) { copy.kind = .working; copy.load = exercise?.mode == .strength ? .working : .none; copy.restSeconds = nil }
+            variant.sets.append(copy)
+        } else if let exercise {
+            var plan = Variant.standard(for: exercise, label: "").sets[0]; plan.id = UUID(); variant.sets.append(plan)
+        }
+    }
+    /// Adds a warm-up after the existing warm-ups, matching the live workout's Add Warm-up Set.
+    func addWarmup() {
+        let position = (variant.sets.lastIndex { $0.kind == .warmup }).map { $0 + 1 } ?? 0
+        variant.sets.insert(SetPlan(kind: .warmup, load: .percent, reps: 5, repCeiling: nil), at: position)
     }
 }
 
@@ -156,8 +179,26 @@ func setPlanSummary(_ plan: SetPlan, unit: WeightUnit) -> String {
     if let seconds = plan.seconds { parts.append(clockText(seconds)) }
     if let meters = plan.meters { parts.append("\(number(meters)) m") }
     if let rpe = plan.rpe { parts.append("RPE \(number(rpe))") }
-    if let rest = plan.restSeconds { parts.append("\(rest)s rest") }
+    if let rest = plan.restSeconds { parts.append(rest == 0 ? "no rest" : "\(clockText(Double(rest))) rest") }
     return parts.joined(separator: " · ")
+}
+
+/// Set summary with the load resolved against the variant's working weight, e.g. "47.5 lb (50%) × 5 · RPE 7".
+func prescribedSetSummary(_ plan: SetPlan, variant: Variant, unit: WeightUnit) -> String {
+    var load = ""
+    if let weight = plan.resolvedWeight(working: variant.workingWeight, increment: variant.rounding) {
+        load = "\(number(unit.display(weight))) \(unit.rawValue)"
+        if plan.load == .percent { load += " (\(number(plan.percent))%)" }
+    }
+    var parts: [String] = []
+    if let target = plan.repTarget { parts.append(load.isEmpty ? "\(target) reps" : "\(load) × \(target)") }
+    else if !load.isEmpty { parts.append(load) }
+    if plan.amrap { parts.append("AMRAP") }
+    if let seconds = plan.seconds { parts.append(clockText(seconds)) }
+    if let meters = plan.meters { parts.append("\(number(meters)) m") }
+    if let rpe = plan.rpe { parts.append("RPE \(number(rpe))") }
+    if let rest = plan.restSeconds { parts.append(rest == 0 ? "no rest" : "\(clockText(Double(rest))) rest") }
+    return parts.isEmpty ? "No targets" : parts.joined(separator: " · ")
 }
 
 enum TechniqueKind: String, Identifiable { case drop, myo; var id: String { rawValue }; var title: String { self == .drop ? "Drop sets" : "MYO reps" } }
@@ -206,7 +247,7 @@ struct TechniqueEditor: View {
                     }
                     Toggle(live ? "Replace remaining work sets" : "Replace working sets", isOn: $replace)
                 }
-                if live { Section { Toggle("Save to this day variant", isOn: $saveFuture) } }
+                if live { Section { Toggle("Save to this day", isOn: $saveFuture) } }
                 Section("Preview") {
                     ForEach(plans) { plan in VStack(alignment: .leading, spacing: 5) { Text(plan.kind.title).font(.headline); Text(setPlanSummary(plan, unit: store.data.settings.unit)).font(.subheadline).foregroundStyle(.secondary) } }
                 }

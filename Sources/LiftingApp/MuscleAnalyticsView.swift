@@ -36,7 +36,7 @@ struct MuscleAnalyticsView: View {
                     if row.id != rows.last?.id { Divider() }
                 }
             }
-            Text(volume ? "Completed non-warm-up sets with recorded weight and reps. Volume is assigned to the primary muscle." : "Completed non-warm-up sets, including drop and MYO mini-sets. Secondary muscles count as half a set when enabled.")
+            Text(volume ? "Completed work sets with weight and reps, credited to the primary muscle." : "Completed work sets, including drop and MYO mini-sets. Warm-ups are excluded.")
                 .font(.caption).foregroundStyle(.secondary)
         }
     }

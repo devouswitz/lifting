@@ -25,17 +25,18 @@ struct SettingsView: View {
     func setting<T>(_ key: WritableKeyPath<LiftingCore.Settings, T>) -> Binding<T> { Binding(get: { store.data.settings[keyPath: key] }, set: { value in store.perform { $0.settings[keyPath: key] = value } }) }
     var body: some View {
         Form {
-            Section("Units") {
-                Picker("Weight", selection: setting(\.unit)) { ForEach(WeightUnit.allCases) { Text($0.rawValue).tag($0) } }.pickerStyle(.segmented)
+            Section("General") {
+                Picker("Weight unit", selection: setting(\.unit)) { ForEach(WeightUnit.allCases) { Text($0.rawValue).tag($0) } }.pickerStyle(.segmented)
+                Picker("Appearance", selection: setting(\.theme)) { Text("System").tag("system"); Text("Light").tag("light"); Text("Dark").tag("dark") }.pickerStyle(.segmented)
             }
             Section("Workout") {
-                NavigationLink("Warm-up presets") { WarmupPresetLibrary() }.accessibilityIdentifier("settings.warmups")
+                NavigationLink("Warm-up Presets") { WarmupPresetLibrary() }.accessibilityIdentifier("settings.warmups")
                 Toggle("Auto-start rest timer", isOn: setting(\.autoRest))
                 Toggle("Auto-collapse completed exercises", isOn: Binding(get: { store.data.settings.autoCollapseCompleted == true }, set: { value in store.perform { $0.settings.autoCollapseCompleted = value } }))
                 Toggle("Haptics", isOn: setting(\.haptics))
                 Toggle("Keep screen awake", isOn: setting(\.keepAwake))
                 #if os(iOS)
-                Button("Enable background rest alerts") {
+                Button("Allow Rest Alerts in Background") {
                     UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { granted, error in
                         Task { @MainActor in notificationStatus = granted ? "Background rest alerts enabled." : "Enable alerts in iOS Settings."; if let error { store.error = error.localizedDescription } }
                     }
@@ -44,26 +45,23 @@ struct SettingsView: View {
                 #endif
             }
             Section("Plates") {
-                HStack { Text("Bar (\(store.data.settings.unit.rawValue))"); TextField("0", value: Binding(get: { store.data.settings.unit.display(store.data.settings.barWeight) }, set: { value in store.perform { $0.settings.barWeight = $0.settings.unit.kilograms(value) } }), format: .number).multilineTextAlignment(.trailing) }
-                NavigationLink("Available plate sizes") { PlateInventoryView() }
-                Button("Plate calculator") { plates = true }
-            }
-            Section("Appearance") {
-                Picker("Theme", selection: setting(\.theme)) { Text("System").tag("system"); Text("Light").tag("light"); Text("Dark").tag("dark") }.pickerStyle(.segmented)
+                HStack { Text("Bar weight (\(store.data.settings.unit.rawValue))"); Spacer(); TextField("0", value: Binding(get: { store.data.settings.unit.display(store.data.settings.barWeight) }, set: { value in store.perform { $0.settings.barWeight = $0.settings.unit.kilograms(value) } }), format: .number).labelsHidden().multilineTextAlignment(.trailing).frame(maxWidth: 90) }
+                NavigationLink("Plate Sizes") { PlateInventoryView() }
+                Button("Plate Calculator") { plates = true }
             }
             folderSyncSection
-            Section("Data") {
-                Button("Export backup") {
+            Section {
+                Button("Export Backup") {
                     do { document = BackupDocument(bytes: try LocalRepository.encode(store.data)); contentType = .json; exportName = "Lifting-\(Date().formatted(.iso8601.year().month().day().dateSeparator(.dash)))"; exporting = true } catch { store.error = error.localizedDescription }
                 }.accessibilityIdentifier("settings.export")
-                Button("Export logged sets as CSV") { document = BackupDocument(bytes: LocalRepository.csv(store.data)); contentType = .commaSeparatedText; exportName = "Lifting-sets"; exporting = true }
-                Button("Import workout data") { importingCSV = true }.accessibilityIdentifier("settings.importCSV")
-                Button("Import backup") { importing = true }.accessibilityIdentifier("settings.import")
-                if let date = store.data.settings.lastBackupAt { Text("Last backup: \(date.formatted(date: .abbreviated, time: .omitted))").font(.footnote).foregroundStyle(.secondary) }
-                Text("Stored on this device. Folder backup and sync are optional.").font(.footnote).foregroundStyle(.secondary)
-                if store.storageBlocked { Text("Your local files were preserved. Import a valid backup to recover.").foregroundStyle(.red) }
+                Button("Export Logged Sets (CSV)") { document = BackupDocument(bytes: LocalRepository.csv(store.data)); contentType = .commaSeparatedText; exportName = "Lifting-sets"; exporting = true }
+                Button("Import Workout Data") { importingCSV = true }.accessibilityIdentifier("settings.importCSV")
+                Button("Restore Backup") { importing = true }.accessibilityIdentifier("settings.import")
+                if store.storageBlocked { Text("Your local files were preserved. Restore a valid backup to recover.").foregroundStyle(.red) }
+            } header: { Text("Data") } footer: {
+                if let date = store.data.settings.lastBackupAt { Text("Last exported \(date.formatted(date: .abbreviated, time: .omitted)).") }
             }
-            Section { LabeledContent("Version", value: "1.0"); Text("Backup files include programs, templates, variants, history, and the active workout.").font(.footnote).foregroundStyle(.secondary) }
+            Section { LabeledContent("Version", value: "1.0") }
         }.formStyle(.grouped).navigationTitle("Settings")
         .fileExporter(isPresented: $exporting, document: document, contentType: contentType, defaultFilename: exportName) { result in
             switch result { case .success: if contentType == .json { store.perform { $0.settings.lastBackupAt = Date() } }; case .failure(let error): store.error = error.localizedDescription }
@@ -108,7 +106,7 @@ struct SettingsView: View {
                 if store.syncConfiguration.bookmark != nil {
                     Button("Disconnect folder") { store.configureSync { $0.bookmark = nil; $0.name = ""; $0.automaticBackup = false; $0.deviceSync = false } }
                 }
-            } header: { Text("Backup and sync") } footer: { Text("Optional. Choose the same iCloud Drive folder on each device. Uses your available storage. Sync runs while the app is open; routines and history merge after the active workout ends. Backups include the active workout.") }
+            } header: { Text("Backup and sync") } footer: { Text("Choose the same iCloud Drive folder on each device. Sync runs while the app is open. History merges after the active workout ends.") }
     }
     private func chooseFolder() {
         #if os(macOS)
@@ -138,7 +136,11 @@ struct PlateInventoryView: View {
         Form {
             Section("\(unit.rawValue) per plate") {
                 ForEach(sizes.sorted(by: >), id: \.self) { value in HStack { Text(number(value)); Spacer(); Button(role: .destructive) { save(sizes.filter { $0 != value }) } label: { Image(systemName: "minus.circle") }.buttonStyle(.plain).accessibilityLabel("Remove \(number(value)) plate") } }
-                HStack { TextField("Plate size", text: $newSize); Button("Add") { if let value = Double(newSize), value.isFinite, value > 0, !sizes.contains(value) { save(sizes + [value]); newSize = "" } } }
+                HStack { TextField("Plate size", text: $newSize).labelsHidden()
+                    #if os(iOS)
+                    .keyboardType(.decimalPad)
+                    #endif
+                    Button("Add") { if let value = Double(newSize.replacingOccurrences(of: ",", with: ".")), value.isFinite, value > 0, !sizes.contains(value) { save(sizes + [value]); newSize = "" } }.disabled(Double(newSize.replacingOccurrences(of: ",", with: ".")) == nil) }
             }
         }.formStyle(.grouped).navigationTitle("Plate sizes").inlineTitle()
     }
@@ -155,7 +157,7 @@ struct PlateView: View {
         NavigationStack {
             Form {
                 Section {
-                    HStack { Text("Target (\(unit.rawValue))"); TextField("0", value: $target, format: .number).multilineTextAlignment(.trailing) }
+                    HStack { Text("Target (\(unit.rawValue))"); Spacer(); TextField("0", value: $target, format: .number).labelsHidden().multilineTextAlignment(.trailing).frame(maxWidth: 110) }
                     LabeledContent("Bar", value: "\(number(unit.display(store.data.settings.barWeight))) \(unit.rawValue)")
                 }
                 Section("Per side") {

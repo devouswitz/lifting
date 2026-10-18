@@ -71,8 +71,7 @@ struct HistoryCalendar: View {
                 }
             }
         }
-        .padding(16)
-        .background(Palette.surface(scheme), in: RoundedRectangle(cornerRadius: 12))
+        .card(padding: 16)
     }
 
     private func moveMonth(_ amount: Int) {
@@ -139,7 +138,12 @@ private struct HistoryMonthStats {
         }
         let completed = sessions.flatMap(\.exercises).flatMap(\.sets).filter { $0.completedAt != nil }
         workouts = sessions.count
-        restDays = max(0, (calendar.range(of: .day, in: .month, for: month)?.count ?? 0) - Set(sessions.map { calendar.startOfDay(for: $0.startedAt) }).count)
+        // Only days that have already happened can be rest days.
+        let elapsedDays: Int
+        if let interval, interval.end <= Date() { elapsedDays = calendar.range(of: .day, in: .month, for: month)?.count ?? 0 }
+        else if let interval, interval.start <= Date() { elapsedDays = (calendar.dateComponents([.day], from: interval.start, to: calendar.startOfDay(for: Date())).day ?? 0) + 1 }
+        else { elapsedDays = 0 }
+        restDays = max(0, elapsedDays - Set(sessions.map { calendar.startOfDay(for: $0.startedAt) }).count)
         sets = completed.count
         reps = completed.reduce(0) { $0 + ($1.reps ?? 0) }
         duration = sessions.reduce(0) { $0 + max(0, ($1.endedAt ?? $1.startedAt).timeIntervalSince($1.startedAt)) }

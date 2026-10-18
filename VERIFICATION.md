@@ -2,6 +2,16 @@
 
 Verified on October 18, 2026.
 
+## Polish and parity pass
+
+- Parity: warm-up, working, drop, MYO, and failure sets all use the same target editor (No count, Reps, Rep range, AMRAP, RPE, time, distance, rest). Checked natively on a warm-up set. The live set menu is now identical whether opened by tapping the set badge or long-pressing the row. Previously each opened a different subset of actions.
+- Prescription editor: Add Working Set copies the last working set's targets instead of a fixed 8-12 default. Add Warm-up Set goes after the existing warm-ups instead of at the top, matching the live workout. Rows show the resolved load, for example 47.5 lb (50%) × 5, using the live W1/1 badges. Checked natively.
+- Fixes: the history calendar counted the rest of the current month as rest days (24 on Oct 18; now 11). The workout name field could not be cleared and retyped. Discard confirmation now appears inside the Finish sheet rather than after it closes. The working-weight sheet stays open on a failed apply. History edit allows deleting a logged set.
+- Train: shows Resume Workout during an active workout instead of disabled Start buttons. Days without exercises show Add Exercises. The resume bar sits above the tab bar; it was below it on Mac. Checked natively.
+- Copy: removed duplicated or filler text, including the repeated track chip on every exercise row in a day, Settings footnotes, and "day variant" jargon. Menus and buttons use consistent title case and icons.
+- 59 core test cases, zero failures. Mac release build verified with Command Line Tools.
+- Not verified: iOS compilation and iPhone layout, including the per-tab resume bar placement on iOS. Xcode was installed during this pass but its license had not been accepted, so no simulator run was possible.
+
 ## Linked training, presets, analytics, imports, and optional sync
 
 - Core coverage now includes linked warm-up sequencing, transitions, round rest, uneven set counts, drop/MYO chains, unlinking/undo behavior, substitution, template copies, CSV/JSON persistence, named warm-up copies, live replacement retaining completed sets, and optional future scope.

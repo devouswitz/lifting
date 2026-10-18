@@ -32,15 +32,19 @@ struct TrainView: View {
                             NavigationLink { ProgramEditor(programID: program.id) } label: { Label("Add Day", systemImage: "plus").frame(maxWidth: .infinity, minHeight: 44) }.buttonStyle(.bordered)
                         }
                     } else {
-                        Button("Create Program") { creatingProgram = true }.buttonStyle(AccentButtonStyle())
+                        VStack(spacing: 14) {
+                            Text("No programs yet.").font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                            Button("Create Program") { creatingProgram = true }.buttonStyle(AccentButtonStyle())
+                        }.frame(maxWidth: .infinity).padding(.vertical, 40)
                     }
                 } else {
+                    if store.data.dayTemplates.isEmpty { Text("No templates yet.").font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: .infinity).padding(.vertical, 24) }
                     ForEach(store.data.dayTemplates) { day in dayCard(day, program: nil) }
                     Button { templateName = ""; creatingTemplate = true } label: { Label("New Template", systemImage: "plus").frame(maxWidth: .infinity, minHeight: 44) }.buttonStyle(.bordered)
                 }
             }.padding(16)
         }
-        .background(Palette.background(scheme)).navigationTitle("Workout")
+        .background(Palette.background(scheme)).navigationTitle("Train")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Menu {
@@ -86,9 +90,9 @@ struct TrainView: View {
             }.compactMenu().accessibilityIdentifier("train.program")
             Spacer()
             if let program = store.data.activeProgram {
-                NavigationLink { ProgramEditor(programID: program.id) } label: { Image(systemName: "folder").frame(width: 32, height: 32) }.buttonStyle(.plain).accessibilityLabel("Manage program")
-            } else {
-                Button { library = true } label: { Image(systemName: "folder").frame(width: 32, height: 32) }.buttonStyle(.plain).accessibilityLabel("Programs")
+                NavigationLink("Edit") { ProgramEditor(programID: program.id) }.font(.subheadline.weight(.medium)).buttonStyle(.plain).foregroundStyle(Palette.tint(scheme)).frame(minHeight: 32).accessibilityLabel("Edit program")
+            } else if !store.data.programs.isEmpty {
+                Button("Programs") { library = true }.font(.subheadline.weight(.medium)).buttonStyle(.plain).foregroundStyle(Palette.tint(scheme)).frame(minHeight: 32)
             }
         }.padding(.horizontal, 2)
     }
@@ -100,11 +104,11 @@ struct TrainView: View {
                 NavigationLink { RoutineEditor(routineID: day.id) } label: {
                     HStack(spacing: 8) {
                         Text(day.name).font(.headline)
-                        if next { Text("Next").font(.caption.weight(.medium)).foregroundStyle(Palette.tint(scheme)) }
+                        if next { Chip(title: "Next", accent: true) }
                     }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
                 }.buttonStyle(.plain)
-                if !next {
-                    Button { store.start(day) } label: { Image(systemName: "play.fill").frame(width: 32, height: 32) }.buttonStyle(.plain).foregroundStyle(Palette.tint(scheme)).disabled(store.data.activeSession != nil).accessibilityLabel("Start \(day.name)")
+                if !next && store.data.activeSession == nil {
+                    Button { store.start(day) } label: { Image(systemName: "play.fill").frame(width: 32, height: 32) }.buttonStyle(.plain).foregroundStyle(Palette.tint(scheme)).disabled(day.slots.isEmpty).accessibilityLabel("Start \(day.name)")
                 }
                 Menu { dayActions(day, program: program) } label: { Image(systemName: "ellipsis").frame(width: 28, height: 32) }.compactMenu().accessibilityLabel("Options for \(day.name)")
             }
@@ -120,21 +124,26 @@ struct TrainView: View {
                         }
                     }
                 }
-                Button { store.start(day) } label: { Text("Start Workout").frame(maxWidth: .infinity, minHeight: 24) }.buttonStyle(AccentButtonStyle()).disabled(store.data.activeSession != nil || day.slots.isEmpty).accessibilityIdentifier("train.startNext")
+                if day.slots.isEmpty {
+                    NavigationLink { RoutineEditor(routineID: day.id) } label: { Label("Add Exercises", systemImage: "plus").frame(maxWidth: .infinity, minHeight: 24) }.buttonStyle(.bordered)
+                } else if store.data.activeSession != nil {
+                    Button { store.workoutPresented = true } label: { Text("Resume Workout").frame(maxWidth: .infinity, minHeight: 24) }.buttonStyle(AccentButtonStyle()).accessibilityIdentifier("train.resume")
+                } else {
+                    Button { store.start(day) } label: { Text("Start Workout").frame(maxWidth: .infinity, minHeight: 24) }.buttonStyle(AccentButtonStyle()).accessibilityIdentifier("train.startNext")
+                }
             } else {
-                Text(day.slots.compactMap { store.data.variant($0.variantID).flatMap { store.data.exercise($0.exerciseID)?.name } }.joined(separator: ", "))
+                Text(day.slots.isEmpty ? "No exercises yet" : day.slots.compactMap { store.data.variant($0.variantID).flatMap { store.data.exercise($0.exerciseID)?.name } }.joined(separator: ", "))
                     .font(.subheadline).foregroundStyle(.secondary).lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
             }
-        }.padding(14).background(Palette.surface(scheme), in: RoundedRectangle(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.primary.opacity(0.08), lineWidth: 0.5))
+        }.card(padding: 14)
     }
 
     @ViewBuilder func dayActions(_ day: Routine, program: TrainingProgram?) -> some View {
         NavigationLink("Edit") { RoutineEditor(routineID: day.id) }
         if let program {
             Button("Set as Next") { store.perform { try $0.selectNextDay(day.id, in: program.id) } }
-            Button("Move up") { moveDay(day.id, in: program, by: -1) }
-            Button("Move down") { moveDay(day.id, in: program, by: 1) }
+            Button("Move Up") { moveDay(day.id, in: program, by: -1) }
+            Button("Move Down") { moveDay(day.id, in: program, by: 1) }
             Divider()
             Button("Save as Template") { store.perform { _ = try $0.saveDayAsTemplate(day.id) } }
             Button("Duplicate Day") { store.perform { _ = try $0.addDay(to: program.id, templateID: day.id, name: TrainingData.uniqueName(day.name + " copy", among: store.data.routines.map(\.name))) } }

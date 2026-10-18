@@ -17,6 +17,7 @@ struct RootView: View {
                     default: TrainView()
                     }
                 }.id(selected)
+                ResumeBar()
                 Divider()
                 HStack(spacing: 0) {
                     navigationTab("Train", symbol: "dumbbell", index: 0)
@@ -27,28 +28,15 @@ struct RootView: View {
             }
             #else
             TabView(selection: $selected) {
-            NavigationStack { TrainView() }.tabItem { Label("Train", systemImage: "dumbbell") }.tag(0)
-            NavigationStack { HistoryView() }.tabItem { Label("History", systemImage: "calendar") }.tag(1)
-            NavigationStack { ProgressView() }.tabItem { Label("Progress", systemImage: "chart.xyaxis.line") }.tag(2)
-            NavigationStack { SettingsView() }.tabItem { Label("Settings", systemImage: "gearshape") }.tag(3)
+            NavigationStack { TrainView() }.safeAreaInset(edge: .bottom, spacing: 0) { ResumeBar() }.tabItem { Label("Train", systemImage: "dumbbell") }.tag(0)
+            NavigationStack { HistoryView() }.safeAreaInset(edge: .bottom, spacing: 0) { ResumeBar() }.tabItem { Label("History", systemImage: "calendar") }.tag(1)
+            NavigationStack { ProgressView() }.safeAreaInset(edge: .bottom, spacing: 0) { ResumeBar() }.tabItem { Label("Progress", systemImage: "chart.xyaxis.line") }.tag(2)
+            NavigationStack { SettingsView() }.safeAreaInset(edge: .bottom, spacing: 0) { ResumeBar() }.tabItem { Label("Settings", systemImage: "gearshape") }.tag(3)
             }
             #endif
         }
         .tint(Palette.tint(scheme))
         .preferredColorScheme(store.data.settings.theme == "system" ? nil : store.data.settings.theme == "dark" ? .dark : .light)
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            if let session = store.data.activeSession, !store.workoutPresented {
-                Button { store.workoutPresented = true } label: {
-                    HStack {
-                        Image(systemName: "figure.strengthtraining.traditional")
-                        Text(session.name).fontWeight(.semibold)
-                        Spacer()
-                        Text("\(session.completedSets)/\(session.totalSets) sets").font(.subheadline)
-                        Image(systemName: "chevron.up")
-                    }.padding().background(Palette.surface(scheme))
-                }.buttonStyle(.plain).accessibilityIdentifier("workout.resume")
-            }
-        }
         .modifier(WorkoutPresentation())
         .alert("Could not complete action", isPresented: Binding(get: { store.error != nil && !store.workoutPresented }, set: { if !$0 { store.error = nil } })) {
             Button("OK") { store.error = nil }
@@ -61,6 +49,28 @@ struct RootView: View {
         }.buttonStyle(.plain).foregroundStyle(selected == index ? Palette.tint(scheme) : Color.secondary).accessibilityAddTraits(selected == index ? .isSelected : []).accessibilityIdentifier("tab.\(title)")
     }
     #endif
+}
+
+struct ResumeBar: View {
+    @EnvironmentObject var store: AppStore
+    @Environment(\.colorScheme) var scheme
+    var body: some View {
+        if let session = store.data.activeSession, !store.workoutPresented {
+            Button { store.workoutPresented = true } label: {
+                HStack(spacing: 10) {
+                    Circle().fill(Palette.tint(scheme)).frame(width: 8, height: 8)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(store.data.title(for: session)).font(.subheadline.weight(.semibold)).lineLimit(1)
+                        TimelineView(.periodic(from: .now, by: 1)) { context in
+                            Text("\(clockText(context.date.timeIntervalSince(session.startedAt))) · \(session.completedSets)/\(session.totalSets) sets").font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                        }
+                    }
+                    Spacer()
+                    Text("Resume").font(.subheadline.weight(.semibold)).foregroundStyle(Palette.tint(scheme))
+                }.padding(.horizontal, 16).padding(.vertical, 10).frame(maxWidth: .infinity).background(Palette.surface(scheme)).overlay(alignment: .top) { Divider() }.contentShape(Rectangle())
+            }.buttonStyle(.plain).accessibilityLabel("Resume \(session.name)").accessibilityIdentifier("workout.resume")
+        }
+    }
 }
 
 struct WorkoutPresentation: ViewModifier {

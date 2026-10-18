@@ -27,13 +27,7 @@ struct LiveSetRow: View {
                 let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6)) : AnyLayout(HStackLayout(spacing: 6))
                 layout {
                     VStack(spacing: 0) {
-                    Menu {
-                        Button(set.plan.kind == .warmup ? "Edit Warm-up Targets" : "Edit Set Targets") { holdExpanded(); editingPlan = true }
-                        Button("Log reps") { open(.reps) }
-                        Divider()
-                        ForEach(SetKind.allCases) { kind in Button(kind.title) { store.editSet(exerciseID, setID) { $0.plan.kind = kind } } }
-                        Button("Delete set", role: .destructive) { store.editExercise(exerciseID) { $0.sets.removeAll { $0.id == setID } } }
-                    } label: {
+                    Menu { setMenu(set) } label: {
                         Text(setLabel(set, item: item)).font(.caption.weight(.semibold)).foregroundStyle(.secondary).frame(width: 28, height: set.plan.load == .percent ? 30 : 44)
                     }.compactMenu().accessibilityLabel("\(set.plan.kind.title), set \(index + 1), options")
                     if set.plan.load == .percent { Text("\(number(set.plan.percent))%").font(.system(size: 9)).foregroundStyle(.secondary) }
@@ -51,21 +45,32 @@ struct LiveSetRow: View {
                         cell(title: "RPE", value: set.rpe.map { number($0) }, field: .rpe, labeled: stacked).frame(maxWidth: stacked || !columns.hasMeasurements ? .infinity : 42)
                         Button { store.toggle(exerciseID, setID) } label: {
                             Image(systemName: set.completedAt == nil ? "square" : "checkmark.square.fill").font(.system(size: 23)).foregroundStyle(set.completedAt == nil ? Color.secondary.opacity(0.6) : Palette.tint(scheme)).frame(width: 40, height: 44)
-                        }.buttonStyle(.plain).accessibilityLabel(set.completedAt == nil ? "Complete set \(index + 1)" : "Undo set \(index + 1)").accessibilityIdentifier("workout.\(exerciseID).\(setID).complete")
+                        }.buttonStyle(.plain).accessibilityLabel("\(set.completedAt == nil ? "Complete" : "Undo") \(set.plan.kind.title.lowercased()) set \(setLabel(set, item: item))").accessibilityIdentifier("workout.\(exerciseID).\(setID).complete")
                     }
                 }
-                if let rest = set.plan.restSeconds { Text("\(rest)s rest").font(.caption2).foregroundStyle(.secondary).padding(.leading, 34) }
+                if let rest = set.plan.restSeconds { Text(rest == 0 ? "No rest" : "\(clockText(Double(rest))) rest").font(.caption2).foregroundStyle(.secondary).padding(.leading, 34) }
             }.padding(.horizontal, 2).padding(.vertical, 2)
             .background(set.completedAt != nil ? Palette.tint(scheme).opacity(0.08) : .clear, in: RoundedRectangle(cornerRadius: 6))
-            .contextMenu {
-                Button("Edit Set Targets") { holdExpanded(); editingPlan = true }
-                Button("Add time") { open(.time) }; Button("Add distance") { open(.distance) }
-                Button("Edit rest") { open(.rest) }
-                Button("Delete set", role: .destructive) { store.editExercise(exerciseID) { $0.sets.removeAll { $0.id == setID } } }
-            }
+            .contextMenu { setMenu(set) }
             .sheet(item: $edit) { NumericPad(edit: $0).sheetSize() }
             .sheet(isPresented: $editingPlan) { LivePlanEditor(exerciseID: exerciseID, setID: setID, initial: set.plan).environmentObject(store).sheetSize() }
         }
+    }
+    @ViewBuilder func setMenu(_ set: LoggedSet) -> some View {
+        Button(set.plan.kind == .warmup ? "Edit Warm-up Targets" : "Edit Set Targets", systemImage: "slider.horizontal.3") { holdExpanded(); editingPlan = true }
+        Button("Log Reps", systemImage: "number") { open(.reps) }
+        Button("Log Time", systemImage: "stopwatch") { open(.time) }
+        Button("Log Distance", systemImage: "ruler") { open(.distance) }
+        Button("Rest After Set", systemImage: "timer") { open(.rest) }
+        Menu("Set Type") {
+            ForEach(SetKind.allCases) { kind in
+                Button { store.editSet(exerciseID, setID) { $0.plan.kind = kind } } label: {
+                    if set.plan.kind == kind { Label(kind.title, systemImage: "checkmark") } else { Text(kind.title) }
+                }
+            }
+        }
+        Divider()
+        Button("Delete Set", systemImage: "trash", role: .destructive) { store.editExercise(exerciseID) { $0.sets.removeAll { $0.id == setID } } }
     }
     func cell(title: String, value: String?, field: Field, labeled: Bool = false, placeholder: String? = nil) -> some View {
         Button { open(field) } label: {
@@ -111,15 +116,20 @@ struct LiveSetRow: View {
             }
         }
     }
-    func setLabel(_ set: LoggedSet, item: SessionExercise) -> String {
-        switch set.plan.kind {
-        case .warmup: return "W\(item.sets.prefix(index + 1).filter { $0.plan.kind == .warmup }.count)"
-        case .drop: return "D\(item.sets.prefix(index + 1).filter { $0.plan.kind == .drop }.count)"
-        case .myoActivation: return "A"
-        case .failure: return "F"
-        case .myoMini: return "M\(item.sets.prefix(index + 1).reversed().prefix { $0.plan.kind == .myoMini }.count)"
-        case .working: return "\(item.sets.prefix(index + 1).filter { $0.plan.kind == .working }.count)"
-        }
+    func setLabel(_ set: LoggedSet, item: SessionExercise) -> String { setBadge(item.sets.map(\.plan.kind), index: index) }
+}
+
+/// Short set label used in workout and prescription tables: W1, 1, D1, A, M1, F.
+func setBadge(_ kinds: [SetKind], index: Int) -> String {
+    guard kinds.indices.contains(index) else { return "" }
+    let prefix = kinds.prefix(index + 1)
+    switch kinds[index] {
+    case .warmup: return "W\(prefix.filter { $0 == .warmup }.count)"
+    case .drop: return "D\(prefix.filter { $0 == .drop }.count)"
+    case .myoActivation: return "A"
+    case .failure: return "F"
+    case .myoMini: return "M\(prefix.reversed().prefix { $0 == .myoMini }.count)"
+    case .working: return "\(prefix.filter { $0 == .working }.count)"
     }
 }
 
