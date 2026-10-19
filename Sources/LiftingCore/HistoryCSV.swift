@@ -8,7 +8,7 @@ public struct HistoryBundle: Sendable {
 }
 
 public enum HistoryCSV {
-    public static let headers = ["date", "workout", "exercise", "variant", "variant_id", "kind", "weight_kg", "reps", "seconds", "meters", "rpe", "notes", "session_id", "ended_at", "workout_notes", "exercise_id", "mode", "muscle", "equipment", "session_exercise_id", "set_id", "recurring_notes", "rest_seconds", "exercise_rest_seconds", "completed_at", "program_id", "program_name", "target_reps", "target_rep_ceiling", "group", "group_rest_seconds", "transition_seconds", "secondary_muscles", "source_fields"]
+    public static let headers = ["date", "workout", "exercise", "variant", "variant_id", "kind", "weight_kg", "reps", "seconds", "meters", "rpe", "notes", "session_id", "ended_at", "workout_notes", "exercise_id", "mode", "muscle", "equipment", "session_exercise_id", "set_id", "recurring_notes", "rest_seconds", "exercise_rest_seconds", "completed_at", "program_id", "program_name", "target_reps", "target_rep_ceiling", "group", "group_rest_seconds", "transition_seconds", "secondary_muscles", "source_fields", "set_type_name", "set_type_badge"]
     public static func export(_ data: TrainingData) -> Data {
         let format = ISO8601DateFormatter(); format.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         var rows = [headers]
@@ -22,6 +22,7 @@ public enum HistoryCSV {
                     row += [session.programID?.uuidString ?? "", session.programName ?? session.programID.flatMap(data.program)?.name ?? "", set.plan.reps.map(String.init) ?? "", set.plan.repCeiling.map(String.init) ?? ""]
                     let sourceFields = set.sourceFields.flatMap { try? JSONEncoder().encode($0) }.flatMap { String(data: $0, encoding: .utf8) } ?? ""
                     row += [exercise.group ?? "", exercise.groupRestSeconds.map(String.init) ?? "", exercise.transitionSeconds.map(String.init) ?? "", exercise.secondaryMuscles?.joined(separator: "|") ?? "", sourceFields]
+                    row += [data.setType(set.plan.customTypeID)?.name ?? "", data.setType(set.plan.customTypeID)?.badge ?? ""]
                     rows.append(row)
                 }
             }
@@ -86,7 +87,9 @@ public enum HistoryCSV {
             let weight = try r.double("weight_kg"), reps = try r.int("reps")
             let targetReps = header.contains("target_reps") ? try r.int("target_reps") : reps
             let plan = SetPlan(kind: kind, load: weight == nil ? .none : .fixed, fixedWeight: weight ?? 0, reps: targetReps, repCeiling: try r.int("target_rep_ceiling"), seconds: try r.double("seconds"), meters: try r.double("meters"), rpe: try r.double("rpe", maximum: 10), restSeconds: try r.int("rest_seconds"))
-            var logged = LoggedSet(plan: plan, variant: data.variant(variantID)!)
+            var typedPlan = plan
+            typedPlan.customTypeID = data.csvSetType(name: r.text("set_type_name"), badge: r.text("set_type_badge"), color: "", countsAs: kind)
+            var logged = LoggedSet(plan: typedPlan, variant: data.variant(variantID)!)
             logged.reps = reps
             if !r.text("source_fields").isEmpty {
                 logged.sourceFields = try JSONDecoder().decode([String: String].self, from: Data(r.text("source_fields").utf8))
@@ -156,6 +159,7 @@ public extension TrainingData {
         let incoming = source.sessions.filter { !known.contains($0.id) }
         guard !incoming.isEmpty else { return 0 }
         var next = self
+        let priorVariants = Set(next.variants.map(\.id)), priorSessions = Set(next.sessions.map(\.id))
         // Recover identities for CSVs imported before import links were stored.
         let existingSessions = Dictionary(uniqueKeysWithValues: sessions.map { ($0.id, $0) })
         for session in source.sessions where known.contains(session.id) {
@@ -199,6 +203,7 @@ public extension TrainingData {
             next.sessions.append(session)
         }
         next.sessions.sort { $0.startedAt < $1.startedAt }
+        next.adoptSetTypes(from: source, existingVariants: priorVariants, existingSessions: priorSessions)
         self = try next.validated()
         return incoming.count
     }

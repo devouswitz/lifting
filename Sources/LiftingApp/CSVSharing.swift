@@ -75,7 +75,7 @@ struct CSVImportPreview: View {
     @State private var programName = "Imported program"
     var body: some View {
         NavigationStack {
-            Form {
+            ThemedForm {
                 StoreErrorRow()
                 if let bundle = routines {
                     Section {

@@ -14,6 +14,10 @@ final class AppStore: ObservableObject {
     @Published var workoutPresented = false
     @Published var autoFocusedExerciseID: UUID?
     @Published var autoFocusRevision = 0
+    /// When the current rest began, so the rest ring keeps its scale across ±15 and reopening the workout.
+    @Published var restStartedAt: Date?
+    /// Bumped when a workout ends, so Train returns to its first screen.
+    @Published var trainRevision = 0
     @Published var syncConfiguration = FolderSyncConfiguration()
     @Published var syncStatus = "Off"
     @Published var syncing = false
@@ -59,8 +63,12 @@ final class AppStore: ObservableObject {
 
     func start(_ routine: Routine) { perform { try $0.start(routineID: routine.id) }; if data.activeSession != nil { workoutPresented = true } }
     func emptyWorkout() { perform { d in guard d.activeSession == nil else { return }; d.activeSession = Session(name: "Workout") }; workoutPresented = true }
-    func finish() { perform { try $0.finish() }; if data.activeSession == nil { workoutPresented = false; cancelRestAlert() } }
-    func discard() { perform { $0.activeSession = nil; $0.restDeadline = nil }; workoutPresented = false; cancelRestAlert() }
+    func finish() { perform { try $0.finish() }; if data.activeSession == nil { workoutPresented = false; cancelRestAlert(); trainRevision += 1 } }
+    func discard() { perform { $0.activeSession = nil; $0.restDeadline = nil }; workoutPresented = false; cancelRestAlert(); trainRevision += 1 }
+    func setHiddenFromProgress(_ exerciseID: UUID, _ hidden: Bool) {
+        perform { d in if let i = d.exercises.firstIndex(where: { $0.id == exerciseID }) { d.exercises[i].hiddenFromProgress = hidden ? true : nil } }
+    }
+        func skipNext(in programID: UUID) { perform { try $0.skipNextDay(in: programID) } }
 
     func editActive(_ change: (inout Session) -> Void) { perform { d in if var session = d.activeSession { change(&session); d.activeSession = session } } }
     func editExercise(_ id: UUID, _ change: (inout SessionExercise) -> Void) {
@@ -71,10 +79,13 @@ final class AppStore: ObservableObject {
     }
     func toggle(_ exerciseID: UUID, _ setID: UUID) {
         let before = data.activeSession?.completedSets ?? 0
+        let previousDeadline = data.restDeadline
         perform { try $0.toggleSet(exerciseID: exerciseID, setID: setID) }
+        if data.restDeadline != previousDeadline { restStartedAt = data.restDeadline == nil ? nil : Date() }
         if (data.activeSession?.completedSets ?? 0) > before {
             haptic(); scheduleRestAlert()
-            if data.activeSession?.linkTitle(for: exerciseID) != nil, let target = data.activeSession?.exercises.first(where: { $0.collapsed == false }) {
+            // Scroll only when focus moves to another exercise, so rows stay put while logging the same one.
+            if data.activeSession?.linkTitle(for: exerciseID) != nil, let target = data.activeSession?.exercises.first(where: { $0.collapsed == false }), target.id != exerciseID {
                 autoFocusedExerciseID = target.id; autoFocusRevision += 1
             }
         }
@@ -165,13 +176,16 @@ func clockText(_ seconds: Double) -> String {
     let value = max(0, Int(seconds.rounded(.up)))
     return value >= 3600 ? String(format: "%d:%02d:%02d", value / 3600, (value % 3600) / 60, value % 60) : String(format: "%d:%02d", value / 60, value % 60)
 }
+/// One-line prescription in the app's standard form, for example "3 × 5 · 95 lb · RPE 8".
 func planSummary(_ variant: Variant, unit: WeightUnit) -> String {
     let work = variant.sets.filter { $0.kind != .warmup }
-    guard let first = work.first else { return "\(variant.sets.count) warm-up sets" }
-    var parts = [counted(work.count, "set")]
-    if let reps = first.reps { parts.append(first.repCeiling != nil && first.repCeiling != reps ? "\(reps)-\(first.repCeiling!) reps" : "\(reps) reps") }
+    guard let first = work.first else { return counted(variant.sets.count, "warm-up") }
+    var parts: [String] = []
+    if let target = first.repTarget { parts.append("\(work.count) × \(target.replacingOccurrences(of: "-", with: "–"))") }
+    else if let seconds = first.seconds { parts.append(work.count > 1 ? "\(work.count) × \(clockText(seconds))" : clockText(seconds)) }
+    else { parts.append(counted(work.count, "set")) }
     if first.load != .none { parts.append("\(number(unit.display(variant.workingWeight))) \(unit.rawValue)") }
-    if let seconds = first.seconds { parts.append(clockText(seconds)) }
+    if first.repTarget != nil, let seconds = first.seconds { parts.append(clockText(seconds)) }
     if let rpe = first.rpe { parts.append("RPE \(number(rpe))") }
     return parts.joined(separator: " · ")
 }
@@ -193,13 +207,13 @@ func loggedExerciseSummary(_ exercise: SessionExercise, unit: WeightUnit) -> Str
     return groups.map { group in
         guard let set = group.first else { return "" }
         var parts: [String] = []
-        if let reps = set.reps { parts.append("\(group.count) × \(reps) reps") }
-        else if let range = set.plan.repRange { parts.append("\(group.count) × \(range.lowerBound)-\(range.upperBound) reps") }
-        else { parts.append(counted(group.count, "set")) }
+        if let reps = set.reps { parts.append("\(group.count) × \(reps)") }
+        else if let range = set.plan.repRange { parts.append("\(group.count) × \(range.lowerBound)–\(range.upperBound)") }
+        else if group.count > 1 || (set.seconds == nil && set.meters == nil && set.weight == nil) { parts.append(counted(group.count, "set")) }
         if let weight = set.weight { parts.append("\(number(unit.display(weight))) \(unit.rawValue)") }
         if let seconds = set.seconds { parts.append(clockText(seconds)) }
         if let meters = set.meters { parts.append("\(number(meters)) m") }
-        if let rpe = set.rpe { parts.append("@\(number(rpe))") }
+        if let rpe = set.rpe { parts.append("RPE \(number(rpe))") }
         switch set.plan.kind {
         case .working: break
         case .warmup: parts.append("Warm-up")

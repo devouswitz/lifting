@@ -4,6 +4,7 @@ import LiftingCore
 struct RootView: View {
     @EnvironmentObject var store: AppStore
     @Environment(\.colorScheme) var scheme
+    var resolved: Palette { Palette(colors: store.data.settings.colors ?? ColorTheme(), dark: scheme == .dark, setTypes: store.data.customSetTypes) }
     @State private var selected = ProcessInfo.processInfo.arguments.contains("--progress") ? 2 : 0
     var body: some View {
         Group {
@@ -16,60 +17,90 @@ struct RootView: View {
                     case 3: SettingsView()
                     default: TrainView()
                     }
-                }.id(selected)
-                ResumeBar()
+                }.id([selected, store.trainRevision])
+                ResumeBar(accessory: false)
                 Divider()
                 HStack(spacing: 0) {
                     navigationTab("Train", symbol: "dumbbell", index: 0)
                     navigationTab("History", symbol: "calendar", index: 1)
                     navigationTab("Progress", symbol: "chart.xyaxis.line", index: 2)
                     navigationTab("Settings", symbol: "gearshape", index: 3)
-                }.padding(.vertical, 6).background(Palette.surface(scheme))
+                }.padding(.vertical, 6).background(resolved.card)
             }
             #else
-            TabView(selection: $selected) {
-            NavigationStack { TrainView() }.safeAreaInset(edge: .bottom, spacing: 0) { ResumeBar() }.tabItem { Label("Train", systemImage: "dumbbell") }.tag(0)
-            NavigationStack { HistoryView() }.safeAreaInset(edge: .bottom, spacing: 0) { ResumeBar() }.tabItem { Label("History", systemImage: "calendar") }.tag(1)
-            NavigationStack { ProgressView() }.safeAreaInset(edge: .bottom, spacing: 0) { ResumeBar() }.tabItem { Label("Progress", systemImage: "chart.xyaxis.line") }.tag(2)
-            NavigationStack { SettingsView() }.safeAreaInset(edge: .bottom, spacing: 0) { ResumeBar() }.tabItem { Label("Settings", systemImage: "gearshape") }.tag(3)
-            }
+            tabs
             #endif
         }
-        .tint(Palette.tint(scheme))
+        .tint(resolved.action)
         .preferredColorScheme(store.data.settings.theme == "system" ? nil : store.data.settings.theme == "dark" ? .dark : .light)
         .modifier(WorkoutPresentation())
         .alert("Could not complete action", isPresented: Binding(get: { store.error != nil && !store.workoutPresented }, set: { if !$0 { store.error = nil } })) {
             Button("OK") { store.error = nil }
         } message: { Text(store.error ?? "") }
+        .onChange(of: store.trainRevision) { selected = 0 }
+        .environment(\.palette, resolved)
     }
+    #if os(iOS)
+    var showResume: Bool { store.data.activeSession != nil && !store.workoutPresented }
+    @ViewBuilder var tabs: some View {
+        let view = TabView(selection: $selected) {
+            tab(0, "Train", "dumbbell", id: store.trainRevision) { TrainView() }
+            tab(1, "History", "calendar") { HistoryView() }
+            tab(2, "Progress", "chart.xyaxis.line") { ProgressView() }
+            tab(3, "Settings", "gearshape") { SettingsView() }
+        }
+        if #available(iOS 26.1, *) {
+            // Active workout lives in the system accessory slot above the tab bar, like a mini player.
+            view.tabViewBottomAccessory(isEnabled: showResume) { ResumeBar(accessory: true) }.tabBarMinimizeBehavior(.onScrollDown)
+        } else { view }
+    }
+    @ViewBuilder func tab<Content: View>(_ tag: Int, _ title: String, _ symbol: String, id: Int = 0, @ViewBuilder content: () -> Content) -> some View {
+        let stack = NavigationStack { content() }.id(id)
+        if #available(iOS 26.1, *) { stack.tabItem { Label(title, systemImage: symbol) }.tag(tag) }
+        else { stack.safeAreaInset(edge: .bottom, spacing: 0) { ResumeBar(accessory: false) }.tabItem { Label(title, systemImage: symbol) }.tag(tag) }
+    }
+    #endif
     #if os(macOS)
     func navigationTab(_ title: String, symbol: String, index: Int) -> some View {
         Button { selected = index } label: {
             VStack(spacing: 4) { Image(systemName: symbol).font(.title3); Text(title).font(.caption) }.frame(maxWidth: .infinity, minHeight: 44)
-        }.buttonStyle(.plain).foregroundStyle(selected == index ? Palette.tint(scheme) : Color.secondary).accessibilityAddTraits(selected == index ? .isSelected : []).accessibilityIdentifier("tab.\(title)")
+        }.buttonStyle(.plain).foregroundStyle(selected == index ? resolved.action : Color.secondary).accessibilityAddTraits(selected == index ? .isSelected : []).accessibilityIdentifier("tab.\(title)")
     }
     #endif
 }
 
+/// The active workout, shown above the tab bar while the workout screen is minimized.
 struct ResumeBar: View {
     @EnvironmentObject var store: AppStore
-    @Environment(\.colorScheme) var scheme
+    @Environment(\.palette) var palette
+    /// True when the system draws the container (the iOS tab bar accessory).
+    var accessory: Bool
     var body: some View {
         if let session = store.data.activeSession, !store.workoutPresented {
             Button { store.workoutPresented = true } label: {
-                HStack(spacing: 10) {
-                    Circle().fill(Palette.tint(scheme)).frame(width: 8, height: 8)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(store.data.title(for: session)).font(.subheadline.weight(.semibold)).lineLimit(1)
+                HStack(spacing: 12) {
+                    Image(systemName: "figure.strengthtraining.traditional").font(.body.weight(.semibold)).foregroundStyle(palette.action)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(store.data.title(for: session)).font(.subheadline.weight(.semibold)).foregroundStyle(.primary).lineLimit(1)
                         TimelineView(.periodic(from: .now, by: 1)) { context in
-                            Text("\(clockText(context.date.timeIntervalSince(session.startedAt))) · \(session.completedSets)/\(session.totalSets) sets").font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                            Text("\(clockText(context.date.timeIntervalSince(session.startedAt)))  \(session.completedSets) of \(session.totalSets) sets").font(.caption).foregroundStyle(.secondary).monospacedDigit()
                         }
                     }
-                    Spacer()
-                    Text("Resume").font(.subheadline.weight(.semibold)).foregroundStyle(Palette.tint(scheme))
-                }.padding(.horizontal, 16).padding(.vertical, 10).frame(maxWidth: .infinity).background(Palette.surface(scheme)).overlay(alignment: .top) { Divider() }.contentShape(Rectangle())
+                    Spacer(minLength: 8)
+                    Image(systemName: "chevron.up").font(.footnote.weight(.bold)).foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, accessory ? 16 : 18).padding(.vertical, accessory ? 0 : 10)
+                .frame(maxWidth: .infinity).contentShape(Rectangle())
+                .modifier(LegacyResumeBackground(enabled: !accessory))
             }.buttonStyle(.plain).accessibilityLabel("Resume \(session.name)").accessibilityIdentifier("workout.resume")
         }
+    }
+}
+
+private struct LegacyResumeBackground: ViewModifier {
+    let enabled: Bool
+    func body(content: Content) -> some View {
+        if enabled { content.floatingCapsule().padding(.horizontal, 12).padding(.bottom, 6) } else { content }
     }
 }
 

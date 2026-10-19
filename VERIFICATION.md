@@ -2,6 +2,22 @@
 
 Verified on October 18, 2026.
 
+## Structural redesign (iPhone simulator)
+
+- First iOS build and run: Xcode 27.1, iOS 27 simulator (iPhone 18 Pro Max), Debug, demo data. Every screen below was checked on iPhone in light and dark, not only in the Mac preview.
+- Train: program row opens Programs; next-workout card starts and resumes; later days open a day screen. Make Next Workout from a day's menu moved Lower to the main card and wrapped the later days. The orphaned "+" menu and the Program/Templates switch were replaced by Programs rows, the day menu, and Start Empty Workout.
+- Programs: native grouped list with load-by-tap, info button to the program, templates, New Program (checkmark template selection), New Template, Import from CSV. Program screen: numbered days with Next badge and swipe actions, Add Day, details, current-program state, duplicate, export, delete.
+- Workout: Finish uses the prominent glass style; one column header; Warm-up and Working groups; inline note; Working and Rest tokens; Swap moved into the exercise menu; completed rows fill with the Completed color; solid floating rest capsule with ring. Keypad sheet is compact, names the set, and replaces the value on first key.
+- Active workout appears in the iOS 26.1 tab bar accessory while minimized; earlier iOS versions keep a floating bar above the tab bar.
+- Settings uses colored tile icons tied to the color roles; Plate Calculator is a pushed screen; Colors editor preview and per-appearance pickers checked in dark.
+- Progress: program filter is a labelled toolbar menu; the create-exercise "+" was removed from Progress (exercise creation remains in every exercise picker); chart series use ten distinct colors.
+- History month comparison shows value and change together; zero change reads "same".
+- An independent review of the diff found nine issues, none crashing; eight were fixed: note keyboard now dismisses (scroll or keyboard Done), Colors saves on leaving the screen, the keypad accepts hardware keys and grows at accessibility sizes, Make Next Workout also loads that program, the rest ring keeps its scale across ±15 and reopening, Reorder's Done stays visible, and color data decoding drops unknown or malformed entries instead of rejecting a backup. Keypad entry (1, 2, 0 replacing 95) and the resulting set value were checked in the simulator.
+- Custom set types (simulator): created Back-off (badge B, counts as working); long-pressed a workout quick-add button, swapped Drop for Back-off, and tapped it to add a B set copying the last working set. Core test covers save, uniqueness, counts-as changes updating prescriptions, live adds, volume, day and history CSV round trips, sync, deletion fallback, and older backups.
+- Superset editor uses checkmark selection and rest steppers; a superset showed on the day screen and in the workout, and logging moved focus to the partner without the list jumping (the jump was a bug fixed in this pass). Programs > Exercises and its New Exercise row were checked.
+- 61 core test cases, zero failures. Mac preview builds with Xcode's toolchain; the ManifestAPI workaround is no longer needed.
+- Not verified: a physical iPhone, Dynamic Type at accessibility sizes, VoiceOver end to end, iOS 17-25 fallbacks on a device (they compile, but no older simulator runtime is installed).
+
 ## Polish and parity pass
 
 - Parity: warm-up, working, drop, MYO, and failure sets all use the same target editor (No count, Reps, Rep range, AMRAP, RPE, time, distance, rest). Checked natively on a warm-up set. The live set menu is now identical whether opened by tapping the set badge or long-pressing the row. Previously each opened a different subset of actions.
@@ -84,3 +100,17 @@ The iOS app is not installed on an iPhone or distributed through TestFlight or t
 The implemented app covers the requested substitutions, independent day variants, flexible warm-ups, per-exercise notes, local storage, mixed cardio, drop sets, and MYO reps. It also includes ordered programs, reusable day templates, independent copies, day/program CSV sharing, additive history CSV import, editable exercises, rest timers, plate calculation, progression rules, graphs, history editing, and backup/restore.
 
 Not included: Apple Watch support, Health integration, variant merging, schedule calendars, or equipment-specific inventory counts. Proprietary/encrypted competitor backups, including GreySkull-specific binary/cloud backup formats, have not been validated. Folder sync runs while the app is open; active workouts and device preferences do not merge across devices.
+
+## Pass of 2026-10-18 (requested fixes)
+
+Checked on the iPhone 18 Pro Max simulator (iOS 27) with demo data; 63 core test cases, 0 failures.
+
+- Finish: saving a workout started from a day screen returns to the Train cover.
+- Program screen: the name is the large title and renames in place ("Starter" to "Starter Plus"); Details is now Notes. The day editor uses the same title.
+- Programs Edit shows delete and reorder controls on day templates as well as programs; swiping a template shows Duplicate and a red Delete with confirmation.
+- Skip Workout on the next day: confirmation names the following day; History shows the day as Skipped with every set unchecked; the calendar marks it with a dashed ring; it is not counted as a workout, in muscle totals, or as the Previous value.
+- Move Later on the next day made the following day next; Move Earlier is disabled for the next day. Core test covers moves across the wrap.
+- Calendar: the month list under the calendar is gone; tapping a day lists that day only. "Compared with September" opens Past Week, Month, 3 Months, Year; Past Week read "Oct 12–18 compared with Oct 5–11".
+- Average volume by muscle per workout appears under the comparison with deltas and bars.
+- Hide from Progress (long press on a record, or the exercise menu) removed Triceps pressdown from the chart, legend, picker, and records; Hidden exercises lists it with Show.
+

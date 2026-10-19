@@ -21,6 +21,8 @@ public struct Exercise: Identifiable, Codable, Equatable, Sendable {
     public var equipment: String
     public var mode: ExerciseMode
     public var secondaryMuscles: [String]?
+    /// Leaves the exercise out of the Progress overview; its own progress screen still works.
+    public var hiddenFromProgress: Bool?
     public init(id: UUID = UUID(), name: String, muscle: String = "Other", equipment: String = "", mode: ExerciseMode = .strength) {
         self.id = id; self.name = name; self.muscle = muscle; self.equipment = equipment; self.mode = mode
     }
@@ -53,6 +55,8 @@ public struct SetPlan: Identifiable, Codable, Equatable, Sendable {
     public var rpe: Double?
     public var amrap: Bool
     public var restSeconds: Int?
+    /// A user-named set type. `kind` still decides how the set counts.
+    public var customTypeID: UUID?
     public init(id: UUID = UUID(), kind: SetKind = .working, load: LoadRule = .working, fixedWeight: Double = 0, percent: Double = 50, reps: Int? = 8, repCeiling: Int? = 12, seconds: Double? = nil, meters: Double? = nil, rpe: Double? = nil, amrap: Bool = false, restSeconds: Int? = nil) {
         self.id = id; self.kind = kind; self.load = load; self.fixedWeight = fixedWeight; self.percent = percent
         self.reps = reps; self.repCeiling = repCeiling; self.seconds = seconds; self.meters = meters; self.rpe = rpe; self.amrap = amrap; self.restSeconds = restSeconds
@@ -188,6 +192,8 @@ public struct Session: Identifiable, Codable, Equatable, Sendable {
     public var programID: UUID?
     public var programName: String?
     public var advancesProgram: Bool?
+    /// A program day that was skipped: saved with every set unchecked, so history shows the gap.
+    public var skipped: Bool?
     public var name: String
     public var startedAt: Date
     public var endedAt: Date?
@@ -212,6 +218,9 @@ public struct Settings: Codable, Equatable, Sendable {
     public var platesKG: [Double] = [25, 20, 15, 10, 5, 2.5, 1.25]
     public var lastBackupAt: Date?
     public var autoCollapseCompleted: Bool?
+    public var colors: ColorTheme?
+    /// The two quick-add buttons under each live exercise: "drop", "myo", "warmup", "failure", or "type:<uuid>".
+    public var quickAdd: [String]?
     public init() {}
 }
 
@@ -233,6 +242,7 @@ public struct TrainingData: Codable, Equatable, Sendable {
     public var routines: [Routine] = []
     public var programs: [TrainingProgram] = []
     public var warmupPresets: [WarmupPreset] = []
+    public var customSetTypes: [CustomSetType] = []
     public var activeProgramID: UUID?
     public var sessions: [Session] = []
     public var historyImports: [HistoryImportLink] = []
@@ -240,7 +250,7 @@ public struct TrainingData: Codable, Equatable, Sendable {
     public var restDeadline: Date?
     public var settings: Settings = Settings()
     public init() {}
-    enum CodingKeys: String, CodingKey { case schemaVersion, exercises, variants, routines, programs, warmupPresets, activeProgramID, sessions, historyImports, activeSession, restDeadline, settings }
+    enum CodingKeys: String, CodingKey { case schemaVersion, exercises, variants, routines, programs, warmupPresets, customSetTypes, activeProgramID, sessions, historyImports, activeSession, restDeadline, settings }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         schemaVersion = try c.decode(Int.self, forKey: .schemaVersion)
@@ -249,6 +259,7 @@ public struct TrainingData: Codable, Equatable, Sendable {
         routines = try c.decode([Routine].self, forKey: .routines)
         programs = try c.decodeIfPresent([TrainingProgram].self, forKey: .programs) ?? []
         warmupPresets = try c.decodeIfPresent([WarmupPreset].self, forKey: .warmupPresets) ?? []
+        customSetTypes = try c.decodeIfPresent([CustomSetType].self, forKey: .customSetTypes) ?? []
         activeProgramID = try c.decodeIfPresent(UUID.self, forKey: .activeProgramID)
         sessions = try c.decode([Session].self, forKey: .sessions)
         historyImports = try c.decodeIfPresent([HistoryImportLink].self, forKey: .historyImports) ?? []

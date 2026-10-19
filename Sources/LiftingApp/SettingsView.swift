@@ -10,6 +10,7 @@ import UserNotifications
 
 struct SettingsView: View {
     @EnvironmentObject var store: AppStore
+    @Environment(\.palette) var palette
     @State private var exporting = false
     @State private var importing = false
     @State private var importingCSV = false
@@ -17,51 +18,66 @@ struct SettingsView: View {
     @State private var contentType = UTType.json
     @State private var importPreview: TrainingData?
     @State private var confirmingImport = false
-    @State private var plates = false
     @State private var exportName = "Lifting-backup"
     @State private var notificationStatus = ""
     @State private var choosingSyncFolder = false
     @State private var choosingMacFolder = false
     func setting<T>(_ key: WritableKeyPath<LiftingCore.Settings, T>) -> Binding<T> { Binding(get: { store.data.settings[keyPath: key] }, set: { value in store.perform { $0.settings[keyPath: key] = value } }) }
     var body: some View {
-        Form {
+        ThemedForm {
             Section("General") {
-                Picker("Weight unit", selection: setting(\.unit)) { ForEach(WeightUnit.allCases) { Text($0.rawValue).tag($0) } }.pickerStyle(.segmented)
-                Picker("Appearance", selection: setting(\.theme)) { Text("System").tag("system"); Text("Light").tag("light"); Text("Dark").tag("dark") }.pickerStyle(.segmented)
+                LabeledContent {
+                    Picker("Weight unit", selection: setting(\.unit)) { ForEach(WeightUnit.allCases) { Text($0.rawValue).tag($0) } }.pickerStyle(.segmented).labelsHidden().frame(width: 110)
+                } label: { TileLabel(title: "Weight Unit", symbol: "scalemass.fill", color: .gray) }
+                Picker(selection: setting(\.theme)) { Text("System").tag("system"); Text("Light").tag("light"); Text("Dark").tag("dark") } label: { TileLabel(title: "Appearance", symbol: "circle.lefthalf.filled", color: .indigo) }
+                NavigationLink { ColorSettingsView() } label: { HStack { TileLabel(title: "Colors", symbol: "paintpalette.fill", color: palette.technique); Spacer(); ColorSwatches() } }.accessibilityIdentifier("settings.colors")
             }
             Section("Workout") {
-                NavigationLink("Warm-up Presets") { WarmupPresetLibrary() }.accessibilityIdentifier("settings.warmups")
-                Toggle("Auto-start rest timer", isOn: setting(\.autoRest))
-                Toggle("Auto-collapse completed exercises", isOn: Binding(get: { store.data.settings.autoCollapseCompleted == true }, set: { value in store.perform { $0.settings.autoCollapseCompleted = value } }))
-                Toggle("Haptics", isOn: setting(\.haptics))
-                Toggle("Keep screen awake", isOn: setting(\.keepAwake))
+                NavigationLink { WarmupPresetLibrary() } label: { TileLabel(title: "Warm-up Presets", symbol: "flame.fill", color: palette.warmup) }.accessibilityIdentifier("settings.warmups")
+                NavigationLink { SetTypesView() } label: { TileLabel(title: "Set Types", symbol: "square.stack.3d.up.fill", color: palette.technique) }.accessibilityIdentifier("settings.settypes")
+                Toggle(isOn: setting(\.autoRest)) { TileLabel(title: "Start Rest Timer Automatically", symbol: "timer", color: palette.rest) }
                 #if os(iOS)
-                Button("Allow Rest Alerts in Background") {
+                Button {
                     UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { granted, error in
-                        Task { @MainActor in notificationStatus = granted ? "Background rest alerts enabled." : "Enable alerts in iOS Settings."; if let error { store.error = error.localizedDescription } }
+                        Task { @MainActor in notificationStatus = granted ? "On" : "Off in iOS Settings"; if let error { store.error = error.localizedDescription } }
                     }
-                }
-                if !notificationStatus.isEmpty { Text(notificationStatus).font(.footnote).foregroundStyle(.secondary) }
+                } label: { HStack { TileLabel(title: "Rest Alerts in Background", symbol: "bell.badge.fill", color: palette.failure); Spacer(); Text(notificationStatus.isEmpty ? "Allow" : notificationStatus).foregroundStyle(notificationStatus.isEmpty ? palette.action : .secondary) } }
                 #endif
+                Toggle(isOn: Binding(get: { store.data.settings.autoCollapseCompleted == true }, set: { value in store.perform { $0.settings.autoCollapseCompleted = value } })) { TileLabel(title: "Collapse Finished Exercises", symbol: "rectangle.compress.vertical", color: palette.completed) }
+                Toggle(isOn: setting(\.haptics)) { TileLabel(title: "Haptics", symbol: "hand.tap.fill", color: .pink) }
+                Toggle(isOn: setting(\.keepAwake)) { TileLabel(title: "Keep Screen On During Workouts", symbol: "sun.max.fill", color: .orange) }
             }
             Section("Plates") {
-                HStack { Text("Bar weight (\(store.data.settings.unit.rawValue))"); Spacer(); TextField("0", value: Binding(get: { store.data.settings.unit.display(store.data.settings.barWeight) }, set: { value in store.perform { $0.settings.barWeight = $0.settings.unit.kilograms(value) } }), format: .number).labelsHidden().multilineTextAlignment(.trailing).frame(maxWidth: 90) }
-                NavigationLink("Plate Sizes") { PlateInventoryView() }
-                Button("Plate Calculator") { plates = true }
+                LabeledContent {
+                    HStack(spacing: 4) {
+                        TextField("0", value: Binding(get: { store.data.settings.unit.display(store.data.settings.barWeight) }, set: { value in store.perform { $0.settings.barWeight = $0.settings.unit.kilograms(value) } }), format: .number).labelsHidden().multilineTextAlignment(.trailing).frame(maxWidth: 70)
+                        #if os(iOS)
+                            .keyboardType(.decimalPad)
+                        #endif
+                        Text(store.data.settings.unit.rawValue).foregroundStyle(.secondary)
+                    }
+                } label: { TileLabel(title: "Bar Weight", symbol: "minus", color: .gray) }
+                NavigationLink { PlateInventoryView() } label: { TileLabel(title: "Plate Sizes", symbol: "circle.circle.fill", color: .gray) }
+                NavigationLink { PlateCalculatorView() } label: { TileLabel(title: "Plate Calculator", symbol: "plus.forwardslash.minus", color: palette.action) }
             }
             folderSyncSection
             Section {
-                Button("Export Backup") {
+                Button {
                     do { document = BackupDocument(bytes: try LocalRepository.encode(store.data)); contentType = .json; exportName = "Lifting-\(Date().formatted(.iso8601.year().month().day().dateSeparator(.dash)))"; exporting = true } catch { store.error = error.localizedDescription }
-                }.accessibilityIdentifier("settings.export")
-                Button("Export Logged Sets (CSV)") { document = BackupDocument(bytes: LocalRepository.csv(store.data)); contentType = .commaSeparatedText; exportName = "Lifting-sets"; exporting = true }
-                Button("Import Workout Data") { importingCSV = true }.accessibilityIdentifier("settings.importCSV")
-                Button("Restore Backup") { importing = true }.accessibilityIdentifier("settings.import")
+                } label: { TileLabel(title: "Export Backup", symbol: "square.and.arrow.up.fill", color: palette.completed) }.accessibilityIdentifier("settings.export")
+                Button { document = BackupDocument(bytes: LocalRepository.csv(store.data)); contentType = .commaSeparatedText; exportName = "Lifting-sets"; exporting = true } label: { TileLabel(title: "Export Logged Sets as CSV", symbol: "tablecells.fill", color: palette.completed) }
+                Button { importingCSV = true } label: { TileLabel(title: "Import Workout Data", symbol: "square.and.arrow.down.fill", color: palette.action) }.accessibilityIdentifier("settings.importCSV")
+                Button { importing = true } label: { TileLabel(title: "Restore Backup", symbol: "clock.arrow.circlepath", color: palette.warmup) }.accessibilityIdentifier("settings.import")
                 if store.storageBlocked { Text("Your local files were preserved. Restore a valid backup to recover.").foregroundStyle(.red) }
             } header: { Text("Data") } footer: {
                 if let date = store.data.settings.lastBackupAt { Text("Last exported \(date.formatted(date: .abbreviated, time: .omitted)).") }
             }
-            Section { LabeledContent("Version", value: "1.0") }
+            Section {
+                Link(destination: URL(string: "https://ko-fi.com/devouswitz")!) {
+                    HStack { TileLabel(title: "Support Lifting on Ko-fi", symbol: "heart.fill", color: .pink); Spacer(); Image(systemName: "arrow.up.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary) }
+                }.accessibilityIdentifier("settings.kofi")
+                LabeledContent("Version", value: "1.0")
+            }
         }.formStyle(.grouped).navigationTitle("Settings")
         .fileExporter(isPresented: $exporting, document: document, contentType: contentType, defaultFilename: exportName) { result in
             switch result { case .success: if contentType == .json { store.perform { $0.settings.lastBackupAt = Date() } }; case .failure(let error): store.error = error.localizedDescription }
@@ -91,20 +107,20 @@ struct SettingsView: View {
                 do { if let url = try result.get().first { store.chooseSyncFolder(url) } } catch { store.syncStatus = error.localizedDescription }
             }
         }
-        .sheet(isPresented: $plates) { PlateView().environmentObject(store).sheetSize() }
     }
     private var folderSyncSection: some View {
             Section {
-                Button(store.syncConfiguration.bookmark == nil ? "Choose iCloud Drive or other folder" : "Folder: \(store.syncConfiguration.name)", action: chooseFolder).disabled(store.syncing || choosingMacFolder).accessibilityIdentifier("settings.syncFolder")
-                Toggle("Automatic backup", isOn: Binding(get: { store.syncConfiguration.automaticBackup }, set: { value in store.configureSync { $0.automaticBackup = value } })).disabled(store.syncConfiguration.bookmark == nil).accessibilityIdentifier("settings.autoBackup")
-                Toggle("Device sync", isOn: Binding(get: { store.syncConfiguration.deviceSync }, set: { value in store.configureSync { $0.deviceSync = value } })).disabled(store.syncConfiguration.bookmark == nil).accessibilityIdentifier("settings.deviceSync")
+                Button(action: chooseFolder) { HStack { TileLabel(title: "Folder", symbol: "folder.fill", color: palette.action); Spacer(); Text(store.syncConfiguration.bookmark == nil ? "Choose" : store.syncConfiguration.name).foregroundStyle(store.syncConfiguration.bookmark == nil ? palette.action : .secondary).lineLimit(1) } }
+                    .disabled(store.syncing || choosingMacFolder).accessibilityIdentifier("settings.syncFolder")
+                Toggle(isOn: Binding(get: { store.syncConfiguration.automaticBackup }, set: { value in store.configureSync { $0.automaticBackup = value } })) { TileLabel(title: "Automatic Backup", symbol: "externaldrive.fill", color: .gray) }.disabled(store.syncConfiguration.bookmark == nil).accessibilityIdentifier("settings.autoBackup")
+                Toggle(isOn: Binding(get: { store.syncConfiguration.deviceSync }, set: { value in store.configureSync { $0.deviceSync = value } })) { TileLabel(title: "Sync Between Devices", symbol: "arrow.triangle.2.circlepath", color: .gray) }.disabled(store.syncConfiguration.bookmark == nil).accessibilityIdentifier("settings.deviceSync")
                 if store.syncConfiguration.automaticBackup || store.syncConfiguration.deviceSync {
-                    Button(store.syncing ? "Syncing…" : "Sync now") { Task { await store.syncNow() } }.disabled(store.syncing).accessibilityIdentifier("settings.syncNow")
+                    Button(store.syncing ? "Syncing…" : "Sync Now") { Task { await store.syncNow() } }.disabled(store.syncing).accessibilityIdentifier("settings.syncNow")
                     Text(store.syncStatus).font(.caption).foregroundStyle(.secondary)
                     if let date = store.lastFolderSync { Text(date.formatted(date: .abbreviated, time: .shortened)).font(.caption).foregroundStyle(.secondary) }
                 }
                 if store.syncConfiguration.bookmark != nil {
-                    Button("Disconnect folder") { store.configureSync { $0.bookmark = nil; $0.name = ""; $0.automaticBackup = false; $0.deviceSync = false } }
+                    Button("Disconnect Folder", role: .destructive) { store.configureSync { $0.bookmark = nil; $0.name = ""; $0.automaticBackup = false; $0.deviceSync = false } }
                 }
             } header: { Text("Backup and sync") } footer: { Text("Choose the same iCloud Drive folder on each device. Sync runs while the app is open. History merges after the active workout ends.") }
     }
@@ -133,7 +149,7 @@ struct PlateInventoryView: View {
     var sizes: [Double] { unit == .lb ? store.data.settings.platesLB : store.data.settings.platesKG }
     func save(_ values: [Double]) { store.perform { if unit == .lb { $0.settings.platesLB = values } else { $0.settings.platesKG = values } } }
     var body: some View {
-        Form {
+        ThemedForm {
             Section("\(unit.rawValue) per plate") {
                 ForEach(sizes.sorted(by: >), id: \.self) { value in HStack { Text(number(value)); Spacer(); Button(role: .destructive) { save(sizes.filter { $0 != value }) } label: { Image(systemName: "minus.circle") }.buttonStyle(.plain).accessibilityLabel("Remove \(number(value)) plate") } }
                 HStack { TextField("Plate size", text: $newSize).labelsHidden()
@@ -146,32 +162,41 @@ struct PlateInventoryView: View {
     }
 }
 
+/// Plate calculator as a sheet, opened from a workout.
 struct PlateView: View {
-    @EnvironmentObject var store: AppStore
     @Environment(\.dismiss) var dismiss
+    var initialWeight = 135.0
+    var body: some View {
+        NavigationStack { PlateCalculatorView(initialWeight: initialWeight).toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } } }
+    }
+}
+
+/// Plates per side for a target weight.
+struct PlateCalculatorView: View {
+    @EnvironmentObject var store: AppStore
+    @Environment(\.palette) var palette
     var initialWeight = 135.0
     @State private var target = 135.0
     var unit: WeightUnit { store.data.settings.unit }
     var result: (plates: [Double], remainder: Double) { PlateCalculator.plates(total: target, bar: unit.display(store.data.settings.barWeight), available: unit == .lb ? store.data.settings.platesLB : store.data.settings.platesKG) }
     var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    HStack { Text("Target (\(unit.rawValue))"); Spacer(); TextField("0", value: $target, format: .number).labelsHidden().multilineTextAlignment(.trailing).frame(maxWidth: 110) }
-                    LabeledContent("Bar", value: "\(number(unit.display(store.data.settings.barWeight))) \(unit.rawValue)")
+        ThemedForm {
+            Section {
+                HStack { Text("Target (\(unit.rawValue))"); Spacer(); TextField("0", value: $target, format: .number).labelsHidden().multilineTextAlignment(.trailing).frame(maxWidth: 110) }
+                LabeledContent("Bar", value: "\(number(unit.display(store.data.settings.barWeight))) \(unit.rawValue)")
+            }
+            Section("Per side") {
+                ScrollView(.horizontal) {
+                    HStack(spacing: 5) {
+                        RoundedRectangle(cornerRadius: 3).fill(.secondary).frame(width: 34, height: 12)
+                        ForEach(Array(result.plates.enumerated()), id: \.offset) { _, plate in ZStack { RoundedRectangle(cornerRadius: 5).fill(palette.action.opacity(0.15)); Text(number(plate)).font(.caption.weight(.semibold)) }.frame(width: 40, height: 50 + min(90, plate * 1.5)) }
+                    }.frame(minHeight: 130)
                 }
-                Section("Per side") {
-                    ScrollView(.horizontal) {
-                        HStack(spacing: 5) {
-                            RoundedRectangle(cornerRadius: 3).fill(.secondary).frame(width: 34, height: 12)
-                            ForEach(Array(result.plates.enumerated()), id: \.offset) { _, plate in ZStack { RoundedRectangle(cornerRadius: 5).fill(Palette.accent.opacity(0.15)); Text(number(plate)).font(.caption.weight(.semibold)) }.frame(width: 40, height: 50 + min(90, plate * 1.5)) }
-                        }.frame(minHeight: 130)
-                    }
-                    Text(result.plates.isEmpty ? "Bar only" : result.plates.map { number($0) }.joined(separator: " + "))
-                    if target < unit.display(store.data.settings.barWeight) { Text("Target is below the bar weight.").foregroundStyle(.red) }
-                    else if result.remainder > 0.01 { Text("Unloaded: \(number(result.remainder)) \(unit.rawValue)").foregroundStyle(.orange) }
-                }
-            }.formStyle(.grouped).navigationTitle("Plate calculator").inlineTitle().toolbar { Button("Done") { dismiss() } }
-        }.onAppear { target = initialWeight }
+                Text(result.plates.isEmpty ? "Bar only" : result.plates.map { number($0) }.joined(separator: " + "))
+                if target < unit.display(store.data.settings.barWeight) { Text("Target is below the bar weight.").foregroundStyle(palette.failure) }
+                else if result.remainder > 0.01 { Text("Unloaded: \(number(result.remainder)) \(unit.rawValue)").foregroundStyle(palette.warmup) }
+            }
+        }.formStyle(.grouped).navigationTitle("Plate Calculator").inlineTitle()
+        .onAppear { target = initialWeight }
     }
 }

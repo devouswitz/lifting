@@ -14,7 +14,7 @@ struct ExternalImportSetup: View {
             if let preview { CSVImportPreview(routines: nil, history: preview, onBack: { self.preview = nil }) }
             else {
                 NavigationStack {
-                    Form {
+                    ThemedForm {
                         Section {
                             LabeledContent("Detected format", value: options.source)
                             Picker("Unspecified weight units", selection: $options.weightUnit) { ForEach(WeightUnit.allCases) { Text($0.rawValue).tag($0) } }

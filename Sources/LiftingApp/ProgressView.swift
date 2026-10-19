@@ -5,8 +5,8 @@ import LiftingCore
 struct ProgressView: View {
     @EnvironmentObject var store: AppStore
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.palette) private var palette
     @State private var search = ""
-    @State private var creating = false
     @State private var metric = Metric.weight
     @State private var range = ProgressRange.all
     @State private var selectedProgramID: UUID?
@@ -15,7 +15,8 @@ struct ProgressView: View {
     @State private var muscles = false
 
     var body: some View {
-        let history = ProgressHistory(data: store.data, programID: selectedProgramID)
+        let history = ProgressHistory(data: store.data, programID: selectedProgramID, includeHidden: false)
+        let hidden = ProgressHistory(data: store.data, programID: selectedProgramID).exercises.filter { $0.hiddenFromProgress == true }
         let tracks = history.tracks(exerciseID: selectedExerciseID, metric: metric, since: range.since)
         let records = history.records(preferredMetric: metric).filter {
             search.isEmpty || $0.exercise.name.localizedCaseInsensitiveContains(search)
@@ -23,15 +24,11 @@ struct ProgressView: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 20) {
                 Picker("View", selection: $muscles) { Text("Exercises").tag(false); Text("Muscles").tag(true) }.pickerStyle(.segmented).labelsHidden().accessibilityIdentifier("progress.view")
-                VStack(alignment: .leading, spacing: 16) {
-                    Picker("Program", selection: $selectedProgramID) {
-                        Text("All programs").tag(UUID?.none)
-                        ForEach(store.data.recordedPrograms) { program in Text(program.name).tag(Optional(program.id)) }
-                    }.pickerStyle(.menu).accessibilityIdentifier("progress.program")
+                VStack(alignment: .leading, spacing: 14) {
                     if !muscles {
                     HStack {
                         Picker("Exercise", selection: $selectedExerciseID) {
-                            Text("All").tag(UUID?.none)
+                            Text("All exercises").tag(UUID?.none)
                             ForEach(history.exercises) { exercise in
                                 Text(exercise.name).tag(Optional(exercise.id))
                             }
@@ -51,8 +48,7 @@ struct ProgressView: View {
                 }
                 .card()
 
-                if !muscles { VStack(alignment: .leading, spacing: 14) {
-                    Text("Records").font(.title2.weight(.semibold))
+                if !muscles { SectionTitle(title: "Records").padding(.top, 4); VStack(alignment: .leading, spacing: 10) {
                     HStack(spacing: 8) {
                         Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                         TextField("Search logged exercises", text: $search)
@@ -64,8 +60,8 @@ struct ProgressView: View {
                                 .accessibilityLabel("Clear search")
                         }
                     }
-                    .padding(10)
-                    .background(Palette.secondary(scheme), in: RoundedRectangle(cornerRadius: 8))
+                    .padding(.horizontal, 12).padding(.vertical, 9)
+                    .background(palette.field, in: Capsule())
 
                     if records.isEmpty {
                         Text(history.exercises.isEmpty ? "No exercises logged." : "No matching exercises.")
@@ -77,16 +73,31 @@ struct ProgressView: View {
                             ProgressRecordRow(record: record, unit: store.data.settings.unit)
                         }
                         .buttonStyle(.plain)
+                        .contextMenu { Button("Hide from Progress", systemImage: "eye.slash") { store.setHiddenFromProgress(record.exercise.id, true) } }
                         if record.id != records.last?.id { Divider() }
                     }
+                    if !hidden.isEmpty {
+                        if !records.isEmpty { Divider() }
+                        NavigationLink { HiddenExercisesView(programID: selectedProgramID) } label: {
+                            HStack {
+                                Text("Hidden exercises").foregroundStyle(.primary)
+                                Spacer()
+                                Text("\(hidden.count)").foregroundStyle(.secondary).monospacedDigit()
+                                Image(systemName: "chevron.right").font(.caption2.weight(.semibold)).foregroundStyle(.tertiary)
+                            }.padding(.vertical, 7).contentShape(Rectangle())
+                        }.buttonStyle(.plain).accessibilityIdentifier("progress.hidden")
+                    }
                 }
-                .card()
+                .card(padding: 16)
                 }
             }
             .padding(16)
         }
-        .background(Palette.background(scheme))
+        .background(palette.background)
         .navigationTitle("Progress")
+        .onChange(of: store.data.exercises.filter { $0.hiddenFromProgress == true }.map(\.id)) { _, ids in
+            if let id = selectedExerciseID, ids.contains(id) { selectedExerciseID = nil }
+        }
         .onAppear {
             guard !initialized else { return }
             initialized = true
@@ -96,7 +107,7 @@ struct ProgressView: View {
         }
         .onChange(of: selectedProgramID) { _, _ in
             selectedExerciseID = nil; search = ""; range = .all; metric = .weight
-            let scoped = ProgressHistory(data: store.data, programID: selectedProgramID)
+            let scoped = ProgressHistory(data: store.data, programID: selectedProgramID, includeHidden: false)
             if scoped.tracks(metric: metric).isEmpty, let exercise = scoped.exercises.first { metric = scoped.preferredMetric(for: exercise, preferred: metric) }
         }
         .onChange(of: selectedExerciseID) { _, id in
@@ -112,11 +123,19 @@ struct ProgressView: View {
             }
         }
         .toolbar {
-            Button { creating = true } label: { Image(systemName: "plus") }
-                .accessibilityLabel("Create exercise")
-        }
-        .sheet(isPresented: $creating) {
-            ExerciseEditor { exercise in store.perform { $0.exercises.append(exercise) } }.sheetSize()
+            ToolbarItem(placement: .primaryAction) {
+                Menu {
+                    Picker("Program", selection: $selectedProgramID) {
+                        Text("All programs").tag(UUID?.none)
+                        ForEach(store.data.recordedPrograms) { program in Text(program.name).tag(Optional(program.id)) }
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Text(selectedProgramID.flatMap { store.data.program($0)?.name } ?? store.data.recordedPrograms.first { $0.id == selectedProgramID }?.name ?? "All programs").lineLimit(1)
+                        Image(systemName: "chevron.up.chevron.down").font(.caption2.weight(.semibold))
+                    }
+                }.accessibilityLabel("Program filter").accessibilityIdentifier("progress.program")
+            }
         }
     }
 }
@@ -124,6 +143,7 @@ struct ProgressView: View {
 struct ExerciseProgress: View {
     @EnvironmentObject var store: AppStore
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.palette) private var palette
     let exerciseID: UUID
     let programID: UUID?
     @State private var selectedVariant: UUID?
@@ -166,8 +186,8 @@ struct ExerciseProgress: View {
                 }
                 .card()
 
+                SectionTitle(title: "Results")
                 VStack(alignment: .leading, spacing: 16) {
-                    Text("Results").font(.title2.weight(.semibold))
                     if sessions.isEmpty {
                         Text("No logged sets in this range.").foregroundStyle(.secondary).padding(.vertical, 16)
                     }
@@ -183,7 +203,7 @@ struct ExerciseProgress: View {
             }
             .padding(16)
         }
-        .background(Palette.background(scheme))
+        .background(palette.background)
         .navigationTitle(exercise?.name ?? "Progress")
         .inlineTitle()
         .onAppear {
@@ -197,7 +217,9 @@ struct ExerciseProgress: View {
         .onChange(of: metric) { _, _ in validateTrack() }
         .toolbar {
             Menu {
-                Button { editingExercise = true } label: { Label("Edit exercise", systemImage: "pencil") }
+                Button { editingExercise = true } label: { Label("Edit Exercise", systemImage: "pencil") }
+                if exercise?.hiddenFromProgress == true { Button("Show in Progress", systemImage: "eye") { store.setHiddenFromProgress(exerciseID, false) } }
+                else { Button("Hide from Progress", systemImage: "eye.slash") { store.setHiddenFromProgress(exerciseID, true) } }
                 if !variants.isEmpty {
                     Menu("Prescriptions") {
                         ForEach(variants) { variant in
@@ -281,6 +303,28 @@ struct ExerciseProgress: View {
     }
 }
 
+/// Exercises left out of the Progress overview, with a way to show each again.
+struct HiddenExercisesView: View {
+    @EnvironmentObject var store: AppStore
+    let programID: UUID?
+    private var exercises: [Exercise] { ProgressHistory(data: store.data, programID: programID).exercises.filter { $0.hiddenFromProgress == true } }
+    var body: some View {
+        ThemedForm {
+            Section {
+                if exercises.isEmpty { Text("No hidden exercises").foregroundStyle(.secondary) }
+                ForEach(exercises) { exercise in
+                    HStack {
+                        Text(exercise.name)
+                        Spacer()
+                        Button("Show") { store.setHiddenFromProgress(exercise.id, false) }.buttonStyle(.borderless).accessibilityLabel("Show \(exercise.name) in Progress")
+                    }
+                }
+            } footer: { Text("Hidden exercises are left out of the Progress chart and records. Their history is kept.") }
+        }
+        .formStyle(.grouped).navigationTitle("Hidden Exercises").inlineTitle()
+    }
+}
+
 private enum ProgressRange: Int, CaseIterable, Identifiable {
     case month = 30, quarter = 90, year = 365, all = 0
     var id: Int { rawValue }
@@ -336,6 +380,7 @@ private struct ProgressChartDatum: Identifiable {
 
 private struct ProgressLineChart: View {
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.palette) private var palette
     let tracks: [ProgressTrack]
     let metric: Metric
     let unit: WeightUnit
@@ -388,7 +433,7 @@ private struct ProgressLineChart: View {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), alignment: .leading)], alignment: .leading, spacing: 8) {
                     ForEach(tracks) { track in
                         HStack(alignment: .firstTextBaseline, spacing: 6) {
-                            Circle().fill(progressColor(track.colorIndex, scheme: scheme)).frame(width: 7, height: 7)
+                            Circle().fill(progressColor(track.colorIndex, palette: palette)).frame(width: 7, height: 7)
                             Text(track.label).font(.caption).foregroundStyle(.secondary)
                         }
                     }
@@ -400,7 +445,7 @@ private struct ProgressLineChart: View {
                         ForEach(selection) { point in
                             if let track = tracks.first(where: { $0.id == point.trackID }) {
                                 HStack(alignment: .firstTextBaseline, spacing: 8) {
-                                    Circle().fill(progressColor(track.colorIndex, scheme: scheme)).frame(width: 7, height: 7)
+                                    Circle().fill(progressColor(track.colorIndex, palette: palette)).frame(width: 7, height: 7)
                                     Text(track.label).font(.subheadline)
                                     Spacer()
                                     Text(progressValue(point.value, metric: metric, unit: unit)).font(.subheadline.weight(.semibold)).monospacedDigit()
@@ -409,7 +454,7 @@ private struct ProgressLineChart: View {
                         }
                     }
                     .padding(12)
-                    .background(Palette.secondary(scheme), in: RoundedRectangle(cornerRadius: 8))
+                    .background(palette.field, in: RoundedRectangle(cornerRadius: 8))
                     .accessibilityIdentifier("progress.selection")
                 }
             }
@@ -420,7 +465,7 @@ private struct ProgressLineChart: View {
     private func plot(_ plotted: [ProgressChartDatum], selection: [ProgressChartDatum]) -> some View {
         let selectedIDs = Set(selection.map(\.id))
         let domain: [String] = tracks.map { $0.id.uuidString }
-        let colors: [Color] = tracks.map { progressColor($0.colorIndex, scheme: scheme) }
+        let colors: [Color] = tracks.map { progressColor($0.colorIndex, palette: palette) }
         return Chart {
             ForEach(plotted) { point in
                 lineMark(point)
@@ -485,6 +530,7 @@ private struct ProgressLineChart: View {
 }
 
 private struct ProgressStatistics: View {
+    @Environment(\.palette) private var palette
     let tracks: [ProgressTrack]
     let metric: Metric
     let unit: WeightUnit
@@ -493,7 +539,7 @@ private struct ProgressStatistics: View {
         if tracks.count == 1, let track = tracks.first {
             HStack(alignment: .top, spacing: 12) {
                 stat("Latest", value: track.points.last?.value ?? 0)
-                stat(metric == .rpe ? "Peak" : "Best", value: track.points.map(\.value).max() ?? 0)
+                stat(metric == .rpe ? "Peak" : "Best", value: track.points.map(\.value).max() ?? 0, color: palette.best)
                 stat("Change", value: change(track), signed: true)
             }
         } else {
@@ -509,7 +555,7 @@ private struct ProgressStatistics: View {
                     GridRow(alignment: .firstTextBaseline) {
                         Text(track.shortLabel).font(.caption.weight(.medium))
                         Text(number(track.points.last?.value ?? 0))
-                        Text(number(track.points.map(\.value).max() ?? 0))
+                        Text(number(track.points.map(\.value).max() ?? 0)).foregroundStyle(palette.best)
                         Text(signedNumber(change(track)))
                     }
                     .font(.subheadline).monospacedDigit()
@@ -520,9 +566,9 @@ private struct ProgressStatistics: View {
     }
 
     private func change(_ track: ProgressTrack) -> Double { (track.points.last?.value ?? 0) - (track.points.first?.value ?? 0) }
-    private func stat(_ title: String, value: Double, signed: Bool = false) -> some View {
+    private func stat(_ title: String, value: Double, signed: Bool = false, color: Color = .primary) -> some View {
         VStack(alignment: .leading, spacing: 5) {
-            Text(signed ? signedNumber(value) : number(value)).font(.title3.weight(.semibold)).monospacedDigit()
+            Text(signed ? signedNumber(value) : number(value)).font(.title3.weight(.semibold)).monospacedDigit().foregroundStyle(color)
                 .minimumScaleFactor(0.75).lineLimit(1)
             Text(title).font(.caption).foregroundStyle(.secondary)
         }
@@ -541,6 +587,7 @@ private struct ProgressRecord: Identifiable {
 }
 
 private struct ProgressRecordRow: View {
+    @Environment(\.palette) private var palette
     let record: ProgressRecord
     let unit: WeightUnit
     var body: some View {
@@ -556,8 +603,8 @@ private struct ProgressRecordRow: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             VStack(alignment: .trailing, spacing: 5) {
                 Text(progressValue(record.latest?.value ?? 0, metric: record.metric, unit: unit)).font(.subheadline.weight(.semibold)).foregroundStyle(.primary).monospacedDigit()
-                Text("\(record.metric == .rpe ? "Peak" : "Best") \(progressValue(record.best, metric: record.metric, unit: unit))")
-                    .font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                Label("\(record.metric == .rpe ? "Peak" : "Best") \(progressValue(record.best, metric: record.metric, unit: unit))", systemImage: "star.fill")
+                    .labelStyle(TightLabelStyle()).font(.caption.weight(.medium)).foregroundStyle(palette.best).monospacedDigit()
             }
             Image(systemName: "chevron.right").font(.caption2.weight(.semibold)).foregroundStyle(.tertiary)
         }
@@ -577,8 +624,13 @@ private struct ProgressHistory {
     let exercises: [Exercise]
     private let descriptors: [Descriptor]
 
-    init(data: TrainingData, programID: UUID? = nil) {
+    /// The overview leaves out exercises hidden from Progress; an exercise's own screen includes them.
+    init(data: TrainingData, programID: UUID? = nil, includeHidden: Bool = true) {
         var data = data
+        if !includeHidden {
+            let hidden = Set(data.exercises.filter { $0.hiddenFromProgress == true }.map(\.id))
+            data.sessions = data.sessions.map { session in var copy = session; copy.exercises.removeAll { hidden.contains($0.exerciseID) }; return copy }
+        }
         data.sessions = data.sessions(inProgram: programID)
         self.data = data
         var observed: [UUID: SessionExercise] = [:]
@@ -644,8 +696,10 @@ private struct ProgressHistory {
     }
 }
 
-private func progressColor(_ index: Int, scheme: ColorScheme) -> Color {
-    let colors: [Color] = [Palette.tint(scheme), .blue, .orange, .purple, .red, .cyan, .pink, .indigo, .teal, .brown]
+private func progressColor(_ index: Int, palette: Palette) -> Color {
+    // Series start with the Action color; the rest are spaced so up to ten lines stay distinct.
+    let colors: [Color] = [palette.action, Color(hex: 0xFF2D55), Color(hex: 0x5856D6), Color(hex: 0xA2845E), Color(hex: 0x00C7BE),
+                           Color(hex: 0xFF9500), Color(hex: 0xAF52DE), Color(hex: 0x8E8E93), Color(hex: 0x34C759), Color(hex: 0xFFCC00)]
     return colors[index % colors.count]
 }
 

@@ -5,7 +5,7 @@ struct WarmupPresetLibrary: View {
     @EnvironmentObject var store: AppStore
     @State private var editing: WarmupPreset?
     var body: some View {
-        Form {
+        ThemedForm {
             ForEach(store.data.warmupPresets) { preset in
                 Button { editing = preset } label: {
                     VStack(alignment: .leading, spacing: 5) {
@@ -32,7 +32,7 @@ struct WarmupPresetEditor: View {
     @State var preset: WarmupPreset
     var body: some View {
         NavigationStack {
-            Form {
+            ThemedForm {
                 StoreErrorRow()
                 Section { TextField("Preset name", text: $preset.name).accessibilityIdentifier("warmups.name") }
                 Section("Sets") {
@@ -85,7 +85,7 @@ struct ApplyWarmupPreset: View {
     }
     var body: some View {
         NavigationStack {
-            Form {
+            ThemedForm {
                 StoreErrorRow()
                 Section {
                     Picker("Preset", selection: $selectedPreset) {

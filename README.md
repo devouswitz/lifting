@@ -29,11 +29,11 @@ open -n '../Lifting Preview.app' --args --demo
 
 ## Controls
 
-- Train: load a Program and start its next Day. Each program remembers its place. Completing another day does not skip the next one.
-- Programs: add blank days or copy day templates, then reorder, edit, duplicate, or export. Templates stay reusable; each copy has independent prescriptions and tracking.
+- Train: the loaded program's next day with Start, its later days in the order they come up, and Start Empty Workout. Tap the program row to switch programs or open one. Each program remembers its place. Completing another day does not skip the next one. Skip Workout in the next day's menu saves it to History with every set unchecked and moves on. Move Earlier/Later reorders what comes up next.
+- Programs: tap a program to load it, or its info button to edit days, order, and notes; tap its name to rename it. Edit reorders and deletes programs and day templates; rows also swipe to Delete or Duplicate. Day templates, New Program, New Template, the Exercises list (New Exercise, edit any exercise), and CSV import live on the same screen. Each day's screen has Start, Edit, and a menu for Make Next Workout, moving, duplicating, templates, export, and delete. Templates stay reusable; each copy has independent prescriptions and tracking.
 - Prescription: configure working load, each set, percentage warm-ups, rep ranges, AMRAP, time, distance, RPE, rest, notes, and optional progression.
 - Set targets: choose No count for RPE-only sets, Reps for a fixed target, or Rep range for minimum and maximum reps. Warm-ups can use a percentage of the working set.
-- Workout: tap the checkbox to log a set, tap a value to edit, tap the working load to update remaining work and percentage warm-ups.
+- Workout: tap the check to log a set, tap a value to edit it on the keypad, tap Working to update remaining work and percentage warm-ups, tap Rest to change rest between sets. Swap Exercise is in each exercise's menu.
 - Substitute: choose Today only or Future sessions, then an exercise. Completed sets stay on the original exercise. Future changes affect this day slot only.
 - Drop: choose reductions, number of drops, and reps. Recurring drop loads stay relative to working weight.
 - MYO: choose activation reps, mini-set count, mini-set reps, and rest. Replace remaining work sets if desired. Add mini-sets, change values, or remove sets during the workout.
@@ -43,10 +43,16 @@ open -n '../Lifting Preview.app' --args --demo
 - Save to this day: makes live load, drop/MYO, warm-up, or link changes recur. Otherwise they apply to the current workout.
 - Tap an exercise header to expand or collapse it. Opening one focuses that exercise. Warm-ups and working sets have separate compact tables. Automatic collapse after completion is optional in Settings. Workout options include Collapse All and Expand All.
 - Each set's menu (tap the set number, or long-press the row) edits today's targets, logs reps, time, or distance, sets rest, changes type, or deletes the set. Range targets stay visible without assuming an exact rep count. Tap the range to optionally record reps completed. Uncounted reps do not contribute to rep totals, volume, estimated max, or automatic progression.
-- History: browse dated results or a selectable monthly calendar with comparisons to the previous month. Rest days count only days that have passed. Open a workout to inspect or edit its sets and notes; swipe a set in Edit to delete it.
-- Progress: choose a program or All programs, then compare separate exercise and day tracks, choose a metric and date range, or scrub a graph for actual recorded values. Exercise details include dated results.
+- History: browse dated results or a monthly calendar. Tap a day to see its workouts. The comparison covers the past week, month, three months, or year against the period before, including average volume per muscle. Rest days count only days that have passed. Open a workout to inspect or edit its sets and notes; swipe a set in Edit to delete it.
+- Progress: choose a program or All programs, then compare separate exercise and day tracks, choose a metric and date range, or scrub a graph for actual recorded values. Exercise details include dated results. Hide an exercise you no longer do from its menu or by long-pressing its record; Hidden exercises lists them to show again.
 - Progress > Muscles: compare logged sets or load volume by primary muscle, with optional half-set credit for secondary muscles. Program and date filters apply. Warm-ups and cardio are excluded; drop/MYO sets count individually. Unknown rep counts contribute no invented volume. Muscle assignments can be edited with an exercise; new sessions snapshot them.
-- Settings: units and appearance, workout preferences, plate sizes, folder backup/sync, JSON backup/restore, and CSV import/export.
+- Settings: units, appearance, and colors, workout preferences, plate sizes, folder backup/sync, JSON backup/restore, and CSV import/export.
+- Set types: Settings > Set Types lists the built-in types (Warm-up, Working, Drop, MYO, Failure) and custom ones. A custom type has a name, a 1-3 character badge, an optional color, and counts as a working set, warm-up, or failure set, which decides volume, records, progression, and warm-up handling. Custom types appear in every set-type menu, the prescription editor's Add Sets menu, history, CSV, backups, and sync. Changing what a type counts as updates saved prescriptions; deleting one leaves its sets counting the same way under the built-in name.
+- Quick-add buttons: the two buttons next to Add Set in a workout default to Drop and MYO. Long-press either to swap it for Drop, MYO, Warm-up, Failure, or a custom type; the choice applies to every exercise and can also be set in Settings > Set Types.
+- Supersets and circuits: in a day's editor, tap Superset / Circuit (or long-press an exercise), check two exercises for a superset or three or more for a circuit, and set rest between exercises and between rounds. In a workout, use an exercise's menu or the workout menu; Save to this day makes it recur. Logging moves to the next exercise in the group.
+- Exercises: Programs > Exercises lists every exercise; New Exercise adds one without putting it in a day, and tapping one edits it.
+- Support: Settings ends with a Ko-fi link.
+- Colors: each color role (Action, Completed, Warm-up, Drop and MYO, Failure, Rest and time, Best, Background, Cards, Fields) can be set separately for light and dark mode, with a live preview. Colors are a device preference and are included in JSON backups.
 
 Weights are stored in kilograms and converted for display. Warm-up and drop percentages round down to the variant's increment. RPE is a user-entered target or observation.
 

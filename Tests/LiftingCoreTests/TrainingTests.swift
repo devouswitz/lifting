@@ -1114,4 +1114,124 @@ final class TrainingTests: XCTestCase {
         let bytes = try LocalRepository.encode(data)
         XCTAssertEqual(try LocalRepository.decode(bytes).sessions.count, 30)
     }
+
+    func testColorThemeOverridesDefaultsPerAppearanceAndValidates() throws {
+        var theme = ColorTheme()
+        XCTAssertEqual(theme.hex(.action, dark: false), ColorRole.action.defaultHex(dark: false))
+        theme.set(.warmup, dark: true, hex: 0x123456)
+        XCTAssertEqual(theme.hex(.warmup, dark: true), 0x123456)
+        XCTAssertEqual(theme.hex(.warmup, dark: false), ColorRole.warmup.defaultHex(dark: false))
+        XCTAssertTrue(theme.isCustomized(.warmup, dark: true))
+        theme.set(.warmup, dark: true, hex: ColorRole.warmup.defaultHex(dark: true))
+        XCTAssertFalse(theme.isCustomized(.warmup, dark: true))
+        XCTAssertEqual(ColorTheme.parse("#0A84FF"), 0x0A84FF)
+        XCTAssertNil(ColorTheme.parse("#12345"))
+        var data = TrainingData.starter()
+        data.settings.colors = theme
+        XCTAssertNoThrow(try data.validated())
+        let decoded = try LocalRepository.decode(LocalRepository.encode(data))
+        XCTAssertEqual(decoded.settings.colors, theme)
+        data.settings.colors?.light["action"] = "blue"
+        XCTAssertThrowsError(try data.validated())
+        data.settings.colors?.light = ["unknown": "#FFFFFF"]
+        XCTAssertThrowsError(try data.validated())
+        let partial = try JSONDecoder().decode(ColorTheme.self, from: Data(##"{"dark":{"action":"#112233","future":"#FFFFFF","rest":"teal"}}"##.utf8))
+        XCTAssertEqual(partial.dark, ["action": "#112233"])
+        XCTAssertTrue(partial.light.isEmpty)
+    }
+
+    func testCustomSetTypesCountAsTheirBaseKindAndTravelThroughCSVAndSync() throws {
+        var data = TrainingData.starter()
+        let backoff = CustomSetType(name: "Back-off", badge: "b", countsAs: .working)
+        try data.saveSetType(backoff)
+        XCTAssertEqual(data.customSetTypes[0].badge, "B")
+        XCTAssertThrowsError(try data.saveSetType(CustomSetType(name: "back-off", badge: "X")))
+        XCTAssertThrowsError(try data.saveSetType(CustomSetType(name: "Warm-up", badge: "X")))
+        let day = data.dayTemplates[0], v = data.variants.firstIndex { $0.id == day.slots[0].variantID }!
+        var plan = data.variants[v].sets.last { $0.kind == .working }!
+        plan.id = UUID(); plan.customTypeID = backoff.id; data.variants[v].sets.append(plan)
+        XCTAssertEqual(data.setTypeTitle(plan), "Back-off")
+
+        // Changing what a type counts as updates saved prescriptions.
+        var feeder = data.customSetTypes[0]; feeder.countsAs = .warmup
+        try data.saveSetType(feeder)
+        XCTAssertEqual(data.variants[v].sets.last!.kind, .warmup)
+        feeder.countsAs = .working; try data.saveSetType(feeder)
+
+        // Day CSV keeps the type and matches it by name on import.
+        let csv = try RoutineCSV.decode(RoutineCSV.export(data, dayID: day.id)).content
+        XCTAssertEqual(csv.customSetTypes.map(\.name), ["Back-off"])
+        var other = TrainingData(); try other.importRoutines(RoutineBundle(content: csv))
+        let imported = other.variants.flatMap(\.sets).first { $0.customTypeID != nil }!
+        XCTAssertEqual(other.setTypeTitle(imported), "Back-off"); XCTAssertEqual(imported.kind, .working)
+        try other.importRoutines(RoutineBundle(content: csv))
+        XCTAssertEqual(other.customSetTypes.count, 1)
+
+        // Live add copies the last work set and counts toward volume.
+        try data.start(routineID: day.id)
+        let item = data.activeSession!.exercises[0]
+        try data.addTypedSet(to: item.id, kind: .working, customTypeID: backoff.id)
+        let added = data.activeSession!.exercises[0].sets.last!
+        XCTAssertEqual(added.plan.customTypeID, backoff.id); XCTAssertEqual(added.plan.kind, .working); XCTAssertNil(added.completedAt)
+        try data.toggleSet(exerciseID: item.id, setID: added.id)
+        XCTAssertGreaterThan(data.activeSession!.volume, 0)
+        try data.addTypedSet(to: item.id, kind: .warmup)
+        XCTAssertEqual(data.activeSession!.exercises[0].sets.last!.plan.kind, .warmup)
+        try data.finish()
+
+        // History CSV keeps the type name; sync carries the type record.
+        let history = try HistoryCSV.decode(HistoryCSV.export(data)).content
+        XCTAssertTrue(history.customSetTypes.contains { $0.name == "Back-off" })
+        var state = DeviceSyncState(); try state.capture(data)
+        var receiver = DeviceSyncState(); let synced = try receiver.merge([state], into: TrainingData())
+        XCTAssertEqual(synced.customSetTypes, data.customSetTypes)
+
+        // Removing a type leaves sets counting as before, under the built-in name.
+        data.removeSetType(backoff.id)
+        XCTAssertNil(data.variants[v].sets.last!.customTypeID)
+        XCTAssertEqual(data.variants[v].sets.last!.kind, .working)
+        XCTAssertNoThrow(try data.validated())
+        let legacy = try LocalRepository.decode(LocalRepository.encode(TrainingData.starter()))
+        XCTAssertTrue(legacy.customSetTypes.isEmpty)
+    }
+
+    func testSkipRecordsUncheckedDayAndAdvancesProgram() throws {
+        var data = TrainingData.starter()
+        try data.createProgram(name: "Test", templateIDs: data.dayTemplates.map(\.id))
+        let program = data.programs.last!
+        let first = program.dayIDs[0], second = program.dayIDs[1]
+        try data.skipNextDay(in: program.id)
+        XCTAssertEqual(data.program(program.id)!.nextDayID, second)
+        let skipped = data.sessions.last!
+        XCTAssertEqual(skipped.skipped, true); XCTAssertEqual(skipped.routineID, first)
+        XCTAssertEqual(skipped.completedSets, 0); XCTAssertGreaterThan(skipped.totalSets, 0)
+        XCTAssertTrue(data.muscleSummary().isEmpty)
+        XCTAssertNoThrow(try data.validated())
+        let decoded = try LocalRepository.decode(LocalRepository.encode(data))
+        XCTAssertEqual(decoded.sessions.last!.skipped, true)
+        try data.start(routineID: second)
+        XCTAssertThrowsError(try data.skipNextDay(in: program.id))
+        let templates = data.dayTemplates.map(\.id)
+        try data.reorderTemplates(templates.reversed())
+        XCTAssertEqual(data.dayTemplates.map(\.id), templates.reversed())
+        XCTAssertThrowsError(try data.reorderTemplates([templates[0]]))
+    }
+
+    func testMovingUpcomingDaysChangesWhatComesNext() throws {
+        var data = TrainingData()
+        let id = try data.createProgram(name: "Four", templateIDs: [])
+        for name in ["A", "B", "C", "D"] { _ = try data.addDay(to: id, name: name) }
+        let names = { data.upcomingDays(id).compactMap { data.routine($0)?.name } }
+        let day = { (name: String) in data.routines.first { $0.name == name }!.id }
+        try data.selectNextDay(day("B"), in: id)
+        XCTAssertEqual(names(), ["B", "C", "D", "A"])
+        try data.moveUpcomingDay(day("B"), by: 1, in: id)
+        XCTAssertEqual(names(), ["C", "B", "D", "A"])
+        XCTAssertEqual(data.program(id)!.nextDayID, day("C"))
+        try data.moveUpcomingDay(day("A"), by: -1, in: id)
+        XCTAssertEqual(names(), ["C", "B", "A", "D"])
+        XCTAssertThrowsError(try data.moveUpcomingDay(day("C"), by: -1, in: id))
+        XCTAssertThrowsError(try data.moveUpcomingDay(day("D"), by: 1, in: id))
+        XCTAssertNoThrow(try data.validated())
+    }
 }

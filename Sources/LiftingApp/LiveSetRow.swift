@@ -4,6 +4,7 @@ import LiftingCore
 struct LiveSetRow: View {
     @EnvironmentObject var store: AppStore
     @Environment(\.colorScheme) var scheme
+    @Environment(\.palette) var palette
     @Environment(\.dynamicTypeSize) var typeSize
     let exerciseID: UUID
     let setID: UUID
@@ -14,45 +15,49 @@ struct LiveSetRow: View {
     var set: LoggedSet? { item?.sets.first { $0.id == setID } }
     var previous: LoggedSet? {
         guard let item, let set else { return nil }
-        let sets = (store.data.sessions.sorted { $0.startedAt > $1.startedAt }.compactMap { $0.exercises.first { $0.variantID == item.variantID } }.first?.sets ?? []).filter { $0.plan.kind == set.plan.kind }
+        let sets = (store.data.sessions.filter { $0.skipped != true }.sorted { $0.startedAt > $1.startedAt }.compactMap { $0.exercises.first { $0.variantID == item.variantID } }.first?.sets ?? []).filter { $0.plan.kind == set.plan.kind }
         let ordinal = item.sets.prefix(index).filter { $0.plan.kind == set.plan.kind }.count
         if sets.indices.contains(ordinal), sets[ordinal].completedAt != nil { return sets[ordinal] }
         return nil
     }
     var body: some View {
         if let set, let item {
-            let columns = SetTableColumns(item: item, warmup: set.plan.kind == .warmup)
+            let columns = SetTableColumns(item: item)
             VStack(alignment: .leading, spacing: 3) {
                 let stacked = typeSize.isAccessibilitySize || (item.mode == .cardio && (set.weight != nil || set.reps != nil))
                 let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6)) : AnyLayout(HStackLayout(spacing: 6))
                 layout {
-                    VStack(spacing: 0) {
-                    Menu { setMenu(set) } label: {
-                        Text(setLabel(set, item: item)).font(.caption.weight(.semibold)).foregroundStyle(.secondary).frame(width: 28, height: set.plan.load == .percent ? 30 : 44)
-                    }.compactMenu().accessibilityLabel("\(set.plan.kind.title), set \(index + 1), options")
-                    if set.plan.load == .percent { Text("\(number(set.plan.percent))%").font(.system(size: 9)).foregroundStyle(.secondary) }
-                    }.frame(width: 28)
+                    VStack(spacing: 1) {
+                        Menu { setMenu(set) } label: { SetBadge(text: setLabel(set, item: item), plan: set.plan) }
+                            .compactMenu().accessibilityLabel("\(palette.title(set.plan)), set \(setLabel(set, item: item)), options")
+                        if set.plan.load == .percent { Text("\(number(set.plan.percent))%").font(.system(size: 10, weight: .medium)).monospacedDigit().foregroundStyle(.secondary) }
+                    }.frame(width: 32, height: 44)
                     HStack(spacing: 6) {
                         if !stacked {
                             if let previous {
-                                Button { copy(previous) } label: { Text(previousValue(previous)).font(.caption).monospacedDigit().foregroundStyle(.secondary).frame(width: 64, height: 44) }.buttonStyle(.plain).accessibilityLabel("Copy previous: \(loggedSetSummary(previous, unit: store.data.settings.unit))")
-                            } else { Text("·").foregroundStyle(.tertiary).frame(width: 64, height: 44) }
+                                Button { copy(previous) } label: { Text(previousValue(previous)).font(.footnote).monospacedDigit().foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.8).frame(width: 64, height: 44) }.buttonStyle(.plain).accessibilityLabel("Copy previous: \(loggedSetSummary(previous, unit: store.data.settings.unit))")
+                            } else { Text("–").foregroundStyle(.tertiary).frame(width: 64, height: 44) }
                         }
                         if columns.weight { cell(title: store.data.settings.unit.rawValue.uppercased(), value: set.weight.map { number(store.data.settings.unit.display($0)) }, field: .weight, labeled: stacked) }
-                        if columns.reps { cell(title: set.plan.amrap ? "AMRAP" : "REPS", value: set.reps.map(String.init), field: .reps, labeled: stacked, placeholder: set.plan.repRange != nil ? set.plan.repTarget : nil) }
+                        if columns.reps { cell(title: set.plan.amrap ? "AMRAP" : "REPS", value: set.reps.map(String.init), field: .reps, labeled: stacked, placeholder: set.plan.repRange != nil ? set.plan.repTarget?.replacingOccurrences(of: "-", with: "–") : nil) }
                         if columns.time { cell(title: "TIME", value: set.seconds.map(clockText), field: .time, labeled: stacked) }
                         if columns.distance { cell(title: "METERS", value: set.meters.map { number($0) }, field: .distance, labeled: stacked) }
-                        cell(title: "RPE", value: set.rpe.map { number($0) }, field: .rpe, labeled: stacked).frame(maxWidth: stacked || !columns.hasMeasurements ? .infinity : 42)
-                        Button { store.toggle(exerciseID, setID) } label: {
-                            Image(systemName: set.completedAt == nil ? "square" : "checkmark.square.fill").font(.system(size: 23)).foregroundStyle(set.completedAt == nil ? Color.secondary.opacity(0.6) : Palette.tint(scheme)).frame(width: 40, height: 44)
-                        }.buttonStyle(.plain).accessibilityLabel("\(set.completedAt == nil ? "Complete" : "Undo") \(set.plan.kind.title.lowercased()) set \(setLabel(set, item: item))").accessibilityIdentifier("workout.\(exerciseID).\(setID).complete")
+                        cell(title: "RPE", value: set.rpe.map { number($0) }, field: .rpe, labeled: stacked).frame(maxWidth: stacked || !columns.hasMeasurements ? .infinity : 44)
+                        Button { withAnimation(.snappy(duration: 0.2)) { store.toggle(exerciseID, setID) } } label: {
+                            let done = set.completedAt != nil
+                            Image(systemName: "checkmark").font(.system(size: 14, weight: .bold))
+                                .foregroundStyle(done ? palette.on(.completed) : Color.secondary.opacity(0.5))
+                                .frame(width: 32, height: 32)
+                                .background(done ? palette.completed : palette.field, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                .frame(width: 40, height: 44).contentShape(Rectangle())
+                        }.buttonStyle(.plain).accessibilityLabel("\(set.completedAt == nil ? "Complete" : "Undo") \(palette.title(set.plan).lowercased()) set \(setLabel(set, item: item))").accessibilityIdentifier("workout.\(exerciseID).\(setID).complete")
                     }
                 }
-                if let rest = set.plan.restSeconds { Text(rest == 0 ? "No rest" : "\(clockText(Double(rest))) rest").font(.caption2).foregroundStyle(.secondary).padding(.leading, 34) }
-            }.padding(.horizontal, 2).padding(.vertical, 2)
-            .background(set.completedAt != nil ? Palette.tint(scheme).opacity(0.08) : .clear, in: RoundedRectangle(cornerRadius: 6))
+                if let rest = set.plan.restSeconds { Label(rest == 0 ? "No rest" : "\(clockText(Double(rest))) rest", systemImage: "timer").font(.caption2).foregroundStyle(palette.rest).padding(.leading, 40).padding(.bottom, 2) }
+            }.padding(.horizontal, 2)
+            .background(set.completedAt != nil ? palette.wash(.completed) : .clear, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
             .contextMenu { setMenu(set) }
-            .sheet(item: $edit) { NumericPad(edit: $0).sheetSize() }
+            .sheet(item: $edit) { NumericPad(edit: $0) }
             .sheet(isPresented: $editingPlan) { LivePlanEditor(exerciseID: exerciseID, setID: setID, initial: set.plan).environmentObject(store).sheetSize() }
         }
     }
@@ -64,8 +69,16 @@ struct LiveSetRow: View {
         Button("Rest After Set", systemImage: "timer") { open(.rest) }
         Menu("Set Type") {
             ForEach(SetKind.allCases) { kind in
-                Button { store.editSet(exerciseID, setID) { $0.plan.kind = kind } } label: {
-                    if set.plan.kind == kind { Label(kind.title, systemImage: "checkmark") } else { Text(kind.title) }
+                Button { store.editSet(exerciseID, setID) { $0.plan.kind = kind; $0.plan.customTypeID = nil } } label: {
+                    if set.plan.kind == kind && set.plan.customTypeID == nil { Label(kind.title, systemImage: "checkmark") } else { Text(kind.title) }
+                }
+            }
+            if !store.data.customSetTypes.isEmpty {
+                Divider()
+                ForEach(store.data.customSetTypes) { type in
+                    Button { store.editSet(exerciseID, setID) { $0.plan.kind = type.countsAs; $0.plan.customTypeID = type.id } } label: {
+                        if set.plan.customTypeID == type.id { Label(type.name, systemImage: "checkmark") } else { Text(type.name) }
+                    }
                 }
             }
         }
@@ -76,8 +89,8 @@ struct LiveSetRow: View {
         Button { open(field) } label: {
             VStack(spacing: 3) {
                 if labeled { Text(title).font(.caption2).foregroundStyle(.secondary) }
-                Text(value ?? placeholder ?? "·").font(.body.weight(.medium)).monospacedDigit().foregroundStyle(value == nil ? .secondary : .primary)
-            }.frame(maxWidth: .infinity, minHeight: 38).background(Palette.secondary(scheme).opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
+                Text(value ?? placeholder ?? "–").font(.figure(17)).foregroundStyle(value == nil ? .secondary : .primary).lineLimit(1).minimumScaleFactor(0.7)
+            }.frame(maxWidth: .infinity, minHeight: 36).background(self.set?.completedAt == nil ? palette.field : Color.clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         }.buttonStyle(.plain).accessibilityLabel("Set \(index + 1), \(title), \(value ?? "not set")\(placeholder.map { ", target \($0)" } ?? "")").accessibilityIdentifier("workout.\(exerciseID).\(setID).\(field.rawValue)")
     }
     func previousValue(_ set: LoggedSet) -> String {
@@ -110,18 +123,23 @@ struct LiveSetRow: View {
         case .rpe: value = set.rpe; title = "RPE"; step = 0.5; maximum = 10
         case .rest: value = set.plan.restSeconds.map(Double.init); title = "Rest (seconds)"; step = 5; maximum = 86400
         }
-        edit = NumericEdit(title: title, value: value, step: step, maximum: maximum, integer: field == .reps || field == .rest) { newValue in
+        edit = NumericEdit(title: title, context: item.map { "\($0.name), set \(setLabel(set, item: $0))" }, value: value, step: step, maximum: maximum, integer: field == .reps || field == .rest) { newValue in
             store.editSet(exerciseID, setID) { s in
                 switch field { case .weight: s.weight = newValue.map(unit.kilograms); case .reps: s.reps = newValue.map(Int.init); case .time: s.seconds = newValue.map { $0 * 60 }; case .distance: s.meters = newValue; case .rpe: s.rpe = newValue; case .rest: s.plan.restSeconds = newValue.map(Int.init) }
             }
         }
     }
-    func setLabel(_ set: LoggedSet, item: SessionExercise) -> String { setBadge(item.sets.map(\.plan.kind), index: index) }
+    func setLabel(_ set: LoggedSet, item: SessionExercise) -> String { setBadge(item.sets.map(\.plan), index: index, types: store.data.customSetTypes) }
 }
 
 /// Short set label used in workout and prescription tables: W1, 1, D1, A, M1, F.
-func setBadge(_ kinds: [SetKind], index: Int) -> String {
-    guard kinds.indices.contains(index) else { return "" }
+func setBadge(_ plans: [SetPlan], index: Int, types: [CustomSetType]) -> String {
+    guard plans.indices.contains(index) else { return "" }
+    if let id = plans[index].customTypeID, let type = types.first(where: { $0.id == id }) {
+        let count = plans.prefix(index + 1).filter { $0.customTypeID == id }.count
+        return type.badge.count >= 3 || plans.filter({ $0.customTypeID == id }).count == 1 ? type.badge : "\(type.badge)\(count)"
+    }
+    let kinds = plans.map(\.kind)
     let prefix = kinds.prefix(index + 1)
     switch kinds[index] {
     case .warmup: return "W\(prefix.filter { $0 == .warmup }.count)"
@@ -136,6 +154,7 @@ func setBadge(_ kinds: [SetKind], index: Int) -> String {
 struct NumericEdit: Identifiable {
     let id = UUID()
     let title: String
+    var context: String? = nil
     let value: Double?
     let step: Double
     let maximum: Double
@@ -143,30 +162,76 @@ struct NumericEdit: Identifiable {
     let onSave: (Double?) -> Void
 }
 
+/// Compact keypad sheet for entering one value without leaving the workout.
 struct NumericPad: View {
     @Environment(\.dismiss) var dismiss
+    @Environment(\.palette) var palette
+    @Environment(\.dynamicTypeSize) var typeSize
     let edit: NumericEdit
+    @FocusState private var keysFocused: Bool
     @State private var text: String
     @State private var error: String?
+    @State private var replacing = true
     init(edit: NumericEdit) { self.edit = edit; _text = State(initialValue: edit.value.map { number($0, decimals: 3) } ?? "") }
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 16) {
-                TextField("Optional", text: $text).font(.system(.largeTitle, design: .rounded).weight(.semibold)).multilineTextAlignment(.center).textFieldStyle(.plain).monospacedDigit().padding(.vertical, 12).accessibilityIdentifier("number.value")
-                HStack(spacing: 12) {
-                    ForEach([-2.0, -1, 1, 2], id: \.self) { multiplier in
-                        Button("\(multiplier > 0 ? "+" : "")\(number(edit.step * multiplier))") { text = number(min(edit.maximum, max(0, (Double(text) ?? 0) + edit.step * multiplier)), decimals: 3) }.buttonStyle(.bordered).frame(maxWidth: .infinity)
-                    }
+        VStack(spacing: 14) {
+            HStack {
+                Button("Cancel") { dismiss() }.foregroundStyle(palette.action)
+                Spacer()
+                VStack(spacing: 1) {
+                    Text(edit.title).font(.headline)
+                    if let context = edit.context { Text(context).font(.caption).foregroundStyle(.secondary) }
                 }
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 3), spacing: 12) {
-                    ForEach(["1", "2", "3", "4", "5", "6", "7", "8", "9", ".", "0", "⌫"], id: \.self) { digit in
-                        Button { if digit == "⌫" { if !text.isEmpty { text.removeLast() } } else if digit == "." { if !edit.integer && !text.contains(".") { text += text.isEmpty ? "0." : "." } } else if text.count < 10 { text = text == "0" ? digit : text + digit } } label: { Text(digit).font(.title2.weight(.medium)).frame(maxWidth: .infinity, minHeight: 55) }.buttonStyle(.bordered)
-                    }
+                Spacer()
+                Button("Clear") { text = ""; replacing = false }.foregroundStyle(palette.action)
+            }
+            Text(text.isEmpty ? "–" : text).font(.figure(44, weight: .bold)).foregroundStyle(text.isEmpty ? .secondary : .primary)
+                .frame(maxWidth: .infinity, minHeight: 56).accessibilityIdentifier("number.value").accessibilityLabel("\(edit.title), \(text.isEmpty ? "empty" : text)")
+            HStack(spacing: 8) {
+                ForEach([-2.0, -1, 1, 2], id: \.self) { multiplier in
+                    Button { text = number(min(edit.maximum, max(0, (Double(text) ?? 0) + edit.step * multiplier)), decimals: 3); replacing = false } label: {
+                        Text("\(multiplier > 0 ? "+" : "−")\(number(edit.step * abs(multiplier)))").font(.subheadline.weight(.semibold).monospacedDigit())
+                            .foregroundStyle(palette.action).frame(maxWidth: .infinity, minHeight: 34).background(palette.wash(.action), in: Capsule())
+                    }.buttonStyle(.plain)
                 }
-                if let error { Text(error).font(.footnote).foregroundStyle(.red) }
-                HStack { Button("Clear") { text = "" }; Spacer(); Button("Done", action: save).buttonStyle(AccentButtonStyle()).keyboardShortcut(.defaultAction).accessibilityIdentifier("number.done") }
-                Spacer(minLength: 0)
-            }.padding(24).navigationTitle(edit.title).inlineTitle().toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
+            }
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3), spacing: 8) {
+                ForEach(["1", "2", "3", "4", "5", "6", "7", "8", "9", ".", "0", "⌫"], id: \.self) { key in
+                    Button { press(key) } label: {
+                        Group { if key == "⌫" { Image(systemName: "delete.left") } else { Text(key) } }
+                            .font(.title2.weight(.medium)).foregroundStyle(key == "." && edit.integer ? Color.secondary.opacity(0.3) : Color.primary)
+                            .frame(maxWidth: .infinity, minHeight: 50).background(palette.field, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    }.buttonStyle(.plain).disabled(key == "." && edit.integer).accessibilityLabel(key == "⌫" ? "Delete" : key)
+                }
+            }
+            if let error { Text(error).font(.footnote).foregroundStyle(palette.failure) }
+            Button(action: save) { Text("Done").frame(maxWidth: .infinity) }.buttonStyle(AccentButtonStyle()).keyboardShortcut(.defaultAction).accessibilityIdentifier("number.done")
+        }
+        .padding(.horizontal, 20).padding(.top, 18).padding(.bottom, 12)
+        .frame(idealWidth: 420)
+        // Hardware keyboards (iPad, Mac) type into the pad directly.
+        .focusable().focused($keysFocused).focusEffectDisabled()
+        .onAppear { keysFocused = true }
+        .onKeyPress { key in
+            if key.key == .return { save(); return .handled }
+            if key.key == .delete { press("⌫"); return .handled }
+            if key.key == .escape { dismiss(); return .handled }
+            let character = key.characters == "," ? "." : key.characters
+            if character.count == 1, "0123456789.".contains(character) { press(character); return .handled }
+            return .ignored
+        }
+        .presentationBackground(palette.card)
+        .presentationDetents(typeSize.isAccessibilitySize ? [.large] : [.height(edit.context == nil ? 520 : 540), .large])
+        .presentationDragIndicator(.visible)
+    }
+    /// The first key replaces the shown value, so typing a new weight does not append to the old one.
+    private func press(_ key: String) {
+        error = nil
+        if replacing && key != "⌫" { text = ""; replacing = false }
+        switch key {
+        case "⌫": replacing = false; if !text.isEmpty { text.removeLast() }
+        case ".": if !edit.integer && !text.contains(".") { text += text.isEmpty ? "0." : "." }
+        default: if text.count < 10 { text = text == "0" ? key : text + key }
         }
     }
     func save() {
@@ -211,8 +276,8 @@ struct SetTableColumns {
     let time: Bool
     let distance: Bool
     var hasMeasurements: Bool { weight || reps || time || distance }
-    init(item: SessionExercise, warmup: Bool) {
-        let sets = item.sets.filter { ($0.plan.kind == .warmup) == warmup }
+    init(item: SessionExercise) {
+        let sets = item.sets
         weight = sets.contains { $0.weight != nil || $0.plan.load != .none }
         reps = sets.contains { $0.reps != nil || $0.plan.reps != nil }
         time = item.mode == .cardio || sets.contains { $0.seconds != nil }

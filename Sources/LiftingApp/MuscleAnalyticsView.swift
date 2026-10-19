@@ -4,6 +4,7 @@ import LiftingCore
 
 struct MuscleAnalyticsView: View {
     @EnvironmentObject var store: AppStore
+    @Environment(\.palette) var palette
     let programID: UUID?
     let since: Date
     @State private var volume = false
@@ -19,7 +20,7 @@ struct MuscleAnalyticsView: View {
             if rows.isEmpty { Text("No logged strength sets in this range.").foregroundStyle(.secondary).padding(.vertical, 24) }
             else {
                 Chart(rows) { row in
-                    BarMark(x: .value(volume ? store.data.settings.unit.rawValue : "Sets", value(row)), y: .value("Muscle", row.name)).foregroundStyle(Palette.accent)
+                    BarMark(x: .value(volume ? store.data.settings.unit.rawValue : "Sets", value(row)), y: .value("Muscle", row.name)).foregroundStyle(palette.action)
                         .accessibilityLabel(row.name).accessibilityValue("\(number(value(row))) \(volume ? store.data.settings.unit.rawValue : "sets")")
                 }.chartYScale(domain: rows.map(\.name)).chartXAxisLabel(volume ? "Volume (\(store.data.settings.unit.rawValue))" : "Logged sets")
                     .frame(height: CGFloat(max(180, rows.count * 36))).accessibilityIdentifier("muscles.chart")

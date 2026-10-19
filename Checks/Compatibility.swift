@@ -10,6 +10,7 @@ func XCTAssertEqual<T: Equatable>(_ a: T, _ b: T, file: StaticString = #filePath
 func XCTAssertEqual(_ a: Double, _ b: Double, accuracy: Double, file: StaticString = #filePath, line: UInt = #line) { if abs(a - b) > accuracy { fail("\(a) != \(b)", file: file, line: line) } }
 func XCTAssertNotEqual<T: Equatable>(_ a: T, _ b: T, file: StaticString = #filePath, line: UInt = #line) { if a == b { fail("Values match", file: file, line: line) } }
 func XCTAssertLessThan<T: Comparable>(_ a: T, _ b: T, file: StaticString = #filePath, line: UInt = #line) { if !(a < b) { fail("\(a) >= \(b)", file: file, line: line) } }
+func XCTAssertGreaterThan<T: Comparable>(_ a: T, _ b: T, file: StaticString = #filePath, line: UInt = #line) { if !(a > b) { fail("\(a) <= \(b)", file: file, line: line) } }
 func XCTAssertTrue(_ value: Bool, file: StaticString = #filePath, line: UInt = #line) { if !value { fail("Expected true", file: file, line: line) } }
 func XCTAssertFalse(_ value: Bool, file: StaticString = #filePath, line: UInt = #line) { if value { fail("Expected false", file: file, line: line) } }
 func XCTAssertNil<T>(_ value: T?, file: StaticString = #filePath, line: UInt = #line) { if value != nil { fail("Expected nil", file: file, line: line) } }

@@ -7,37 +7,34 @@ struct RoutineEditor: View {
     let routineID: UUID
     @State private var picker = false
     @State private var editing: Variant?
-    @State private var deleting = false
-    @State private var export: CSVExportRequest?
     @State private var linking = false
     @State private var linkedSlotID: UUID?
     @State private var warmups = false
-    var isTemplate: Bool { store.data.programForDay(routineID) == nil }
+    #if os(iOS)
+    @State private var reordering: EditMode = .inactive
+    #endif
     var routine: Routine? { store.data.routines.first { $0.id == routineID } }
     func update(_ change: @escaping (inout Routine) -> Void) { store.perform { d in if let i = d.routines.firstIndex(where: { $0.id == routineID }) { change(&d.routines[i]) } } }
     var body: some View {
-        Form {
+        ThemedForm {
             StoreErrorRow()
             if let routine {
-                Section(isTemplate ? "Template" : "Day") {
-                    SavedNameField(name: routine.name) { value in update { $0.name = value } }
-                    TextField("Notes", text: Binding(get: { self.routine?.notes ?? "" }, set: { value in update { $0.notes = value } }), axis: .vertical)
-                }
+                EditableTitle(name: routine.name) { value in update { $0.name = value } }
                 Section("Exercises") {
                     ForEach(routine.slots) { slot in
                         if let variant = store.data.variant(slot.variantID), let exercise = store.data.exercise(variant.exerciseID) {
                             Button { editing = variant } label: {
                                 HStack {
-                                    VStack(alignment: .leading, spacing: 6) {
-                                        Text(exercise.name).foregroundStyle(.primary).font(.headline)
-                                        Text(planSummary(variant, unit: store.data.settings.unit)).font(.subheadline).foregroundStyle(.secondary)
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(exercise.name).foregroundStyle(Color.primary).font(.headline)
+                                        Text(planSummary(variant, unit: store.data.settings.unit)).font(.subheadline).foregroundStyle(.secondary).monospacedDigit()
                                         HStack(spacing: 6) {
                                             if variant.label != defaultTrackName(routine) { Chip(title: variant.label) }
                                             if !slot.group.isEmpty, routine.slots.filter({ $0.group == slot.group }).count > 1 { Label(routine.slots.filter({ $0.group == slot.group }).count > 2 ? "Circuit" : "Superset", systemImage: "link").font(.caption).foregroundStyle(.secondary) }
                                         }
                                     }
                                     Spacer(); Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
-                                }.padding(.vertical, 4)
+                                }.padding(.vertical, 2).contentShape(Rectangle())
                             }.buttonStyle(.plain)
                             .contextMenu {
                                 Button("Superset / Circuit", systemImage: "link") { linkedSlotID = slot.id; linking = true }
@@ -53,32 +50,25 @@ struct RoutineEditor: View {
                     if routine.slots.count > 1 { Button { linkedSlotID = nil; linking = true } label: { Label("Superset / Circuit", systemImage: "link") }.accessibilityIdentifier("routine.link") }
                     if !routine.slots.isEmpty { Button { warmups = true } label: { Label("Apply Warm-up Preset", systemImage: "flame") }.accessibilityIdentifier("routine.warmups") }
                 }
-                Section {
-                    Button("Export CSV") { do { export = try .day(routineID, in: store.data) } catch { store.error = error.localizedDescription } }
-                    if let program = store.data.programForDay(routineID) {
-                        Button("Save as Template") { store.perform { _ = try $0.saveDayAsTemplate(routineID) } }
-                        Button("Duplicate Day") { store.perform { _ = try $0.addDay(to: program.id, templateID: routineID, name: TrainingData.uniqueName(routine.name + " copy", among: store.data.routines.map(\.name))) } }
-                    } else {
-                        if !store.data.programs.isEmpty { Menu("Add to Program") { ForEach(store.data.programs) { program in Button(program.name) { store.perform { _ = try $0.addDay(to: program.id, templateID: routineID) } } } } }
-                        Button("Duplicate Template") { store.perform { _ = try $0.saveDayAsTemplate(routineID, name: TrainingData.uniqueName(routine.name + " copy", among: store.data.routines.map(\.name))) } }
-                    }
-                    Button(isTemplate ? "Delete Template" : "Delete Day", role: .destructive) { deleting = true }
+                Section("Notes") {
+                    TextField("Notes", text: Binding(get: { self.routine?.notes ?? "" }, set: { value in update { $0.notes = value } }), axis: .vertical)
                 }
             }
-        }.formStyle(.grouped).navigationTitle(routine?.name ?? "Day").inlineTitle()
+        }.formStyle(.grouped).titleInContent(routine?.name ?? "Day")
         .toolbar {
             #if os(iOS)
-            EditButton()
+            if (routine?.slots.count ?? 0) > 1 || reordering == .active {
+                Button(reordering == .active ? "Done" : "Reorder") { withAnimation { reordering = reordering == .active ? .inactive : .active } }.fontWeight(reordering == .active ? .semibold : .regular)
+            }
             #endif
         }
+        #if os(iOS)
+        .environment(\.editMode, $reordering)
+        #endif
         .sheet(isPresented: $picker) { ExercisePicker(title: "Add Exercise") { store.add($0, to: routineID) }.environmentObject(store).sheetSize() }
         .sheet(item: $editing) { VariantEditor(variant: $0).environmentObject(store).sheetSize() }
         .sheet(isPresented: $linking) { LinkedExerciseEditor(routineID: routineID, exerciseID: linkedSlotID).environmentObject(store).sheetSize() }
         .sheet(isPresented: $warmups) { ApplyWarmupPreset(routineID: routineID).environmentObject(store).sheetSize() }
-        .modifier(CSVExportModifier(request: $export))
-        .confirmationDialog(isTemplate ? "Delete template?" : "Delete day?", isPresented: $deleting) {
-            Button("Delete", role: .destructive) { if store.perform({ $0.removeDay(routineID) }) { dismiss() } }
-        } message: { Text("Workout history is kept.") }
     }
 }
 
@@ -150,7 +140,7 @@ struct ExerciseEditor: View {
     @State private var exercise = Exercise(name: "")
     var body: some View {
         NavigationStack {
-            Form {
+            ThemedForm {
                 StoreErrorRow()
                 Section {
                     TextField("Name", text: $exercise.name)

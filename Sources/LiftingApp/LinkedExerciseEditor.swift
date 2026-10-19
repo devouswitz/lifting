@@ -3,6 +3,7 @@ import LiftingCore
 
 struct LinkedExerciseEditor: View {
     @EnvironmentObject var store: AppStore
+    @Environment(\.palette) var palette
     @Environment(\.dismiss) private var dismiss
     var routineID: UUID?
     var exerciseID: UUID?
@@ -23,17 +24,22 @@ struct LinkedExerciseEditor: View {
     }
     var body: some View {
         NavigationStack {
-            Form {
+            ThemedForm {
                 StoreErrorRow()
-                Section("Exercises") {
+                Section {
                     ForEach(members) { member in
-                        Toggle(member.name, isOn: Binding(get: { selection.contains(member.id) }, set: { if $0 { selection.insert(member.id) } else { selection.remove(member.id) } }))
-                            .accessibilityIdentifier("link.member.\(member.id)")
+                        Button { if selection.contains(member.id) { selection.remove(member.id) } else { selection.insert(member.id) } } label: {
+                            HStack {
+                                Text(member.name).foregroundStyle(Color.primary)
+                                Spacer()
+                                if selection.contains(member.id) { Image(systemName: "checkmark").font(.body.weight(.semibold)).foregroundStyle(palette.technique) }
+                            }.contentShape(Rectangle())
+                        }.buttonStyle(.plain).accessibilityAddTraits(selection.contains(member.id) ? .isSelected : []).accessibilityIdentifier("link.member.\(member.id)")
                     }
-                }
+                } header: { Text("Exercises") } footer: { Text("Two exercises make a superset; three or more make a circuit. You move through them in order, one set each round.") }
                 Section("Rest") {
-                    HStack { Text("Between exercises (seconds)"); Spacer(); TextField("0", value: $transition, format: .number).labelsHidden().multilineTextAlignment(.trailing).frame(maxWidth: 70) }
-                    HStack { Text("Between rounds (seconds)"); Spacer(); TextField("90", value: $rest, format: .number).labelsHidden().multilineTextAlignment(.trailing).frame(maxWidth: 70) }
+                    Stepper(value: $transition, in: 0...600, step: 5) { LabeledContent("Between exercises", value: transition == 0 ? "None" : clockText(Double(transition))) }
+                    Stepper(value: $rest, in: 0...3600, step: 15) { LabeledContent("Between rounds", value: rest == 0 ? "None" : clockText(Double(rest))) }
                 }
                 if routineID == nil, store.data.activeSession?.routineID != nil { Toggle("Save to this day", isOn: $future) }
                 if let originalGroup {

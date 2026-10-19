@@ -4,6 +4,7 @@ import LiftingCore
 struct HistoryView: View {
     @EnvironmentObject var store: AppStore
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.palette) private var palette
     @State private var search = ""
     @State private var mode = HistoryMode.calendar
     @State private var month = Calendar.current.dateInterval(of: .month, for: .now)?.start ?? .now
@@ -16,16 +17,8 @@ struct HistoryView: View {
             search.isEmpty || "\(store.data.title(for: session)) \(session.notes) \(session.exercises.map { "\($0.name) \($0.label) \($0.notes)" }.joined(separator: " "))".localizedCaseInsensitiveContains(search)
         }
     }
-    private var visibleSessions: [Session] {
-        guard mode == .calendar else { return matchingSessions }
-        return matchingSessions.filter { session in
-            if let selectedDay { return calendar.isDate(session.startedAt, inSameDayAs: selectedDay) }
-            guard let interval = calendar.dateInterval(of: .month, for: month) else { return false }
-            return session.startedAt >= interval.start && session.startedAt < interval.end
-        }
-    }
     private var months: [Date] {
-        Array(Set(visibleSessions.compactMap { calendar.dateInterval(of: .month, for: $0.startedAt)?.start })).sorted(by: >)
+        Array(Set(matchingSessions.compactMap { calendar.dateInterval(of: .month, for: $0.startedAt)?.start })).sorted(by: >)
     }
 
     var body: some View {
@@ -38,17 +31,17 @@ struct HistoryView: View {
                 LazyVStack(alignment: .leading, spacing: 20) {
                     if mode == .calendar {
                         HistoryCalendar(month: $month, selectedDay: $selectedDay, sessions: sortedSessions, unit: store.data.settings.unit)
-                        calendarSessions
+                        if let selectedDay { daySessions(selectedDay) }
                     } else if matchingSessions.isEmpty {
                         EmptyState(symbol: "clock", text: store.data.sessions.isEmpty ? "No workouts logged." : "No matching workouts.")
                     } else {
                         ForEach(months, id: \.self) { month in
                             VStack(alignment: .leading, spacing: 10) {
-                                let sessions = visibleSessions.filter { calendar.isDate($0.startedAt, equalTo: month, toGranularity: .month) }
+                                let sessions = matchingSessions.filter { calendar.isDate($0.startedAt, equalTo: month, toGranularity: .month) }
                                 HStack(alignment: .firstTextBaseline) {
                                     Text(month, format: .dateTime.month(.wide).year()).font(.headline)
                                     Spacer()
-                                    Text(counted(sessions.count, "workout")).font(.caption).foregroundStyle(.secondary)
+                                    Text(counted(sessions.filter { $0.skipped != true }.count, "workout")).font(.caption).foregroundStyle(.secondary)
                                 }
                                 sessionList(sessions)
                             }
@@ -57,22 +50,18 @@ struct HistoryView: View {
                 }.padding(.horizontal, 16).padding(.bottom, 24)
             }
         }
-        .background(Palette.background(scheme))
+        .background(palette.background)
         .navigationTitle("History")
         .searchable(text: $search, prompt: "Search workouts")
+        // Search results are a list, so searching shows the log.
+        .onChange(of: search) { _, value in if !value.isEmpty { mode = .log } }
     }
 
-    private var calendarSessions: some View {
+    /// The workouts on the day tapped in the calendar.
+    private func daySessions(_ day: Date) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                if let selectedDay { Text(selectedDay, format: .dateTime.weekday(.wide).month(.abbreviated).day()).font(.headline) }
-                else { Text("Workouts").font(.headline) }
-                Spacer()
-                if selectedDay != nil { Button("All days") { selectedDay = nil }.font(.subheadline).accessibilityIdentifier("history.allDays") }
-                else { Text("\(visibleSessions.count)").font(.subheadline).foregroundStyle(.secondary).monospacedDigit() }
-            }
-            if visibleSessions.isEmpty { Text(search.isEmpty ? "No workouts this month." : "No matching workouts.").font(.subheadline).foregroundStyle(.secondary).padding(.vertical, 20) }
-            else { sessionList(visibleSessions) }
+            Text(day, format: .dateTime.weekday(.wide).month(.abbreviated).day()).font(.headline)
+            sessionList(sortedSessions.filter { calendar.isDate($0.startedAt, inSameDayAs: day) })
         }
     }
 
@@ -106,15 +95,20 @@ private struct HistoryWorkoutRow: View {
                     Text(session.startedAt, format: .dateTime.weekday(.abbreviated)).font(.caption2).foregroundStyle(.secondary)
                 }.frame(width: 30)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(title).font(.headline).foregroundStyle(.primary)
-                    Text("\(counted(session.completedSets, "set")) · \(clockText(max(0, (session.endedAt ?? session.startedAt).timeIntervalSince(session.startedAt)))) · \(number(unit.display(session.volume), decimals: 0)) \(unit.rawValue)")
-                        .font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                    Text(title).font(.headline).foregroundStyle(session.skipped == true ? .secondary : .primary)
+                    if session.skipped == true { Text("Skipped").font(.caption).foregroundStyle(.secondary) }
+                    else {
+                        Text("\(counted(session.completedSets, "set")) · \(clockText(max(0, (session.endedAt ?? session.startedAt).timeIntervalSince(session.startedAt)))) · \(number(unit.display(session.volume), decimals: 0)) \(unit.rawValue)")
+                            .font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                    }
                 }
                 Spacer(minLength: 0)
                 Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary).padding(.top, 5)
             }
+            let logged = session.exercises.filter { $0.sets.contains { $0.completedAt != nil } }
+            if !logged.isEmpty || !session.notes.isEmpty {
             VStack(alignment: .leading, spacing: 9) {
-                ForEach(session.exercises.filter { $0.sets.contains { $0.completedAt != nil } }) { exercise in
+                ForEach(logged) { exercise in
                     HStack(alignment: .firstTextBaseline, spacing: 12) {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(exercise.name).font(.subheadline.weight(.medium))
@@ -127,6 +121,7 @@ private struct HistoryWorkoutRow: View {
                 }
                 if !session.notes.isEmpty { Label(session.notes, systemImage: "note.text").font(.caption).foregroundStyle(.secondary).lineLimit(2) }
             }.padding(.leading, 42)
+            }
         }.padding(16).contentShape(Rectangle())
     }
 }
@@ -136,6 +131,7 @@ struct SessionDetail: View {
     @EnvironmentObject var store: AppStore
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.palette) private var palette
     let sessionID: UUID
     @State private var deleting = false
     @State private var editing = false
@@ -169,23 +165,27 @@ struct SessionDetail: View {
             LazyVStack(alignment: .leading, spacing: 20) {
                 VStack(alignment: .leading, spacing: 16) {
                     Text(session.startedAt, format: .dateTime.weekday(.wide).month(.wide).day().year()).font(.subheadline).foregroundStyle(.secondary)
-                    HStack(spacing: 16) {
-                        detailMetric("Sets", value: "\(session.completedSets)")
-                        detailMetric("Duration", value: clockText(max(0, (session.endedAt ?? session.startedAt).timeIntervalSince(session.startedAt))))
-                        detailMetric("Volume (\(store.data.settings.unit.rawValue))", value: number(store.data.settings.unit.display(session.volume), decimals: 0))
+                    if session.skipped == true {
+                        Label("Skipped", systemImage: "forward").font(.headline).foregroundStyle(.secondary)
+                    } else {
+                        HStack(spacing: 16) {
+                            detailMetric("Sets", value: "\(session.completedSets)")
+                            detailMetric("Duration", value: clockText(max(0, (session.endedAt ?? session.startedAt).timeIntervalSince(session.startedAt))))
+                            detailMetric("Volume", value: "\(number(store.data.settings.unit.display(session.volume), decimals: 0)) \(store.data.settings.unit.rawValue)")
+                        }
                     }
                     if !session.notes.isEmpty { Text(session.notes).font(.subheadline).textSelection(.enabled) }
-                }.card(padding: 16)
+                }.frame(maxWidth: .infinity, alignment: .leading).card(padding: 16)
                 ForEach(session.exercises) { exercise in
                     VStack(alignment: .leading, spacing: 13) {
                         NavigationLink { ExerciseProgress(exerciseID: exercise.exerciseID, initialVariantID: exercise.variantID, programID: session.programID) } label: {
                             HStack(alignment: .firstTextBaseline) {
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text(exercise.name).font(.headline)
-                                    if !exercise.label.isEmpty { Text(exercise.label).font(.caption).foregroundStyle(.secondary) }
+                                    if !exercise.label.isEmpty && exercise.label != session.name && exercise.label != store.data.title(for: session).replacingOccurrences(of: " - ", with: " · ") && !exercise.label.hasSuffix(" · \(session.name)") { Text(exercise.label).font(.caption).foregroundStyle(.secondary) }
                                 }
                                 Spacer()
-                                Image(systemName: "chart.xyaxis.line").font(.subheadline).foregroundStyle(Palette.tint(scheme))
+                                Image(systemName: "chart.xyaxis.line").font(.subheadline).foregroundStyle(palette.action)
                             }.contentShape(Rectangle())
                         }.buttonStyle(.plain)
                         if let from = exercise.substitutedFrom { Text("Substitute for \(from)").font(.caption).foregroundStyle(.secondary) }
@@ -196,7 +196,7 @@ struct SessionDetail: View {
                 }
                 Button("Delete workout", role: .destructive) { deleting = true }.font(.subheadline).padding(.horizontal, 4)
             }.padding(16)
-        }.background(Palette.background(scheme))
+        }.background(palette.background)
     }
 
     private func detailMetric(_ title: String, value: String) -> some View {
@@ -207,7 +207,7 @@ struct SessionDetail: View {
     }
 
     private func editForm(_ session: Session) -> some View {
-        Form {
+        ThemedForm {
             Section {
                 DatePicker("Date", selection: Binding(get: { self.session?.startedAt ?? .now }, set: { date in
                     update { value in
@@ -254,10 +254,10 @@ struct SessionDetail: View {
     private func setRow(_ set: LoggedSet) -> some View {
         HStack(alignment: .top) {
             Image(systemName: set.completedAt == nil ? "minus.circle" : "checkmark.circle.fill")
-                .foregroundStyle(set.completedAt == nil ? Color.secondary : Palette.tint(scheme))
+                .foregroundStyle(set.completedAt == nil ? Color.secondary : palette.completed)
             VStack(alignment: .leading, spacing: 4) {
                 Text(loggedSetSummary(set, unit: store.data.settings.unit)).monospacedDigit()
-                if set.plan.kind != .working { Text(set.plan.kind.title).font(.caption).foregroundStyle(.secondary) }
+                if set.plan.kind != .working || set.plan.customTypeID != nil { Text(palette.title(set.plan)).font(.caption).foregroundStyle(palette.color(for: set.plan)) }
             }
         }
     }
@@ -265,6 +265,7 @@ struct SessionDetail: View {
 
 private struct HistorySetTable: View {
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.palette) private var palette
     let sets: [LoggedSet]
     let unit: WeightUnit
     private var columns: [HistorySetColumn] { HistorySetColumn.allCases.filter { column in sets.contains { column.value($0, unit: unit) != nil } } }
@@ -287,15 +288,15 @@ private struct HistorySetTable: View {
                     VStack(alignment: .leading, spacing: 2) {
                         HStack(spacing: 5) {
                             Image(systemName: set.completedAt == nil ? "minus" : "checkmark").font(.caption2.weight(.semibold))
-                                .foregroundStyle(set.completedAt == nil ? Color.secondary : Palette.tint(scheme))
+                                .foregroundStyle(set.completedAt == nil ? Color.secondary : palette.completed)
                             Text("\(index + 1)")
                         }
-                        if set.plan.kind != .working { Text(set.plan.kind.title).font(.caption2).foregroundStyle(.secondary) }
+                        if set.plan.kind != .working || set.plan.customTypeID != nil { Text(palette.title(set.plan)).font(.caption2).foregroundStyle(palette.color(for: set.plan)) }
                     }.frame(maxWidth: .infinity, alignment: .leading)
                     ForEach(columns) { column in Text(column.value(set, unit: unit) ?? "-").frame(maxWidth: .infinity, alignment: .trailing) }
                 }.font(.subheadline).monospacedDigit().padding(.vertical, 9).opacity(set.completedAt == nil ? 0.5 : 1)
                     .accessibilityElement(children: .ignore)
-                    .accessibilityLabel("Set \(index + 1), \(set.plan.kind.title), \(set.completedAt == nil ? "not completed" : "completed"), \(loggedSetSummary(set, unit: unit))")
+                    .accessibilityLabel("Set \(index + 1), \(palette.title(set.plan)), \(set.completedAt == nil ? "not completed" : "completed"), \(loggedSetSummary(set, unit: unit))")
                 if index < sets.count - 1 { Divider().opacity(0.5) }
             }
         }
@@ -329,7 +330,7 @@ struct LoggedSetEditor: View {
     @Binding var set: LoggedSet
     let unit: WeightUnit
     var body: some View {
-        Form {
+        ThemedForm {
             Picker("Type", selection: $set.plan.kind) { ForEach(SetKind.allCases) { Text($0.title).tag($0) } }
             Toggle("Completed", isOn: Binding(get: { set.completedAt != nil }, set: { set.completedAt = $0 ? .now : nil }))
             HStack { Text("Weight (\(unit.rawValue))"); OptionalNumberField(title: "Optional", value: $set.weight, factor: unit.kilograms(1)) }

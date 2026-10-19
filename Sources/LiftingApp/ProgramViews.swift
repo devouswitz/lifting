@@ -1,70 +1,177 @@
 import SwiftUI
 import LiftingCore
 
-struct ProgramLibrary: View {
+/// All programs and day templates. Tap a program to load it; the info button opens it.
+struct ProgramsView: View {
     @EnvironmentObject var store: AppStore
-    @Environment(\.dismiss) var dismiss
-    @State private var creating = false
+    @Environment(\.palette) var palette
+    @State private var creatingProgram = false
+    @State private var creatingTemplate = false
+    @State private var templateName = ""
     @State private var importing = false
+    @State private var detail: UUID?
+    @State private var newTemplate: UUID?
+    @State private var deleting: TrainingProgram?
+    @State private var deletingTemplate: Routine?
     var body: some View {
-        NavigationStack {
-            List {
-                StoreErrorRow()
+        ThemedForm {
+            StoreErrorRow()
+            Section {
                 ForEach(store.data.programs) { program in
-                    HStack {
-                        NavigationLink { ProgramEditor(programID: program.id) } label: {
-                            VStack(alignment: .leading, spacing: 5) {
-                                Text(program.name).font(.headline)
-                                Text(counted(program.dayIDs.count, "day")).font(.caption).foregroundStyle(.secondary)
-                            }
-                        }
-                        Spacer(minLength: 12)
-                        if program.id == store.data.activeProgramID { Image(systemName: "checkmark").foregroundStyle(.tint).accessibilityLabel("Loaded") }
-                        else { Button("Load") { if store.perform({ try $0.loadProgram(program.id) }) { dismiss() } }.buttonStyle(.bordered) }
-                    }.contextMenu {
-                        Button("Move Up") { moveProgram(program.id, by: -1) }
-                        Button("Move Down") { moveProgram(program.id, by: 1) }
+                    HStack(spacing: 12) {
+                        Button { store.perform { try $0.loadProgram(program.id) } } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: "checkmark").font(.body.weight(.semibold)).foregroundStyle(palette.action)
+                                    .opacity(program.id == store.data.activeProgramID ? 1 : 0).frame(width: 20)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(program.name).foregroundStyle(.primary)
+                                    Text(counted(program.dayIDs.count, "day")).font(.caption).foregroundStyle(.secondary)
+                                }
+                                Spacer(minLength: 0)
+                            }.contentShape(Rectangle())
+                        }.buttonStyle(.plain)
+                        .accessibilityLabel("\(program.name), \(counted(program.dayIDs.count, "day"))").accessibilityAddTraits(program.id == store.data.activeProgramID ? .isSelected : [])
+                        Button { detail = program.id } label: { Image(systemName: "info.circle").font(.title3).foregroundStyle(palette.action) }
+                            .buttonStyle(.borderless).accessibilityLabel("Open \(program.name)").accessibilityIdentifier("programs.info.\(program.id)")
                     }
-                }.onMove { source, target in store.perform { $0.programs.move(fromOffsets: source, toOffset: target) } }
-                Button("New Program", systemImage: "plus") { creating = true }
-                Button("Import CSV", systemImage: "square.and.arrow.down") { importing = true }
-            }.navigationTitle("Programs").inlineTitle()
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
-                #if os(iOS)
-                ToolbarItem(placement: .primaryAction) { EditButton() }
-                #endif
+                    .swipeActions(edge: .trailing) {
+                        Button("Delete", role: .destructive) { deleting = program }.tint(.red)
+                        Button("Duplicate") { store.perform { _ = try $0.duplicateProgram(program.id) } }.tint(.gray)
+                    }
+                }
+                .onDelete { offsets in deleting = offsets.first.map { store.data.programs[$0] } }
+                .onMove { source, target in store.perform { $0.programs.move(fromOffsets: source, toOffset: target) } }
+                AddRow(title: "New Program") { creatingProgram = true }.accessibilityIdentifier("programs.new")
             }
-            .sheet(isPresented: $creating) { NewProgramView().environmentObject(store).sheetSize() }
-            .modifier(CSVImportModifier(isPresented: $importing))
+            Section("Day templates") {
+                ForEach(store.data.dayTemplates) { day in
+                    NavigationLink { DayView(dayID: day.id) } label: {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(day.name)
+                            Text(counted(day.slots.count, "exercise")).font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                    .swipeActions(edge: .trailing) {
+                        Button("Delete", role: .destructive) { deletingTemplate = day }.tint(.red)
+                        Button("Duplicate") { store.perform { _ = try $0.saveDayAsTemplate(day.id, name: TrainingData.uniqueName(day.name + " copy", among: $0.dayTemplates.map(\.name))) } }.tint(.gray)
+                    }
+                }
+                .onDelete { offsets in deletingTemplate = offsets.first.map { store.data.dayTemplates[$0] } }
+                .onMove { source, target in var ids = store.data.dayTemplates.map(\.id); ids.move(fromOffsets: source, toOffset: target); store.perform { try $0.reorderTemplates(ids) } }
+                AddRow(title: "New Template") { templateName = ""; creatingTemplate = true }.accessibilityIdentifier("programs.newTemplate")
+            }
+            Section {
+                NavigationLink { ExerciseLibraryView() } label: {
+                    HStack { Label("Exercises", systemImage: "dumbbell"); Spacer(); Text("\(store.data.exercises.count)").foregroundStyle(.secondary).monospacedDigit() }
+                }.accessibilityIdentifier("programs.exercises")
+                AddRow(title: "Import from CSV", symbol: "square.and.arrow.down") { importing = true }
+            }
+        }
+        .formStyle(.grouped).navigationTitle("Programs")
+        .toolbar {
+            #if os(iOS)
+            ToolbarItem(placement: .primaryAction) { EditButton() }
+            #endif
+        }
+        .navigationDestination(item: $detail) { ProgramEditor(programID: $0) }
+        .navigationDestination(item: $newTemplate) { RoutineEditor(routineID: $0) }
+        .sheet(isPresented: $creatingProgram) { NewProgramView().environmentObject(store).sheetSize() }
+        .alert("New Template", isPresented: $creatingTemplate) {
+            TextField("Name", text: $templateName)
+            Button("Create") {
+                let name = templateName.trimmingCharacters(in: .whitespacesAndNewlines)
+                let day = Routine(name: TrainingData.uniqueName(name, among: store.data.dayTemplates.map(\.name)))
+                if !name.isEmpty, store.perform({ $0.routines.append(day) }) { newTemplate = day.id }
+            }.disabled(templateName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || templateName.count > 200)
+            Button("Cancel", role: .cancel) {}
+        }
+        .confirmationDialog("Delete \(deleting?.name ?? "program") and its days?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }), titleVisibility: .visible) {
+            Button("Delete Program", role: .destructive) { if let deleting { store.perform { $0.removeProgram(deleting.id) } }; deleting = nil }
+        } message: { Text("Templates and workout history are kept.") }
+        .confirmationDialog("Delete \(deletingTemplate?.name ?? "template")?", isPresented: Binding(get: { deletingTemplate != nil }, set: { if !$0 { deletingTemplate = nil } }), titleVisibility: .visible) {
+            Button("Delete Template", role: .destructive) { if let deletingTemplate { store.perform { $0.removeDay(deletingTemplate.id) } }; deletingTemplate = nil }
+        } message: { Text("Program days made from it and workout history are kept.") }
+        .modifier(CSVImportModifier(isPresented: $importing))
+    }
+}
+
+/// Every exercise, with New Exercise and editing for ones not yet logged.
+struct ExerciseLibraryView: View {
+    @EnvironmentObject var store: AppStore
+    @Environment(\.palette) var palette
+    @State private var search = ""
+    @State private var creating = false
+    @State private var editing: Exercise?
+    private var matches: [Exercise] {
+        store.data.exercises.filter { search.isEmpty || "\($0.name) \($0.muscle) \($0.equipment)".localizedCaseInsensitiveContains(search) }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+    var body: some View {
+        ThemedForm {
+            StoreErrorRow()
+            Section { AddRow(title: "New Exercise") { creating = true }.accessibilityIdentifier("exercises.new") }
+            Section {
+                if matches.isEmpty { Text("No matching exercises").foregroundStyle(.secondary) }
+                ForEach(matches) { exercise in
+                    Button { editing = exercise } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: exercise.mode.symbol).foregroundStyle(.secondary).frame(width: 28)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(exercise.name).foregroundStyle(Color.primary)
+                                let detail = [exercise.muscle, exercise.equipment].filter { !$0.isEmpty }.joined(separator: " · ")
+                                if !detail.isEmpty { Text(detail).font(.caption).foregroundStyle(.secondary) }
+                            }
+                            Spacer(minLength: 0)
+                        }.contentShape(Rectangle())
+                    }.buttonStyle(.plain).accessibilityHint("Edit exercise")
+                }
+            }
+        }
+        .formStyle(.grouped).navigationTitle("Exercises")
+        .searchable(text: $search, prompt: "Exercise, muscle, equipment")
+        .sheet(isPresented: $creating) {
+            ExerciseEditor(initialName: search) { exercise in store.perform { $0.exercises.append(exercise) } }.environmentObject(store).sheetSize()
+        }
+        .sheet(item: $editing) { exercise in
+            ExerciseEditor(initialExercise: exercise) { value in
+                store.perform { data in if let index = data.exercises.firstIndex(where: { $0.id == value.id }) { data.exercises[index] = value } }
+            }.environmentObject(store).sheetSize()
         }
     }
-    func moveProgram(_ id: UUID, by offset: Int) {
-        store.perform { d in guard let i = d.programs.firstIndex(where: { $0.id == id }), d.programs.indices.contains(i + offset) else { return }; d.programs.swapAt(i, i + offset) }
-    }
-
 }
 
 struct NewProgramView: View {
     @EnvironmentObject var store: AppStore
+    @Environment(\.palette) var palette
     @Environment(\.dismiss) var dismiss
     @State private var name = ""
     @State private var selected: Set<UUID> = []
     var clean: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
     var body: some View {
         NavigationStack {
-            Form {
+            ThemedForm {
                 StoreErrorRow()
                 Section { TextField("Program name", text: $name).accessibilityIdentifier("program.name") }
-                Section("Add Templates") {
-                    ForEach(store.data.dayTemplates) { day in
-                        Toggle(day.name, isOn: Binding(get: { selected.contains(day.id) }, set: { if $0 { selected.insert(day.id) } else { selected.remove(day.id) } }))
+                if !store.data.dayTemplates.isEmpty {
+                    Section("Start with days from templates") {
+                        ForEach(store.data.dayTemplates) { day in
+                            Button { if selected.contains(day.id) { selected.remove(day.id) } else { selected.insert(day.id) } } label: {
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(day.name).foregroundStyle(Color.primary)
+                                        Text(counted(day.slots.count, "exercise")).font(.caption).foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    if selected.contains(day.id) { Image(systemName: "checkmark").font(.body.weight(.semibold)).foregroundStyle(palette.action) }
+                                }.contentShape(Rectangle())
+                            }.buttonStyle(.plain).accessibilityAddTraits(selected.contains(day.id) ? .isSelected : [])
+                        }
                     }
                 }
             }.formStyle(.grouped).navigationTitle("New Program").inlineTitle()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) { Button("Create and Load") {
+                ToolbarItem(placement: .confirmationAction) { Button("Create") {
                     if store.perform({ d in let id = try d.createProgram(name: clean, templateIDs: d.dayTemplates.filter { selected.contains($0.id) }.map(\.id)); try d.loadProgram(id) }) { dismiss() }
                 }.disabled(clean.isEmpty || clean.count > 200).accessibilityIdentifier("program.create") }
             }
@@ -74,6 +181,7 @@ struct NewProgramView: View {
 
 struct ProgramEditor: View {
     @EnvironmentObject var store: AppStore
+    @Environment(\.palette) var palette
     @Environment(\.dismiss) var dismiss
     let programID: UUID
     @State private var addingBlank = false
@@ -83,41 +191,50 @@ struct ProgramEditor: View {
     var program: TrainingProgram? { store.data.program(programID) }
     func update(_ change: @escaping (inout TrainingProgram) -> Void) { store.perform { d in if let i = d.programs.firstIndex(where: { $0.id == programID }) { change(&d.programs[i]) } } }
     var body: some View {
-        Form {
+        ThemedForm {
             StoreErrorRow()
             if let program {
-                Section("Program") {
-                    SavedNameField(name: program.name) { value in update { $0.name = value } }
-                    TextField("Notes", text: Binding(get: { self.program?.notes ?? "" }, set: { value in update { $0.notes = value } }), axis: .vertical)
-                    if store.data.activeProgramID == programID { Label("Loaded", systemImage: "checkmark").foregroundStyle(.secondary) }
-                    else { Button("Load Program") { store.perform { try $0.loadProgram(programID) } }.accessibilityIdentifier("program.load") }
-                }
-                Section("Days") {
-                    ForEach(program.dayIDs, id: \.self) { id in
+                EditableTitle(name: program.name) { value in update { $0.name = value } }
+                Section {
+                    ForEach(Array(program.dayIDs.enumerated()), id: \.element) { index, id in
                         if let day = store.data.routine(id) {
-                            NavigationLink { RoutineEditor(routineID: id) } label: { HStack { Text(day.name); Spacer(); if program.nextDayID == id { Chip(title: "Next") } } }
-                                .contextMenu {
-                                    Button("Set as Next") { store.perform { try $0.selectNextDay(id, in: programID) } }
-                                    Button("Move Up") { move(id, by: -1) }
-                                    Button("Move Down") { move(id, by: 1) }
-                                    Button("Save as Template") { store.perform { _ = try $0.saveDayAsTemplate(id) } }
-                                    Button("Remove Day", role: .destructive) { store.perform { $0.removeDay(id) } }
+                            NavigationLink { DayView(dayID: id) } label: {
+                                HStack(spacing: 12) {
+                                    Text("\(index + 1)").font(.subheadline.weight(.semibold)).monospacedDigit().foregroundStyle(.secondary).frame(width: 20)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(day.name)
+                                        Text(counted(day.slots.count, "exercise")).font(.caption).foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    if program.nextDayID == id { Chip(title: "Next", accent: true) }
                                 }
+                            }
+                            .swipeActions(edge: .leading) {
+                                if program.nextDayID != id { Button("Make Next") { store.perform { try $0.selectNextDay(id, in: programID) } }.tint(palette.action) }
+                            }
+                            .swipeActions(edge: .trailing) {
+                                Button("Delete", role: .destructive) { store.perform { $0.removeDay(id) } }.tint(.red)
+                            }
                         }
-                    }.onMove { source, target in var ids = program.dayIDs; ids.move(fromOffsets: source, toOffset: target); store.perform { try $0.reorderDays(ids, in: programID) } }
-                    .onDelete { offsets in let ids = offsets.map { program.dayIDs[$0] }; store.perform { d in for id in ids { d.removeDay(id) } } }
+                    }
+                    .onMove { source, target in var ids = program.dayIDs; ids.move(fromOffsets: source, toOffset: target); store.perform { try $0.reorderDays(ids, in: programID) } }
                     Menu {
-                        Button("Blank Day") { dayName = ""; addingBlank = true }
-                        if !store.data.dayTemplates.isEmpty { Menu("From Template") { ForEach(store.data.dayTemplates) { day in Button(day.name) { store.perform { _ = try $0.addDay(to: programID, templateID: day.id) } } } } }
-                    } label: { Label("Add Day", systemImage: "plus") }.accessibilityIdentifier("program.addDay")
+                        Button("Blank Day", systemImage: "doc") { dayName = ""; addingBlank = true }
+                        if !store.data.dayTemplates.isEmpty { Menu { ForEach(store.data.dayTemplates) { day in Button(day.name) { store.perform { _ = try $0.addDay(to: programID, templateID: day.id) } } } } label: { Label("From Template", systemImage: "doc.on.doc") } }
+                    } label: { Label("Add Day", systemImage: "plus").foregroundStyle(palette.action) }.accessibilityIdentifier("program.addDay")
+                } header: { Text("Days") }
+                Section("Notes") {
+                    TextField("Notes", text: Binding(get: { self.program?.notes ?? "" }, set: { value in update { $0.notes = value } }), axis: .vertical)
                 }
                 Section {
-                    Button("Export CSV") { do { export = try .program(programID, in: store.data) } catch { store.error = error.localizedDescription } }
-                    Button("Duplicate Program") { store.perform { _ = try $0.duplicateProgram(programID) } }
-                    Button("Delete Program", role: .destructive) { deleting = true }
+                    if store.data.activeProgramID == programID { Label("Current program", systemImage: "checkmark.circle.fill").foregroundStyle(.secondary) }
+                    else { AddRow(title: "Make Current Program", symbol: "checkmark.circle") { store.perform { try $0.loadProgram(programID) } }.accessibilityIdentifier("program.load") }
+                    AddRow(title: "Duplicate Program", symbol: "plus.square.on.square") { store.perform { _ = try $0.duplicateProgram(programID) } }
+                    AddRow(title: "Export CSV", symbol: "square.and.arrow.up") { do { export = try .program(programID, in: store.data) } catch { store.error = error.localizedDescription } }
                 }
+                Section { Button("Delete Program", role: .destructive) { deleting = true } }
             }
-        }.formStyle(.grouped).navigationTitle(program?.name ?? "Program").inlineTitle()
+        }.formStyle(.grouped).titleInContent(program?.name ?? "Program")
         .toolbar {
             #if os(iOS)
             EditButton()
@@ -128,7 +245,7 @@ struct ProgramEditor: View {
             Button("Add") { let clean = dayName.trimmingCharacters(in: .whitespacesAndNewlines); if !clean.isEmpty { store.perform { _ = try $0.addDay(to: programID, name: clean) } } }
             Button("Cancel", role: .cancel) {}
         }
-        .confirmationDialog("Delete program and its days?", isPresented: $deleting) { Button("Delete Program", role: .destructive) { if store.perform({ $0.removeProgram(programID) }) { dismiss() } } } message: { Text("Templates and workout history are kept.") }
+        .confirmationDialog("Delete program and its days?", isPresented: $deleting, titleVisibility: .visible) { Button("Delete Program", role: .destructive) { if store.perform({ $0.removeProgram(programID) }) { dismiss() } } } message: { Text("Templates and workout history are kept.") }
         .modifier(CSVExportModifier(request: $export))
     }
     func move(_ id: UUID, by offset: Int) {

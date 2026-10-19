@@ -3,6 +3,7 @@ import LiftingCore
 
 struct VariantEditor: View {
     @EnvironmentObject var store: AppStore
+    @Environment(\.palette) var palette
     @Environment(\.dismiss) var dismiss
     @State var variant: Variant
     @State private var technique: TechniqueKind?
@@ -12,10 +13,7 @@ struct VariantEditor: View {
     var exercise: Exercise? { store.data.exercise(variant.exerciseID) }
     var body: some View {
         NavigationStack {
-            Form {
-                Section {
-                    TextField("Track name", text: $variant.label)
-                } header: { Text("Track") }
+            ThemedForm {
                 Section("Load and rest") {
                     if exercise?.mode != .cardio {
                         HStack { Text("Working weight (\(unit.rawValue))"); Spacer(); TextField("0", value: Binding(get: { unit.display(variant.workingWeight) }, set: { variant.workingWeight = unit.kilograms($0) }), format: .number).labelsHidden().multilineTextAlignment(.trailing).frame(maxWidth: 110) }
@@ -27,10 +25,10 @@ struct VariantEditor: View {
                     ForEach(Array($variant.sets.enumerated()), id: \.element.id) { index, $plan in
                         NavigationLink { PlanEditor(plan: $plan, unit: unit) } label: {
                             HStack(spacing: 12) {
-                                Text(setBadge(variant.sets.map(\.kind), index: index)).font(.subheadline.weight(.semibold)).monospacedDigit().foregroundStyle(.secondary).frame(minWidth: 26)
+                                SetBadge(text: setBadge(variant.sets, index: index, types: store.data.customSetTypes), plan: plan).frame(minWidth: 26)
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(prescribedSetSummary(plan, variant: variant, unit: unit)).font(.subheadline).monospacedDigit()
-                                    if ![.warmup, .working].contains(plan.kind) { Text(plan.kind.title).font(.caption).foregroundStyle(.secondary) }
+                                    if plan.customTypeID != nil || ![.warmup, .working].contains(plan.kind) { Text(palette.title(plan)).font(.caption).foregroundStyle(palette.color(for: plan)) }
                                 }
                             }.padding(.vertical, 2)
                         }
@@ -47,6 +45,11 @@ struct VariantEditor: View {
                             Button("Warm-up Set") { addWarmup() }
                             Button("Drop Sets") { technique = .drop }
                             Button("MYO Reps") { technique = .myo }
+                            Button("Failure Set") { addTyped(kind: .failure) }
+                            if !store.data.customSetTypes.isEmpty {
+                                Divider()
+                                ForEach(store.data.customSetTypes) { type in Button(type.name) { addTyped(kind: type.countsAs, customTypeID: type.id) } }
+                            }
                         }
                     } label: { Label("Add Sets", systemImage: "plus") }
                     if exercise?.mode != .cardio { Menu {
@@ -65,6 +68,9 @@ struct VariantEditor: View {
                         Text(variant.progression.mode == .double ? "Adds weight next time when every working set reaches the top of its rep range." : "Adds weight next time when every working set reaches its target reps.").font(.footnote).foregroundStyle(.secondary)
                     }
                 }
+                Section {
+                    LabeledContent("Track") { TextField("Track name", text: $variant.label).multilineTextAlignment(.trailing) }
+                } footer: { Text("Progress keeps each track separate.") }
                 Section("Note shown every session") { TextField("Optional", text: $variant.notes, axis: .vertical).lineLimit(3...8) }
                 if let validationError { Text(validationError).foregroundStyle(.red) }
             }.formStyle(.grouped).navigationTitle(exercise?.name ?? "Prescription").inlineTitle()
@@ -97,6 +103,13 @@ extension VariantEditor {
             var plan = Variant.standard(for: exercise, label: "").sets[0]; plan.id = UUID(); variant.sets.append(plan)
         }
     }
+    /// Adds a set of a kind or custom type, copying the last working set's targets.
+    func addTyped(kind: SetKind, customTypeID: UUID? = nil) {
+        if kind == .warmup { addWarmup(); if let i = variant.sets.lastIndex(where: { $0.kind == .warmup }) { variant.sets[i].customTypeID = customTypeID }; return }
+        addWorkingSet()
+        guard let last = variant.sets.indices.last else { return }
+        variant.sets[last].kind = kind; variant.sets[last].customTypeID = customTypeID
+    }
     /// Adds a warm-up after the existing warm-ups, matching the live workout's Add Warm-up Set.
     func addWarmup() {
         let position = (variant.sets.lastIndex { $0.kind == .warmup }).map { $0 + 1 } ?? 0
@@ -105,14 +118,18 @@ extension VariantEditor {
 }
 
 struct PlanEditor: View {
+    @Environment(\.palette) var palette
     @Binding var plan: SetPlan
     let unit: WeightUnit
     var warmupOnly = false
     var body: some View {
-        Form {
+        ThemedForm {
             StoreErrorRow()
             if !warmupOnly { Section("Set") {
-                Picker("Type", selection: $plan.kind) { ForEach(SetKind.allCases) { Text($0.title).tag($0) } }
+                Picker("Type", selection: typeChoice) {
+                    ForEach(SetKind.allCases) { Text($0.title).tag(SetTypeChoice.kind($0)) }
+                    ForEach(palette.setTypes) { Text($0.name).tag(SetTypeChoice.custom($0.id)) }
+                }
             } }
             Section(plan.kind == .warmup ? "Warm-up weight" : "Weight") {
                 Picker("Based on", selection: $plan.load) { ForEach(LoadRule.allCases) { Text($0.title).tag($0) } }
@@ -125,10 +142,24 @@ struct PlanEditor: View {
             Section("Rest after this set") {
                 HStack { Text("Seconds"); OptionalNumberField(title: "Exercise default", value: Binding(get: { plan.restSeconds.map(Double.init) }, set: { plan.restSeconds = $0.map { Int($0) } }), integer: true).labelsHidden().accessibilityLabel("Rest in seconds").accessibilityIdentifier("plan.rest") }
             }
-        }.formStyle(.grouped).navigationTitle(plan.kind.title).inlineTitle()
+        }.formStyle(.grouped).navigationTitle(palette.title(plan)).inlineTitle()
         #if os(iOS)
         .keyboardType(.decimalPad)
         #endif
+    }
+}
+
+/// A built-in kind or a custom type, as one picker value.
+enum SetTypeChoice: Hashable { case kind(SetKind), custom(UUID) }
+
+extension PlanEditor {
+    var typeChoice: Binding<SetTypeChoice> {
+        Binding(get: { plan.customTypeID.flatMap { id in palette.setTypes.contains { $0.id == id } ? .custom(id) : nil } ?? .kind(plan.kind) }, set: { choice in
+            switch choice {
+            case .kind(let kind): plan.kind = kind; plan.customTypeID = nil
+            case .custom(let id): plan.customTypeID = id; plan.kind = palette.setTypes.first { $0.id == id }?.countsAs ?? .working
+            }
+        })
     }
 }
 
@@ -229,7 +260,7 @@ struct TechniqueEditor: View {
     }
     var body: some View {
         NavigationStack {
-            Form {
+            ThemedForm {
                 if kind == .drop {
                     Section {
                         IntegerControl(title: "Drops", value: $dropCount, range: 1...10)
