@@ -1234,4 +1234,17 @@ final class TrainingTests: XCTestCase {
         XCTAssertThrowsError(try data.moveUpcomingDay(day("D"), by: 1, in: id))
         XCTAssertNoThrow(try data.validated())
     }
+
+    func testShowcaseIsValidHistoryWithPushNext() throws {
+        let data = TrainingData.showcase(now: Date(timeIntervalSince1970: 1_792_300_000))
+        XCTAssertNoThrow(try data.validated())
+        XCTAssertEqual(data.activeProgram?.name, "Push Pull Legs")
+        XCTAssertEqual(data.activeProgram?.nextDayID.flatMap(data.routine)?.name, "Push")
+        XCTAssertGreaterThan(data.sessions.count, 60)
+        XCTAssertEqual(data.sessions.filter { $0.skipped == true }.count, 1)
+        XCTAssertEqual(data.programs.count, 2); XCTAssertEqual(data.dayTemplates.map(\.name), ["Arms", "Conditioning"])
+        XCTAssertTrue(data.sessions.flatMap(\.exercises).flatMap(\.sets).contains { $0.plan.customTypeID != nil && $0.completedAt != nil })
+        let bench = data.exercises.first { $0.name == "Bench press" }!
+        XCTAssertGreaterThan(data.points(exerciseID: bench.id, metric: .weight).count, 15)
+    }
 }

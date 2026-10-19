@@ -31,11 +31,12 @@ final class AppStore: ObservableObject {
 
     init() {
         let arguments = ProcessInfo.processInfo.arguments
-        demo = arguments.contains("--demo")
+        let showcase = arguments.contains("--showcase")
+        demo = arguments.contains("--demo") || showcase
         let directoryIndex = arguments.firstIndex(of: "--data-directory")
         let testDirectory = directoryIndex.flatMap { index in arguments.indices.contains(index + 1) ? URL(fileURLWithPath: arguments[index + 1], isDirectory: true) : nil }
         if demo && testDirectory == nil {
-            repository = nil; data = .demo(); return
+            repository = nil; data = showcase ? .showcase() : .demo(); return
         }
         let root = testDirectory ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!.appendingPathComponent("Lifting", isDirectory: true)
         repository = LocalRepository(url: root.appendingPathComponent("training.json"))
@@ -176,9 +177,16 @@ func clockText(_ seconds: Double) -> String {
     let value = max(0, Int(seconds.rounded(.up)))
     return value >= 3600 ? String(format: "%d:%02d:%02d", value / 3600, (value % 3600) / 60, value % 60) : String(format: "%d:%02d", value / 60, value % 60)
 }
+/// The sets counted in "sets × reps": working and failure sets, so drop and MYO follow-ups are not
+/// read as extra work sets. Falls back to every non-warm-up set, for example a MYO-only prescription.
+func prescribedWork(_ plans: [SetPlan]) -> [SetPlan] {
+    let main = plans.filter { $0.kind == .working || $0.kind == .failure }
+    return main.isEmpty ? plans.filter { $0.kind != .warmup } : main
+}
+
 /// One-line prescription in the app's standard form, for example "3 × 5 · 95 lb · RPE 8".
 func planSummary(_ variant: Variant, unit: WeightUnit) -> String {
-    let work = variant.sets.filter { $0.kind != .warmup }
+    let work = prescribedWork(variant.sets)
     guard let first = work.first else { return counted(variant.sets.count, "warm-up") }
     var parts: [String] = []
     if let target = first.repTarget { parts.append("\(work.count) × \(target.replacingOccurrences(of: "-", with: "–"))") }

@@ -131,7 +131,7 @@ struct ExerciseTargets: View {
         }
     }
     func target(_ variant: Variant) -> String {
-        let work = variant.sets.filter { $0.kind != .warmup }
+        let work = prescribedWork(variant.sets)
         guard let plan = work.first else { return "" }
         if let seconds = plan.seconds { return clockText(seconds) }
         if let reps = plan.reps { return "\(work.count) × \(reps)\(plan.repCeiling.map { $0 != reps ? "–\($0)" : "" } ?? "")" }

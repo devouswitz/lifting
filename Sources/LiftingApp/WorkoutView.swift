@@ -346,7 +346,8 @@ struct WorkoutExerciseCard: View {
     var autoCollapseReady: Bool { completed && item?.collapsed != true && item?.keepExpanded != true && technique == nil && editVariant == nil && !substituting && !workingWeight && !noteFocused && restEdit == nil && store.data.settings.autoCollapseCompleted == true }
     /// Collapsed summary in the standard prescription form, for example "3 × 8–10 · 65 lb".
     func compactSummary(_ item: SessionExercise) -> String {
-        let work = item.sets.filter { $0.plan.kind != .warmup }
+        let main = Set(prescribedWork(item.sets.map(\.plan)).map(\.id))
+        let work = item.sets.filter { main.contains($0.plan.id) }
         guard let first = work.first else { return counted(item.sets.count, "warm-up") }
         var parts: [String] = []
         if let target = first.plan.repTarget { parts.append("\(work.count) × \(target.replacingOccurrences(of: "-", with: "–"))") }

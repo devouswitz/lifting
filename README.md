@@ -27,6 +27,8 @@ For sample history without saving any changes:
 open -n '../Lifting Preview.app' --args --demo
 ```
 
+`--showcase` loads a fuller sample instead: a finished 5/3/1 block and four months of Push Pull Legs, used for screenshots and the demo video.
+
 ## Controls
 
 - Train: the loaded program's next day with Start, its later days in the order they come up, and Start Empty Workout. Tap the program row to switch programs or open one. Each program remembers its place. Completing another day does not skip the next one. Skip Workout in the next day's menu saves it to History with every set unchecked and moves on. Move Earlier/Later reorders what comes up next.
