@@ -60,6 +60,9 @@ struct SettingsView: View {
                 NavigationLink { PlateInventoryView() } label: { TileLabel(title: "Plate Sizes", symbol: "circle.circle.fill", color: .gray) }
                 NavigationLink { PlateCalculatorView() } label: { TileLabel(title: "Plate Calculator", symbol: "plus.forwardslash.minus", color: palette.action) }
             }
+            #if canImport(HealthKit) && os(iOS)
+            if store.health != nil { healthSection }
+            #endif
             folderSyncSection
             Section {
                 Button {
@@ -108,6 +111,22 @@ struct SettingsView: View {
             }
         }
     }
+    #if canImport(HealthKit) && os(iOS)
+    private var healthSection: some View {
+        Section {
+            Toggle(isOn: Binding(get: { store.healthSettings.read }, set: { on in Task { await store.setHealthRead(on) } })) {
+                TileLabel(title: "Add Calories from Apple Health", symbol: "heart.fill", color: .pink)
+            }.accessibilityIdentifier("settings.healthRead")
+            Toggle(isOn: Binding(get: { store.healthSettings.write }, set: { on in Task { await store.setHealthWrite(on) } })) {
+                TileLabel(title: "Save Workouts to Apple Health", symbol: "square.and.arrow.down.fill", color: .pink)
+            }.disabled(!store.healthSettings.read).accessibilityIdentifier("settings.healthWrite")
+            if let status = store.healthStatus { Label(status, systemImage: "exclamationmark.triangle").font(.footnote).foregroundStyle(.secondary) }
+        } header: { Text("Apple Health") } footer: {
+            Text("Calories and heart rate come from the Apple Watch or other workout recorded at the same time. Lifting never changes those workouts. With saving on, Lifting adds a workout only when nothing else recorded that time, and removes it if a watch workout appears later.")
+        }
+    }
+    #endif
+
     private var folderSyncSection: some View {
             Section {
                 Button(action: chooseFolder) { HStack { TileLabel(title: "Folder", symbol: "folder.fill", color: palette.action); Spacer(); Text(store.syncConfiguration.bookmark == nil ? "Choose" : store.syncConfiguration.name).foregroundStyle(store.syncConfiguration.bookmark == nil ? palette.action : .secondary).lineLimit(1) } }

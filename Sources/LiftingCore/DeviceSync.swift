@@ -30,7 +30,7 @@ public struct DeviceSyncState: Codable, Equatable, Sendable {
             for item in items { result["\(kind)/\(item.id.uuidString)"] = try encoder.encode(item) }
         }
         try add(data.exercises, kind: "exercise"); try add(data.variants, kind: "variant")
-        try add(data.routines, kind: "routine"); try add(data.programs, kind: "program"); try add(data.sessions, kind: "session")
+        try add(data.routines, kind: "routine"); try add(data.programs, kind: "program"); try add(data.withoutHealthData.sessions, kind: "session")
         try add(data.warmupPresets, kind: "warmup"); try add(data.customSetTypes, kind: "settype")
         for link in data.historyImports { result["import/\(link.sourceVariantID.uuidString)"] = try encoder.encode(link) }
         return result
@@ -72,7 +72,9 @@ public struct DeviceSyncState: Codable, Equatable, Sendable {
         result.routines = try values("routine", as: Routine.self); result.programs = try values("program", as: TrainingProgram.self)
         result.warmupPresets = try values("warmup", as: WarmupPreset.self)
         result.customSetTypes = try values("settype", as: CustomSetType.self)
-        result.sessions = try values("session", as: Session.self).sorted { $0.startedAt < $1.startedAt }
+        // Apple Health values never travel through the shared folder; keep this device's own.
+        let health = Dictionary(local.sessions.compactMap { session in session.health.map { (session.id, $0) } }, uniquingKeysWith: { first, _ in first })
+        result.sessions = try values("session", as: Session.self).map { session in var value = session; value.health = health[session.id]; return value }.sorted { $0.startedAt < $1.startedAt }
         result.historyImports = try next.records.keys.sorted().filter { $0.hasPrefix("import/") }.compactMap { key in
             guard let payload = next.records[key]?.payload else { return nil }
             let value = try decoder.decode(HistoryImportLink.self, from: payload)

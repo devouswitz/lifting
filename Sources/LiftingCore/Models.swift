@@ -194,6 +194,8 @@ public struct Session: Identifiable, Codable, Equatable, Sendable {
     public var advancesProgram: Bool?
     /// A program day that was skipped: saved with every set unchecked, so history shows the gap.
     public var skipped: Bool?
+    /// Calories and heart rate from the Apple Health workout recorded at the same time.
+    public var health: HealthLink?
     public var name: String
     public var startedAt: Date
     public var endedAt: Date?
@@ -221,6 +223,7 @@ public struct Settings: Codable, Equatable, Sendable {
     public var colors: ColorTheme?
     /// The two quick-add buttons under each live exercise: "drop", "myo", "warmup", "failure", or "type:<uuid>".
     public var quickAdd: [String]?
+    public var health: HealthSettings?
     public init() {}
 }
 

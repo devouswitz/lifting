@@ -114,3 +114,14 @@ Checked on the iPhone 18 Pro Max simulator (iOS 27) with demo data; 63 core test
 - Average volume by muscle per workout appears under the comparison with deltas and bars.
 - Hide from Progress (long press on a record, or the exercise menu) removed Triceps pressdown from the chart, legend, picker, and records; Hidden exercises lists it with Show.
 
+## Apple Health (2026-10-20)
+
+Core tests (68 cases, 0 failures) cover matching a watch workout and summing a warm-up plus a strength workout; never saving over another source's workout, including one without calories; waiting before saving; deleting only Lifting's copy when a watch workout appears later; unlinking and relinking; skipped and old sessions; validation; health values left out of folder sync while a merge keeps each device's own; and CSV round trip.
+
+Checked on the iPhone 18 Pro Max simulator (iOS 27) with ad hoc signing and the HealthKit entitlement:
+- Turning on Add Calories showed the Health permission sheet for Active Energy, Workouts, and Heart Rate, then the data range step.
+- A workout logged in Lifting from 4:51 to 4:51 PM matched a 4:46 to 4:53 PM workout entered in the Health app with 210 calories. History showed "210 kcal" on the log row and "210 kcal · Health" in the workout. Health still showed a single workout with its 210 calories.
+- With Save Workouts on (test launch with `--health-save-delay 20`), a session at 5:05 PM with nothing else recorded was saved to Health as Traditional Strength Training from Lifting.
+- A 5:04 to 5:07 PM workout with 150 calories was then entered in Health. On returning to Lifting, Health went from three workouts to two: Lifting deleted only its own copy, and both other workouts kept their calories (360 total). The session showed "150 kcal".
+- The Mac preview builds with Apple Health excluded.
+

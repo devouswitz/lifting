@@ -8,7 +8,7 @@ public struct HistoryBundle: Sendable {
 }
 
 public enum HistoryCSV {
-    public static let headers = ["date", "workout", "exercise", "variant", "variant_id", "kind", "weight_kg", "reps", "seconds", "meters", "rpe", "notes", "session_id", "ended_at", "workout_notes", "exercise_id", "mode", "muscle", "equipment", "session_exercise_id", "set_id", "recurring_notes", "rest_seconds", "exercise_rest_seconds", "completed_at", "program_id", "program_name", "target_reps", "target_rep_ceiling", "group", "group_rest_seconds", "transition_seconds", "secondary_muscles", "source_fields", "set_type_name", "set_type_badge"]
+    public static let headers = ["date", "workout", "exercise", "variant", "variant_id", "kind", "weight_kg", "reps", "seconds", "meters", "rpe", "notes", "session_id", "ended_at", "workout_notes", "exercise_id", "mode", "muscle", "equipment", "session_exercise_id", "set_id", "recurring_notes", "rest_seconds", "exercise_rest_seconds", "completed_at", "program_id", "program_name", "target_reps", "target_rep_ceiling", "group", "group_rest_seconds", "transition_seconds", "secondary_muscles", "source_fields", "set_type_name", "set_type_badge", "active_kcal", "average_heart_rate", "health_source"]
     public static func export(_ data: TrainingData) -> Data {
         let format = ISO8601DateFormatter(); format.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         var rows = [headers]
@@ -23,6 +23,7 @@ public enum HistoryCSV {
                     let sourceFields = set.sourceFields.flatMap { try? JSONEncoder().encode($0) }.flatMap { String(data: $0, encoding: .utf8) } ?? ""
                     row += [exercise.group ?? "", exercise.groupRestSeconds.map(String.init) ?? "", exercise.transitionSeconds.map(String.init) ?? "", exercise.secondaryMuscles?.joined(separator: "|") ?? "", sourceFields]
                     row += [data.setType(set.plan.customTypeID)?.name ?? "", data.setType(set.plan.customTypeID)?.badge ?? ""]
+                    row += [session.health?.activeKcal.map { String($0) } ?? "", session.health?.averageHeartRate.map { String($0) } ?? "", session.health?.hasData == true ? session.health!.sourceName : ""]
                     rows.append(row)
                 }
             }
@@ -69,7 +70,10 @@ public enum HistoryCSV {
             if let existing = data.sessions.first(where: { $0.id == sessionID }) {
                 guard existing.name == workout, existing.startedAt == started, existing.endedAt == ended, existing.notes == r.text("workout_notes"), existing.programID == programID, existing.programName == programName else { throw TrainingError.invalid("Conflicting workout details on row \(r.number).") }
             } else {
-                var session = Session(id: sessionID, name: workout, startedAt: started, endedAt: ended); session.notes = r.text("workout_notes"); session.programID = programID; session.programName = programName; data.sessions.append(session)
+                var session = Session(id: sessionID, name: workout, startedAt: started, endedAt: ended); session.notes = r.text("workout_notes"); session.programID = programID; session.programName = programName
+                let kcal = try r.double("active_kcal", maximum: 100_000), heartRate = try r.double("average_heart_rate", maximum: 300)
+                if kcal != nil || heartRate != nil { session.health = HealthLink(sourceName: String(r.text("health_source").prefix(200)), activeKcal: kcal, averageHeartRate: heartRate.flatMap { (20...300).contains($0) ? $0 : nil }) }
+                data.sessions.append(session)
             }
             let s = data.sessions.firstIndex { $0.id == sessionID }!
             let sessionExerciseID = try r.uuid("session_exercise_id") ?? stableID("session-exercise|\(sessionID)|\(variantID)")

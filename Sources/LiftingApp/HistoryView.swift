@@ -98,7 +98,7 @@ private struct HistoryWorkoutRow: View {
                     Text(title).font(.headline).foregroundStyle(session.skipped == true ? .secondary : .primary)
                     if session.skipped == true { Text("Skipped").font(.caption).foregroundStyle(.secondary) }
                     else {
-                        Text("\(counted(session.completedSets, "set")) · \(clockText(max(0, (session.endedAt ?? session.startedAt).timeIntervalSince(session.startedAt)))) · \(number(unit.display(session.volume), decimals: 0)) \(unit.rawValue)")
+                        Text("\(counted(session.completedSets, "set")) · \(clockText(max(0, (session.endedAt ?? session.startedAt).timeIntervalSince(session.startedAt)))) · \(number(unit.display(session.volume), decimals: 0)) \(unit.rawValue)\(session.health?.activeKcal.map { " · \(number($0, decimals: 0)) kcal" } ?? "")")
                             .font(.caption).foregroundStyle(.secondary).monospacedDigit()
                     }
                 }
@@ -154,7 +154,7 @@ struct SessionDetail: View {
         .toolbar { if session != nil { Button(editing ? "Done" : "Edit") { editing.toggle() }.fontWeight(editing ? .semibold : .regular).accessibilityIdentifier("history.edit") } }
         .confirmationDialog("Delete this workout?", isPresented: $deleting) {
             Button("Delete workout", role: .destructive) {
-                store.perform { $0.sessions.removeAll { $0.id == sessionID } }
+                store.deleteSession(sessionID)
                 dismiss()
             }
         }
@@ -172,6 +172,10 @@ struct SessionDetail: View {
                             detailMetric("Sets", value: "\(session.completedSets)")
                             detailMetric("Duration", value: clockText(max(0, (session.endedAt ?? session.startedAt).timeIntervalSince(session.startedAt))))
                             detailMetric("Volume", value: "\(number(store.data.settings.unit.display(session.volume), decimals: 0)) \(store.data.settings.unit.rawValue)")
+                        }
+                        if let health = session.health, health.hasData {
+                            Label { Text(healthSummary(health)).foregroundStyle(.secondary) } icon: { Image(systemName: "heart.fill").foregroundStyle(.pink) }.font(.subheadline)
+                                .accessibilityIdentifier("history.health")
                         }
                     }
                     if !session.notes.isEmpty { Text(session.notes).font(.subheadline).textSelection(.enabled) }
@@ -197,6 +201,12 @@ struct SessionDetail: View {
                 Button("Delete workout", role: .destructive) { deleting = true }.font(.subheadline).padding(.horizontal, 4)
             }.padding(16)
         }.background(palette.background)
+    }
+
+    /// For example "412 kcal · 128 bpm average · Apple Watch".
+    private func healthSummary(_ health: HealthLink) -> String {
+        [health.activeKcal.map { "\(number($0, decimals: 0)) kcal" }, health.averageHeartRate.map { "\(number($0, decimals: 0)) bpm average" }, health.sourceName.isEmpty ? nil : health.sourceName]
+            .compactMap { $0 }.joined(separator: " · ")
     }
 
     private func detailMetric(_ title: String, value: String) -> some View {
@@ -246,6 +256,15 @@ struct SessionDetail: View {
                 } footer: {
                     if !exercise.recurringNotes.isEmpty { Text(exercise.recurringNotes) }
                 }
+            }
+            if let health = session.health {
+                Section {
+                    if health.unlinked == true {
+                        Button("Match with Apple Health Again") { store.perform { $0.relinkHealth(sessionID) }; Task { await store.refreshHealth() } }
+                    } else if health.hasData {
+                        Button("Remove Apple Health Match", role: .destructive) { store.perform { $0.unlinkHealth(sessionID) } }
+                    }
+                } footer: { if health.hasData, health.unlinked != true { Text(healthSummary(health)) } }
             }
             Section { Button("Delete workout", role: .destructive) { deleting = true } }
         }.formStyle(.grouped)

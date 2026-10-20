@@ -24,6 +24,10 @@ The first screen is a multi-exercise chart with program, exercise, metric, and r
 
 All state stays in local JSON. Exercise definitions and day variants have separate IDs. Substitutions retain a stable family so returning to an exercise resumes its original track. New day copies and imported routine copies get independent tracks. History CSV maintains import mappings across backups and incremental imports.
 
+## Apple Health
+
+Apple Health is the record of what the body did; Lifting is the record of what was lifted. Lifting reads a workout recorded by another source and copies its calories and heart rate into the matching session, so the Health workout stays exactly as the watch saved it and Fitness never shows a second entry. Lifting writes its own workout only when no other source recorded that time, and removes it if one appears later. Matching lives in `LiftingCore/HealthLink.swift` and is covered by core tests; `LiftingApp/HealthBridge.swift` only reads, saves, and deletes Lifting's own samples.
+
 ## Appearance
 
 Every color has one meaning, used the same way on every screen:

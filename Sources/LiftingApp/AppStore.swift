@@ -22,6 +22,19 @@ final class AppStore: ObservableObject {
     @Published var syncStatus = "Off"
     @Published var syncing = false
     @Published var lastFolderSync: Date?
+    /// Last Apple Health problem, shown in Settings.
+    @Published var healthStatus: String?
+    #if canImport(HealthKit) && os(iOS)
+    let health: HealthBridge? = HealthBridge.isAvailable ? HealthBridge() : nil
+    #endif
+    var healthRefreshing = false
+    var healthRefreshPending = false
+    /// How long Lifting waits for a watch workout before saving its own. `--health-save-delay` shortens it for testing.
+    let healthSaveDelay: TimeInterval = {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let index = arguments.firstIndex(of: "--health-save-delay"), arguments.indices.contains(index + 1), let value = TimeInterval(arguments[index + 1]) else { return HealthMatching.saveDelay }
+        return max(0, value)
+    }()
     var syncState: DeviceSyncState?
     var syncGeneration = 0
     var syncConfigurationLoaded = false
@@ -64,7 +77,12 @@ final class AppStore: ObservableObject {
 
     func start(_ routine: Routine) { perform { try $0.start(routineID: routine.id) }; if data.activeSession != nil { workoutPresented = true } }
     func emptyWorkout() { perform { d in guard d.activeSession == nil else { return }; d.activeSession = Session(name: "Workout") }; workoutPresented = true }
-    func finish() { perform { try $0.finish() }; if data.activeSession == nil { workoutPresented = false; cancelRestAlert(); trainRevision += 1 } }
+    func finish() { perform { try $0.finish() }; if data.activeSession == nil { workoutPresented = false; cancelRestAlert(); trainRevision += 1; scheduleHealthCheck() } }
+    /// Deletes a workout from history, and the copy Lifting saved to Apple Health for it.
+    func deleteSession(_ id: UUID) {
+        let copy = data.sessions.first { $0.id == id }?.health?.savedWorkoutID
+        if perform({ $0.sessions.removeAll { $0.id == id } }) { deleteHealthCopy(copy) }
+    }
     func discard() { perform { $0.activeSession = nil; $0.restDeadline = nil }; workoutPresented = false; cancelRestAlert(); trainRevision += 1 }
     func setHiddenFromProgress(_ exerciseID: UUID, _ hidden: Bool) {
         perform { d in if let i = d.exercises.firstIndex(where: { $0.id == exerciseID }) { d.exercises[i].hiddenFromProgress = hidden ? true : nil } }

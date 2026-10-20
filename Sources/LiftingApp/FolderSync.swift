@@ -151,9 +151,10 @@ extension AppStore {
             if pull && data.activeSession == nil {
                 let merged = try state.merge(remote, into: data)
                 if merged != data {
-                    recovery = try LocalRepository.encode(data)
+                    // The shared folder may be iCloud Drive, so its copies leave out Apple Health values.
+                    recovery = try LocalRepository.encode(data.withoutHealthData)
                     if let repository {
-                        try recovery!.write(to: repository.url.appendingPathExtension("before-sync"), options: .atomic)
+                        try LocalRepository.encode(data).write(to: repository.url.appendingPathExtension("before-sync"), options: .atomic)
                         try repository.save(merged)
                     }
                     data = merged
@@ -162,7 +163,7 @@ extension AppStore {
             syncState = state
             let stateBytes = try state.encoded()
             if let url = syncStateURL { try stateBytes.write(to: url, options: .atomic) }
-            let backup = configuration.automaticBackup ? try LocalRepository.encode(data) : nil
+            let backup = configuration.automaticBackup ? try LocalRepository.encode(data.withoutHealthData) : nil
             let replica = configuration.deviceSync ? stateBytes : nil
             try await Task.detached(priority: .utility) { try SyncFolderIO.write(configuration, state: replica, backup: backup, recovery: recovery) }.value
             guard generation == syncGeneration else { return }
@@ -171,7 +172,7 @@ extension AppStore {
         } catch {
             guard generation == syncGeneration else { return }
             let message = error.localizedDescription
-            if configuration.automaticBackup, let backup = try? LocalRepository.encode(data) {
+            if configuration.automaticBackup, let backup = try? LocalRepository.encode(data.withoutHealthData) {
                 do {
                     try await Task.detached(priority: .utility) { try SyncFolderIO.write(configuration, state: nil, backup: backup, recovery: nil) }.value
                     syncStatus = "Backup saved. Sync: \(message)"
