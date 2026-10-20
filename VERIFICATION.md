@@ -132,3 +132,18 @@ Watch-shaped workouts (2026-10-20). A test helper app saved workouts the way the
 - A session with only a Run was saved to Health as Running.
 - Found and fixed during this pass: a watch workout ending within 10 minutes of the next session counted toward both. Each workout now counts once, split by when the energy was burned.
 
+## Apple Watch check on real devices (not yet run)
+
+No iPhone or Apple Watch was available while building this, so it has only been checked in the simulator. To check it on a real iPhone paired with an Apple Watch:
+
+1. In Xcode, select your team under Signing & Capabilities (the HealthKit capability is already declared), choose the iPhone, and Run.
+2. In Lifting, open Settings > Apple Health, turn on Add Calories from Apple Health, and allow Workouts, Active Energy, and Heart Rate. Leave Save Workouts off for the first lift.
+3. Start a Traditional Strength Training workout on the watch, then start the day in Lifting. Lift as usual. End the watch workout, then tap Finish and Save Workout in Lifting.
+4. In the Fitness app, check that the day shows one strength workout from the watch, with its calories and heart rate unchanged.
+5. In Lifting, open History. The workout should show the watch's calories and average heart rate within a minute or two. If not, leave and reopen Lifting to make it check again.
+6. Next time, turn on Save Workouts and lift without the watch. About 10 minutes after Finish (with Lifting open or reopened), Fitness should show one Lifting strength workout.
+7. Lift with the watch again with Save Workouts still on. Fitness should show only the watch workout; Lifting should not add a second one.
+8. Optional: on the watch, record strength training and then a separate run during one Lifting session. Lifting's workout detail should list both, and Fitness should show only the two watch workouts.
+
+Report anything that differs, especially how many minutes the watch workout took to appear on the phone. The 10-minute wait before saving assumes the watch syncs within that time.
+
