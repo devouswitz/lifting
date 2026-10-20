@@ -125,3 +125,10 @@ Checked on the iPhone 18 Pro Max simulator (iOS 27) with ad hoc signing and the 
 - A 5:04 to 5:07 PM workout with 150 calories was then entered in Health. On returning to Lifting, Health went from three workouts to two: Lifting deleted only its own copy, and both other workouts kept their calories (360 total). The session showed "150 kcal".
 - The Mac preview builds with Apple Health excluded.
 
+Watch-shaped workouts (2026-10-20). A test helper app saved workouts the way the Workout app does: a separate source, an Apple Watch device, per-minute active energy, and heart rate samples every 30 seconds. Health computed the workout totals from those samples. Times below are 5 PM local; every workout Lifting saved was read back from Health with its source.
+- Lift, then run on the watch, in one Lifting session (5:25 to 5:29): the strength workout (120 kcal) and the run (90 kcal) both counted. The workout showed "210 kcal · 133 bpm average · Apple Watch" with a line for each. Lifting saved nothing.
+- One watch workout left running across two Lifting sessions (Lower 5:30 to 5:32, Push 5:32 to 5:35), 60 kcal burned in the first and 140 in the second: Lower showed 60 kcal and Push 140 kcal. The earlier session kept its 210. Lifting saved nothing.
+- The watch recorded only a run at the end of a 7-minute session: Lifting saved strength training from 5:36:32 to 5:42:20, ending where the run began. The run was untouched, and the session showed its 40 kcal.
+- A session with only a Run was saved to Health as Running.
+- Found and fixed during this pass: a watch workout ending within 10 minutes of the next session counted toward both. Each workout now counts once, split by when the energy was burned.
+

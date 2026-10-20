@@ -174,8 +174,19 @@ struct SessionDetail: View {
                             detailMetric("Volume", value: "\(number(store.data.settings.unit.display(session.volume), decimals: 0)) \(store.data.settings.unit.rawValue)")
                         }
                         if let health = session.health, health.hasData {
-                            Label { Text(healthSummary(health)).foregroundStyle(.secondary) } icon: { Image(systemName: "heart.fill").foregroundStyle(.pink) }.font(.subheadline)
-                                .accessibilityIdentifier("history.health")
+                            VStack(alignment: .leading, spacing: 6) {
+                                Label { Text(healthSummary(health)).foregroundStyle(.secondary) } icon: { Image(systemName: "heart.fill").foregroundStyle(.pink) }
+                                // Each Apple Health workout that counted, when there was more than one.
+                                if let parts = health.parts, parts.count > 1 {
+                                    ForEach(Array(parts.enumerated()), id: \.offset) { _, part in
+                                        HStack {
+                                            Text(part.activityName)
+                                            Spacer()
+                                            Text([clockText(part.duration), part.activeKcal.map { "\(number($0, decimals: 0)) kcal" }].compactMap { $0 }.joined(separator: " · ")).monospacedDigit()
+                                        }.foregroundStyle(.secondary).padding(.leading, 28)
+                                    }
+                                }
+                            }.font(.subheadline).accessibilityElement(children: .combine).accessibilityIdentifier("history.health")
                         }
                     }
                     if !session.notes.isEmpty { Text(session.notes).font(.subheadline).textSelection(.enabled) }

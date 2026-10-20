@@ -1294,17 +1294,17 @@ final class TrainingTests: XCTestCase {
         data.settings.health?.writeSince = start
         // Waits for a watch workout to reach the phone before saving.
         XCTAssertEqual(data.reconcileHealth([], now: end.addingTimeInterval(5 * 60)), HealthPlan())
-        XCTAssertEqual(data.reconcileHealth([], now: end.addingTimeInterval(11 * 60)), HealthPlan(saves: [id]))
+        XCTAssertEqual(data.reconcileHealth([], now: end.addingTimeInterval(11 * 60)), HealthPlan(saves: [HealthSave(sessionID: id, start: start, end: end, activity: .strength)]))
         let copy = HealthWorkout(start: start, end: end, sourceName: "Lifting", isOwn: true, sessionID: id, activityName: "Strength training")
         data.recordSavedHealthWorkout(copy.id, for: id)
-        XCTAssertEqual(data.sessions.last!.health?.savedWorkoutID, copy.id)
+        XCTAssertEqual(data.sessions.last!.health?.savedWorkoutIDs, [copy.id])
         // Already saved: nothing to do.
         XCTAssertEqual(data.reconcileHealth([copy], now: end.addingTimeInterval(20 * 60)), HealthPlan())
         // The watch workout shows up later: Lifting removes only its own copy and takes the watch's calories.
         let watch = HealthWorkout(start: start.addingTimeInterval(60), end: end.addingTimeInterval(60), sourceName: "Apple Watch", activeKcal: 380, averageHeartRate: 131)
         let plan = data.reconcileHealth([copy, watch], now: end.addingTimeInterval(30 * 60))
         XCTAssertEqual(plan, HealthPlan(deletions: [copy.id]))
-        XCTAssertNil(data.sessions.last!.health?.savedWorkoutID)
+        XCTAssertNil(data.sessions.last!.health?.savedWorkoutIDs)
         XCTAssertEqual(data.sessions.last!.health?.activeKcal ?? 0, 380, accuracy: 0.001)
         // Once the watch recorded the time, Lifting never saves it again.
         XCTAssertEqual(data.reconcileHealth([watch], now: end.addingTimeInterval(3600)), HealthPlan())
@@ -1361,5 +1361,111 @@ final class TrainingTests: XCTestCase {
         let imported = try XCTUnwrap(bundle.content.sessions.first { $0.id == id }?.health)
         XCTAssertEqual(imported.activeKcal ?? 0, 333, accuracy: 0.001); XCTAssertEqual(imported.averageHeartRate ?? 0, 125, accuracy: 0.001)
         XCTAssertEqual(imported.sourceName, "Apple Watch")
+    }
+
+    func testHealthCountsEachWorkoutTowardOneSessionOnly() throws {
+        var (data, first, start) = try healthLibrary()
+        // A second session six minutes after the first one ended.
+        let secondStart = start.addingTimeInterval(76 * 60)
+        try data.start(routineID: data.dayTemplates[1].id, now: secondStart)
+        let item = data.activeSession!.exercises[0]
+        try data.toggleSet(exerciseID: item.id, setID: item.sets[0].id, now: secondStart.addingTimeInterval(60))
+        try data.finish(now: secondStart.addingTimeInterval(40 * 60))
+        let second = data.sessions.last!.id
+        let early = HealthWorkout(start: start.addingTimeInterval(65 * 60), end: start.addingTimeInterval(72 * 60), sourceName: "Apple Watch", activeKcal: 150)
+        let late = HealthWorkout(start: secondStart.addingTimeInterval(-2 * 60), end: secondStart.addingTimeInterval(41 * 60), sourceName: "Apple Watch", activeKcal: 320, averageHeartRate: 132)
+        // The early workout is within ten minutes of both sessions but counts only toward the one it overlaps.
+        _ = data.reconcileHealth([early, late], now: secondStart.addingTimeInterval(3 * 3600))
+        XCTAssertEqual(data.sessions.first { $0.id == first }!.health?.activeKcal ?? 0, 150, accuracy: 0.001)
+        XCTAssertEqual(data.sessions.first { $0.id == second }!.health?.activeKcal ?? 0, 320, accuracy: 0.001)
+        // A workout first linked to the earlier session moves when a closer session appears, without counting twice.
+        var (moving, firstID, movingStart) = try healthLibrary()
+        let gapWorkout = HealthWorkout(start: movingStart.addingTimeInterval(74 * 60), end: movingStart.addingTimeInterval(79 * 60), sourceName: "Apple Watch", activeKcal: 60)
+        _ = moving.reconcileHealth([gapWorkout], now: movingStart.addingTimeInterval(80 * 60))
+        XCTAssertEqual(moving.sessions.first { $0.id == firstID }!.health?.activeKcal ?? 0, 60, accuracy: 0.001)
+        let laterStart = movingStart.addingTimeInterval(76 * 60)
+        try moving.start(routineID: moving.dayTemplates[1].id, now: laterStart)
+        let laterItem = moving.activeSession!.exercises[0]
+        try moving.toggleSet(exerciseID: laterItem.id, setID: laterItem.sets[0].id, now: laterStart.addingTimeInterval(60))
+        try moving.finish(now: laterStart.addingTimeInterval(30 * 60))
+        _ = moving.reconcileHealth([gapWorkout], now: laterStart.addingTimeInterval(3 * 3600))
+        XCTAssertNil(moving.sessions.first { $0.id == firstID }!.health?.activeKcal)
+        XCTAssertEqual(moving.sessions.last!.health?.activeKcal ?? 0, 60, accuracy: 0.001)
+    }
+
+    /// Finishes a session from a day template, completing the first set of each listed exercise.
+    private func finishSession(_ data: inout TrainingData, day: Int, at start: Date, minutes: Double, exercises: [Int] = [0]) throws -> UUID {
+        try data.start(routineID: data.dayTemplates[day].id, now: start)
+        for e in exercises {
+            let item = data.activeSession!.exercises[e]
+            try data.toggleSet(exerciseID: item.id, setID: item.sets[0].id, now: start.addingTimeInterval(minutes * 60 - 60))
+        }
+        try data.finish(now: start.addingTimeInterval(minutes * 60))
+        return data.sessions.last!.id
+    }
+
+    func testHealthSplitsOneWatchWorkoutAcrossBackToBackSessions() throws {
+        var data = TrainingData.starter()
+        let start = Date(timeIntervalSince1970: 1_792_000_000)
+        data.settings.health = HealthSettings(read: true, write: true, writeSince: start)
+        let lift = try finishSession(&data, day: 0, at: start, minutes: 40)
+        let cardio = try finishSession(&data, day: 1, at: start.addingTimeInterval(40 * 60), minutes: 30, exercises: [2])
+        // One watch workout ran through both: 5 kcal a minute while lifting, 10 while running.
+        let segments = (0..<70).map { minute in
+            HealthSegment(start: start.addingTimeInterval(Double(minute) * 60), end: start.addingTimeInterval(Double(minute + 1) * 60), kcal: minute < 40 ? 5 : 10)
+        }
+        let watch = HealthWorkout(start: start, end: start.addingTimeInterval(70 * 60), sourceName: "Apple Watch", activityName: "Strength training", activeKcal: 500, averageHeartRate: 130, energySegments: segments)
+        let plan = data.reconcileHealth([watch], now: start.addingTimeInterval(3 * 3600))
+        XCTAssertEqual(plan, HealthPlan())
+        let first = try XCTUnwrap(data.sessions.first { $0.id == lift }?.health), second = try XCTUnwrap(data.sessions.first { $0.id == cardio }?.health)
+        XCTAssertEqual(first.activeKcal ?? 0, 200, accuracy: 0.001); XCTAssertEqual(second.activeKcal ?? 0, 300, accuracy: 0.001)
+        XCTAssertEqual(first.parts?.first?.duration ?? 0, 40 * 60, accuracy: 0.001); XCTAssertEqual(second.parts?.first?.duration ?? 0, 30 * 60, accuracy: 0.001)
+        XCTAssertEqual(first.averageHeartRate ?? 0, 130, accuracy: 0.001)
+        // Without per-minute energy, calories are split by time.
+        var timed = watch; timed.energySegments = nil
+        _ = data.reconcileHealth([timed], now: start.addingTimeInterval(3 * 3600))
+        XCTAssertEqual(data.sessions.first { $0.id == lift }!.health?.activeKcal ?? 0, 500 * 40 / 70, accuracy: 0.001)
+        XCTAssertEqual(data.sessions.first { $0.id == cardio }!.health?.activeKcal ?? 0, 500 * 30 / 70, accuracy: 0.001)
+    }
+
+    func testHealthLiftAndRunRecordedSeparatelyCountAsOneSession() throws {
+        var (data, id, start) = try healthLibrary()
+        let lift = HealthWorkout(start: start.addingTimeInterval(-60), end: start.addingTimeInterval(50 * 60), sourceName: "Apple Watch", activityName: "Strength training", activeKcal: 280, averageHeartRate: 118)
+        let run = HealthWorkout(start: start.addingTimeInterval(52 * 60), end: start.addingTimeInterval(70 * 60), sourceName: "Apple Watch", activityName: "Run", activeKcal: 190, averageHeartRate: 150)
+        _ = data.reconcileHealth([run, lift], now: start.addingTimeInterval(3 * 3600))
+        let link = try XCTUnwrap(data.sessions.first { $0.id == id }?.health)
+        XCTAssertEqual(link.activeKcal ?? 0, 470, accuracy: 0.001)
+        XCTAssertEqual(link.parts?.map(\.activityName), ["Strength training", "Run"])
+        XCTAssertEqual(link.workoutIDs, [lift.id, run.id])
+    }
+
+    func testHealthSavesOnlyTheTimeNoOtherSourceRecorded() throws {
+        var (data, id, start) = try healthLibrary()
+        let end = start.addingTimeInterval(70 * 60)
+        data.settings.health = HealthSettings(read: true, write: true, writeSince: start)
+        // The watch recorded only the run at the end; Lifting saves the lifting before it.
+        let run = HealthWorkout(start: start.addingTimeInterval(50 * 60), end: end, sourceName: "Apple Watch", activityName: "Run", activeKcal: 200)
+        XCTAssertEqual(data.reconcileHealth([run], now: end.addingTimeInterval(11 * 60)), HealthPlan(saves: [HealthSave(sessionID: id, start: start, end: start.addingTimeInterval(50 * 60), activity: .strength)]))
+        // A full-length copy saved before the run arrived is replaced by the uncovered part.
+        let full = HealthWorkout(start: start, end: end, sourceName: "Lifting", isOwn: true, sessionID: id)
+        XCTAssertEqual(data.reconcileHealth([full, run], now: end.addingTimeInterval(20 * 60)), HealthPlan(deletions: [full.id], saves: [HealthSave(sessionID: id, start: start, end: start.addingTimeInterval(50 * 60), activity: .strength)]))
+        let trimmed = HealthWorkout(start: start, end: start.addingTimeInterval(50 * 60), sourceName: "Lifting", isOwn: true, sessionID: id)
+        XCTAssertEqual(data.reconcileHealth([trimmed, run], now: end.addingTimeInterval(30 * 60)), HealthPlan())
+        XCTAssertEqual(data.sessions.last!.health?.savedWorkoutIDs, [trimmed.id])
+        XCTAssertEqual(data.sessions.last!.health?.activeKcal ?? 0, 200, accuracy: 0.001)
+        // With saving off, a copy that repeats another recording is still removed.
+        data.settings.health?.write = false
+        XCTAssertEqual(data.reconcileHealth([full, run], now: end.addingTimeInterval(40 * 60)), HealthPlan(deletions: [full.id]))
+    }
+
+    func testHealthSavesCardioSessionsAsTheirActivity() throws {
+        var data = TrainingData.starter()
+        let start = Date(timeIntervalSince1970: 1_792_000_000)
+        data.settings.health = HealthSettings(read: true, write: true, writeSince: start)
+        let id = try finishSession(&data, day: 1, at: start, minutes: 21, exercises: [2])
+        let plan = data.reconcileHealth([], now: start.addingTimeInterval(3600))
+        XCTAssertEqual(plan.saves.map(\.activity), [.running]); XCTAssertEqual(plan.saves.first?.sessionID, id)
+        XCTAssertEqual(HealthActivity.cardio(named: "Row"), .rowing); XCTAssertEqual(HealthActivity.cardio(named: "Stair climber"), .stairs)
+        XCTAssertEqual(HealthActivity.cardio(named: "Bike"), .cycling); XCTAssertEqual(HealthActivity.cardio(named: "Jump rope"), .mixedCardio)
     }
 }

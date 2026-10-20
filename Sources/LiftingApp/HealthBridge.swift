@@ -46,26 +46,28 @@ final class HealthBridge {
             let sessionID = (workout.metadata?[HKMetadataKeyExternalUUID] as? String).flatMap(UUID.init(uuidString:))
             let kcal = workout.statistics(for: energy)?.sumQuantity()?.doubleValue(for: .kilocalorie()) ?? LegacyWorkoutEnergy.kilocalories(workout)
             var rate = workout.statistics(for: heartRate)?.averageQuantity()?.doubleValue(for: Self.bpm)
-            if rate == nil, !isOwn, windows.contains(where: { $0.intersects(DateInterval(start: workout.startDate, end: workout.endDate)) }) {
-                rate = try? await averageHeartRate(from: workout.startDate, to: workout.endDate)
-            }
+            let span = DateInterval(start: workout.startDate, end: max(workout.startDate, workout.endDate))
+            let near = windows.filter { $0.intersects(span) }.count
+            if rate == nil, !isOwn, near > 0 { rate = try? await averageHeartRate(from: workout.startDate, to: workout.endDate) }
+            // A workout kept running across two sessions is split by when its energy was burned.
+            let segments = !isOwn && near > 1 ? try? await energySegments(of: workout) : nil
             result.append(HealthWorkout(id: workout.uuid, start: workout.startDate, end: workout.endDate, sourceName: Self.sourceName(workout), isOwn: isOwn,
                                         sessionID: isOwn ? sessionID : nil, activityName: Self.activityName(workout.workoutActivityType),
-                                        activeKcal: kcal.flatMap { $0 > 0 ? $0 : nil }, averageHeartRate: rate.flatMap { (20...300).contains($0) ? $0 : nil }))
+                                        activeKcal: kcal.flatMap { $0 > 0 ? $0 : nil }, averageHeartRate: rate.flatMap { (20...300).contains($0) ? $0 : nil },
+                                        energySegments: segments))
         }
         return result
     }
 
-    /// Saves a strength training workout for a session, tagged with the session so Lifting can find it again.
-    func save(_ session: Session) async throws -> UUID {
-        guard let end = session.endedAt else { throw TrainingError.invalid("Finish the workout before saving it to Apple Health.") }
+    /// Saves a workout for part or all of a session, tagged with the session so Lifting can find it again.
+    func save(_ request: HealthSave) async throws -> UUID {
         let configuration = HKWorkoutConfiguration()
-        configuration.activityType = .traditionalStrengthTraining
-        configuration.locationType = .indoor
+        configuration.activityType = Self.activityType(request.activity)
+        configuration.locationType = request.activity == .strength ? .indoor : .unknown
         let builder = HKWorkoutBuilder(healthStore: store, configuration: configuration, device: .local())
-        try await builder.beginCollection(at: session.startedAt)
-        try await builder.addMetadata([HKMetadataKeyExternalUUID: session.id.uuidString])
-        try await builder.endCollection(at: end)
+        try await builder.beginCollection(at: request.start)
+        try await builder.addMetadata([HKMetadataKeyExternalUUID: request.sessionID.uuidString])
+        try await builder.endCollection(at: request.end)
         guard let workout = try await builder.finishWorkout() else { throw TrainingError.invalid("Apple Health did not save the workout.") }
         return workout.uuid
     }
@@ -79,6 +81,11 @@ final class HealthBridge {
         if !mine.isEmpty { try await store.delete(mine) }
     }
 
+    private func energySegments(of workout: HKWorkout) async throws -> [HealthSegment] {
+        let descriptor = HKSampleQueryDescriptor(predicates: [.quantitySample(type: energy, predicate: HKQuery.predicateForObjects(from: workout))], sortDescriptors: [SortDescriptor(\.startDate)], limit: 10_000)
+        return try await descriptor.result(for: store).map { HealthSegment(start: $0.startDate, end: $0.endDate, kcal: $0.quantity.doubleValue(for: .kilocalorie())) }
+    }
+
     private func averageHeartRate(from start: Date, to end: Date) async throws -> Double? {
         let samples = HKSamplePredicate.quantitySample(type: heartRate, predicate: HKQuery.predicateForSamples(withStart: start, end: end, options: .strictStartDate))
         return try await HKStatisticsQueryDescriptor(predicate: samples, options: .discreteAverage).result(for: store)?.averageQuantity()?.doubleValue(for: Self.bpm)
@@ -87,6 +94,20 @@ final class HealthBridge {
     private static func sourceName(_ workout: HKWorkout) -> String {
         if workout.device?.model == "Watch" || workout.sourceRevision.productType?.hasPrefix("Watch") == true { return "Apple Watch" }
         return workout.sourceRevision.source.name
+    }
+
+    private static func activityType(_ activity: HealthActivity) -> HKWorkoutActivityType {
+        switch activity {
+        case .strength: return .traditionalStrengthTraining
+        case .running: return .running
+        case .walking: return .walking
+        case .cycling: return .cycling
+        case .rowing: return .rowing
+        case .stairs: return .stairClimbing
+        case .elliptical: return .elliptical
+        case .swimming: return .swimming
+        case .mixedCardio: return .mixedCardio
+        }
     }
 
     private static func activityName(_ type: HKWorkoutActivityType) -> String {
@@ -101,6 +122,9 @@ final class HealthBridge {
         case .cycling: return "Cycling"
         case .elliptical: return "Elliptical"
         case .rowing: return "Rowing"
+        case .stairClimbing: return "Stairs"
+        case .mixedCardio: return "Cardio"
+        case .swimming: return "Swim"
         default: return "Workout"
         }
     }
@@ -160,19 +184,16 @@ extension AppStore {
             healthRefreshPending = false
             let now = Date()
             guard let range = data.healthRange(now: now) else { return }
-            let windows = data.sessions.filter { data.healthEligible($0, now: now) }.compactMap { session in
-                session.endedAt.map { DateInterval(start: session.startedAt.addingTimeInterval(-HealthMatching.margin), end: $0.addingTimeInterval(HealthMatching.margin)) }
-            }
+            let windows = data.healthWindows(now: now)
             do {
                 let workouts = try await health.workouts(in: range, near: windows)
                 var plan = HealthPlan()
                 let delay = healthSaveDelay
                 guard perform({ plan = $0.reconcileHealth(workouts, now: now, saveDelay: delay) }) else { return }
                 if !plan.deletions.isEmpty { try await health.delete(plan.deletions) }
-                for id in plan.saves {
-                    guard let session = data.sessions.first(where: { $0.id == id }) else { continue }
-                    let saved = try await health.save(session)
-                    perform { $0.recordSavedHealthWorkout(saved, for: id) }
+                for request in plan.saves {
+                    let saved = try await health.save(request)
+                    perform { $0.recordSavedHealthWorkout(saved, for: request.sessionID) }
                 }
                 healthStatus = nil
             } catch {
@@ -192,10 +213,10 @@ extension AppStore {
         }
     }
 
-    /// Removes the copy Lifting saved for a deleted session.
-    func deleteHealthCopy(_ workoutID: UUID?) {
-        guard let health, let workoutID else { return }
-        Task { try? await health.delete([workoutID]) }
+    /// Removes the workouts Lifting saved for a deleted session.
+    func deleteHealthCopies(_ workoutIDs: [UUID]) {
+        guard let health, !workoutIDs.isEmpty else { return }
+        Task { try? await health.delete(workoutIDs) }
     }
 }
 #else
@@ -203,6 +224,6 @@ extension AppStore {
     func startHealth() async {}
     func refreshHealth() async {}
     func scheduleHealthCheck() {}
-    func deleteHealthCopy(_ workoutID: UUID?) {}
+    func deleteHealthCopies(_ workoutIDs: [UUID]) {}
 }
 #endif

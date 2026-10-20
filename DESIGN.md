@@ -26,7 +26,7 @@ All state stays in local JSON. Exercise definitions and day variants have separa
 
 ## Apple Health
 
-Apple Health is the record of what the body did; Lifting is the record of what was lifted. Lifting reads a workout recorded by another source and copies its calories and heart rate into the matching session, so the Health workout stays exactly as the watch saved it and Fitness never shows a second entry. Lifting writes its own workout only when no other source recorded that time, and removes it if one appears later. Matching lives in `LiftingCore/HealthLink.swift` and is covered by core tests; `LiftingApp/HealthBridge.swift` only reads, saves, and deletes Lifting's own samples.
+Apple Health is the record of what the body did; Lifting is the record of what was lifted. Lifting reads a workout recorded by another source and copies its calories and heart rate into the matching session, so the Health workout stays exactly as the watch saved it and Fitness never shows a second entry. Lifting writes its own workout only for time no other source recorded, and removes or trims it if one appears later. Each Health workout's calories go to the session it happened in; one spanning two sessions is split by its energy samples. Matching lives in `LiftingCore/HealthLink.swift` and is covered by core tests; `LiftingApp/HealthBridge.swift` only reads, saves, and deletes Lifting's own samples.
 
 ## Appearance
 

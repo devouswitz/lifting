@@ -80,8 +80,8 @@ final class AppStore: ObservableObject {
     func finish() { perform { try $0.finish() }; if data.activeSession == nil { workoutPresented = false; cancelRestAlert(); trainRevision += 1; scheduleHealthCheck() } }
     /// Deletes a workout from history, and the copy Lifting saved to Apple Health for it.
     func deleteSession(_ id: UUID) {
-        let copy = data.sessions.first { $0.id == id }?.health?.savedWorkoutID
-        if perform({ $0.sessions.removeAll { $0.id == id } }) { deleteHealthCopy(copy) }
+        let copies = data.sessions.first { $0.id == id }?.health?.savedWorkoutIDs ?? []
+        if perform({ $0.sessions.removeAll { $0.id == id } }) { deleteHealthCopies(copies) }
     }
     func discard() { perform { $0.activeSession = nil; $0.restDeadline = nil }; workoutPresented = false; cancelRestAlert(); trainRevision += 1 }
     func setHiddenFromProgress(_ exerciseID: UUID, _ hidden: Bool) {
