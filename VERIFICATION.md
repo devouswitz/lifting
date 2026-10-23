@@ -1,5 +1,7 @@
 # Verification
 
+Entries below are dated records. Earlier toolchain and distribution limitations describe the environment at that time; see the newest pass for current evidence.
+
 Verified on October 18, 2026.
 
 ## Structural redesign (iPhone simulator)
@@ -147,3 +149,12 @@ No iPhone or Apple Watch was available while building this, so it has only been 
 
 Report anything that differs, especially how many minutes the watch workout took to appear on the phone. The 10-minute wait before saving assumes the watch syncs within that time.
 
+
+
+## Pass of 2026-10-23 (Torque 1.0 build 2)
+
+82 core cases pass, with all earlier feature tests retained. Release simulator and arm64 archive builds pass. Tested isolated iPhone 17e/iOS 27 and iPad mini/iPadOS 27 sessions: template batch add, shared weights/warm-ups, live shadow weights/header sync, short/full swipe deletion, rep target range editing without replacing logged reps, default collapse/focus, pause/restart/save, and a delivered background reminder opening the matching workout. Tablet portrait/landscape picker search and multiselect passed. The largest accessibility text size exposed wrapping issues that were corrected. macOS logging/save and workout toolbar actions were verified.
+
+The bundle/storage identities are unchanged. Exact reps, ranges, AMRAP, no-count, RPE/time/distance, all load rules, progression, warm-up presets, Drop/MYO/custom types, substitution scope, linking, templates, import/export, history, analytics, sync and Health remain available. The global template collection is under Programs > Saved Days.
+
+Physical phone/Watch checks remain unrun. The native hold-and-drag UI could not be exercised with a sustained touch drag through the automation interface; the reorder mutation is tested, with Move Up/Down retained. TestFlight distribution status is recorded separately in the release deliverables.

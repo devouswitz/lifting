@@ -11,6 +11,7 @@ import UserNotifications
 struct SettingsView: View {
     @EnvironmentObject var store: AppStore
     @Environment(\.palette) var palette
+    @Environment(\.scenePhase) private var phase
     @State private var exporting = false
     @State private var importing = false
     @State private var importingCSV = false
@@ -18,7 +19,7 @@ struct SettingsView: View {
     @State private var contentType = UTType.json
     @State private var importPreview: TrainingData?
     @State private var confirmingImport = false
-    @State private var exportName = "Lifting-backup"
+    @State private var exportName = "Torque-backup"
     @State private var notificationStatus = ""
     @State private var choosingSyncFolder = false
     @State private var choosingMacFolder = false
@@ -38,12 +39,23 @@ struct SettingsView: View {
                 Toggle(isOn: setting(\.autoRest)) { TileLabel(title: "Start Rest Timer Automatically", symbol: "timer", color: palette.rest) }
                 #if os(iOS)
                 Button {
-                    UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { granted, error in
-                        Task { @MainActor in notificationStatus = granted ? "On" : "Off in iOS Settings"; if let error { store.error = error.localizedDescription } }
+                    Task {
+                        let center = UNUserNotificationCenter.current()
+                        if await center.notificationSettings().authorizationStatus == .denied {
+                            if let url = URL(string: UIApplication.openSettingsURLString) { await UIApplication.shared.open(url) }
+                        } else {
+                            do { _ = try await center.requestAuthorization(options: [.alert, .sound]) }
+                            catch { store.error = error.localizedDescription }
+                            await updateNotificationStatus()
+                            store.refreshWorkoutReminders()
+                        }
                     }
-                } label: { HStack { TileLabel(title: "Rest Alerts in Background", symbol: "bell.badge.fill", color: palette.failure); Spacer(); Text(notificationStatus.isEmpty ? "Allow" : notificationStatus).foregroundStyle(notificationStatus.isEmpty ? palette.action : .secondary) } }
+                } label: { HStack { TileLabel(title: "Workout & Rest Alerts", symbol: "bell.badge.fill", color: palette.failure); Spacer(); Text(notificationStatus.isEmpty ? "Allow" : notificationStatus).foregroundStyle(notificationStatus.isEmpty ? palette.action : .secondary) } }
+                .task { await updateNotificationStatus() }
+                .onChange(of: phase) { _, value in if value == .active { Task { await updateNotificationStatus() } } }
                 #endif
-                Toggle(isOn: Binding(get: { store.data.settings.autoCollapseCompleted == true }, set: { value in store.perform { $0.settings.autoCollapseCompleted = value } })) { TileLabel(title: "Collapse Finished Exercises", symbol: "rectangle.compress.vertical", color: palette.completed) }
+                Toggle(isOn: Binding(get: { store.data.settings.remindsAboutUnfinishedWorkouts }, set: { value in store.perform { $0.settings.workoutReminders = value }; if value { store.requestWorkoutAlerts() } })) { TileLabel(title: "Unfinished Workout Reminders", symbol: "bell.fill", color: palette.rest) }
+                Toggle(isOn: Binding(get: { store.data.settings.collapsesCompletedExercises }, set: { value in store.perform { $0.settings.autoCollapseCompleted = value } })) { TileLabel(title: "Collapse Finished Exercises", symbol: "rectangle.compress.vertical", color: palette.completed) }
                 Toggle(isOn: setting(\.haptics)) { TileLabel(title: "Haptics", symbol: "hand.tap.fill", color: .pink) }
                 Toggle(isOn: setting(\.keepAwake)) { TileLabel(title: "Keep Screen On During Workouts", symbol: "sun.max.fill", color: .orange) }
             }
@@ -66,9 +78,9 @@ struct SettingsView: View {
             folderSyncSection
             Section {
                 Button {
-                    do { document = BackupDocument(bytes: try LocalRepository.encode(store.data)); contentType = .json; exportName = "Lifting-\(Date().formatted(.iso8601.year().month().day().dateSeparator(.dash)))"; exporting = true } catch { store.error = error.localizedDescription }
+                    do { document = BackupDocument(bytes: try LocalRepository.encode(store.data)); contentType = .json; exportName = "Torque-\(Date().formatted(.iso8601.year().month().day().dateSeparator(.dash)))"; exporting = true } catch { store.error = error.localizedDescription }
                 } label: { TileLabel(title: "Export Backup", symbol: "square.and.arrow.up.fill", color: palette.completed) }.accessibilityIdentifier("settings.export")
-                Button { document = BackupDocument(bytes: LocalRepository.csv(store.data)); contentType = .commaSeparatedText; exportName = "Lifting-sets"; exporting = true } label: { TileLabel(title: "Export Logged Sets as CSV", symbol: "tablecells.fill", color: palette.completed) }
+                Button { document = BackupDocument(bytes: LocalRepository.csv(store.data)); contentType = .commaSeparatedText; exportName = "Torque-sets"; exporting = true } label: { TileLabel(title: "Export Logged Sets as CSV", symbol: "tablecells.fill", color: palette.completed) }
                 Button { importingCSV = true } label: { TileLabel(title: "Import Workout Data", symbol: "square.and.arrow.down.fill", color: palette.action) }.accessibilityIdentifier("settings.importCSV")
                 Button { importing = true } label: { TileLabel(title: "Restore Backup", symbol: "clock.arrow.circlepath", color: palette.warmup) }.accessibilityIdentifier("settings.import")
                 if store.storageBlocked { Text("Your local files were preserved. Restore a valid backup to recover.").foregroundStyle(.red) }
@@ -77,7 +89,7 @@ struct SettingsView: View {
             }
             Section {
                 Link(destination: URL(string: "https://ko-fi.com/devouswitz")!) {
-                    HStack { TileLabel(title: "Support Lifting on Ko-fi", symbol: "heart.fill", color: .pink); Spacer(); Image(systemName: "arrow.up.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary) }
+                    HStack { TileLabel(title: "Support Torque on Ko-fi", symbol: "heart.fill", color: .pink); Spacer(); Image(systemName: "arrow.up.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary) }
                 }.accessibilityIdentifier("settings.kofi")
                 LabeledContent("Version", value: "1.0")
             }
@@ -111,6 +123,17 @@ struct SettingsView: View {
             }
         }
     }
+
+    #if os(iOS)
+    private func updateNotificationStatus() async {
+        let status = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
+        switch status {
+        case .authorized, .provisional, .ephemeral: notificationStatus = "On"
+        case .denied: notificationStatus = "iOS Settings"
+        default: notificationStatus = ""
+        }
+    }
+    #endif
     #if canImport(HealthKit) && os(iOS)
     private var healthSection: some View {
         Section {
@@ -122,7 +145,7 @@ struct SettingsView: View {
             }.disabled(!store.healthSettings.read).accessibilityIdentifier("settings.healthWrite")
             if let status = store.healthStatus { Label(status, systemImage: "exclamationmark.triangle").font(.footnote).foregroundStyle(.secondary) }
         } header: { Text("Apple Health") } footer: {
-            Text("Calories and heart rate come from the Apple Watch or other workout recorded at the same time. Lifting never changes those workouts. With saving on, Lifting adds a workout only when nothing else recorded that time, and removes it if a watch workout appears later.")
+            Text("Calories and heart rate come from the Apple Watch or other workout recorded at the same time. Torque never changes those workouts. With saving on, Torque adds a workout only when nothing else recorded that time, and removes it if a watch workout appears later.")
         }
     }
     #endif

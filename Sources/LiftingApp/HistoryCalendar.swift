@@ -236,7 +236,7 @@ private struct HistoryPeriodStats {
         restDays = max(0, elapsed - Set(sessions.map { calendar.startOfDay(for: $0.startedAt) }).count)
         sets = completed.count
         reps = completed.reduce(0) { $0 + ($1.reps ?? 0) }
-        duration = sessions.reduce(0) { $0 + max(0, ($1.endedAt ?? $1.startedAt).timeIntervalSince($1.startedAt)) }
+        duration = sessions.reduce(0) { $0 + $1.duration() }
         volume = sessions.reduce(0) { $0 + $1.volume }
     }
 }

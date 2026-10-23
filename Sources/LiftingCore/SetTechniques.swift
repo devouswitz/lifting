@@ -25,18 +25,6 @@ public enum SetTechniques {
 }
 
 public extension TrainingData {
-    mutating func setWorkingWeight(_ weight: Double, for exerciseID: UUID, saveFuture: Bool) throws {
-        guard weight.isFinite, weight >= 0, weight <= 100_000,
-              let e = activeSession?.exercises.firstIndex(where: { $0.id == exerciseID }),
-              let v = variants.firstIndex(where: { $0.id == activeSession!.exercises[e].variantID }) else { throw TrainingError.invalid("Enter a valid working weight.") }
-        for s in activeSession!.exercises[e].sets.indices where activeSession!.exercises[e].sets[s].completedAt == nil {
-            let plan = activeSession!.exercises[e].sets[s].plan
-            if plan.load == .working || plan.load == .percent { activeSession!.exercises[e].sets[s].weight = plan.resolvedWeight(working: weight, increment: activeSession!.exercises[e].roundingIncrement ?? variants[v].rounding) }
-        }
-        activeSession!.exercises[e].workingWeight = weight
-        if saveFuture { variants[v].workingWeight = weight }
-    }
-
     mutating func applyTechnique(to exerciseID: UUID, plans: [SetPlan], isDrop: Bool, replaceRemaining: Bool, saveFuture: Bool) throws {
         guard let e = activeSession?.exercises.firstIndex(where: { $0.id == exerciseID }),
               let v = variants.firstIndex(where: { $0.id == activeSession!.exercises[e].variantID }) else { throw TrainingError.invalid("Exercise unavailable.") }
@@ -61,7 +49,7 @@ public extension TrainingData {
         guard let e = activeSession?.exercises.firstIndex(where: { $0.id == exerciseID }), let variant = variant(activeSession!.exercises[e].variantID) else { throw TrainingError.invalid("Exercise unavailable.") }
         let item = activeSession!.exercises[e]
         var set = item.sets.last ?? LoggedSet(plan: SetPlan(), variant: variant)
-        set.id = UUID(); set.plan.id = UUID(); set.completedAt = nil
+        set.id = UUID(); set.plan.id = UUID(); set.completedAt = nil; set.weightIsEdited = false
         if warmup {
             var current = variant; current.workingWeight = item.workingLoad(fallback: variant.workingWeight); current.rounding = item.roundingIncrement ?? variant.rounding
             set = LoggedSet(plan: SetPlan(kind: .warmup, load: .percent, reps: 5, repCeiling: nil), variant: current)

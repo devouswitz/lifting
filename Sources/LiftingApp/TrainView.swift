@@ -5,6 +5,7 @@ import LiftingCore
 struct TrainView: View {
     @EnvironmentObject var store: AppStore
     @Environment(\.palette) var palette
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
         ScrollView {
@@ -49,11 +50,11 @@ struct TrainView: View {
                     Text(counted(program.dayIDs.count, "day")).font(.subheadline).foregroundStyle(.secondary)
                 }
                 Spacer()
-                Text("Programs").font(.subheadline).foregroundStyle(.secondary)
+                if !typeSize.isAccessibilitySize { Text("Programs").font(.subheadline).foregroundStyle(.secondary) }
                 Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
             }.contentShape(Rectangle())
         }
-        .buttonStyle(.plain).card(padding: 12).accessibilityIdentifier("train.program")
+        .buttonStyle(.plain).card(padding: 12).accessibilityLabel("Programs, \(program.name), \(counted(program.dayIDs.count, "day"))").accessibilityIdentifier("train.program")
     }
 
     private var noProgram: some View {
@@ -192,32 +193,8 @@ struct DayView: View {
     let dayID: UUID
     var day: Routine? { store.data.routine(dayID) }
     var program: TrainingProgram? { store.data.programForDay(dayID) }
-    var body: some View {
-        ScrollView {
-            if let day {
-                VStack(alignment: .leading, spacing: 20) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        if let program, let index = program.dayIDs.firstIndex(of: dayID) {
-                            Text("\(program.name), day \(index + 1) of \(program.dayIDs.count)").font(.subheadline).foregroundStyle(.secondary)
-                            if program.id == store.data.activeProgramID, program.nextDayID == dayID { Chip(title: "Next workout", accent: true).padding(.top, 2) }
-                        } else { Text("Template").font(.subheadline).foregroundStyle(.secondary) }
-                        if !day.notes.isEmpty { Text(day.notes).font(.subheadline).padding(.top, 4) }
-                    }.padding(.horizontal, 4)
-                    if day.slots.isEmpty { Text("No exercises yet").foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading).card(padding: 16) }
-                    else { ExerciseTargets(day: day, detailed: true).padding(.horizontal, 16).padding(.vertical, 6).card(padding: 0) }
-                    StartDayButton(day: day)
-                }.padding(16)
-            }
-        }
-        .background(palette.background)
-        .navigationTitle(day?.name ?? "Day")
-        .toolbar {
-            if let day {
-                ToolbarItem(placement: .primaryAction) { NavigationLink("Edit") { RoutineEditor(routineID: day.id) }.accessibilityIdentifier("day.edit") }
-                ToolbarItem(placement: .primaryAction) { DayMenu(day: day, program: program, includeEdit: false) { dismiss() } }
-            }
-        }
-    }
+    var body: some View { RoutineEditor(routineID: dayID, showsStart: true) }
+
 }
 
 /// Every action for a day or template, in one menu.
@@ -227,6 +204,9 @@ struct DayMenu: View {
     let program: TrainingProgram?
     var includeEdit: Bool
     var onDelete: (() -> Void)? = nil
+    var onRename: (() -> Void)? = nil
+    var onLink: (() -> Void)? = nil
+    var onWarmups: (() -> Void)? = nil
     @State private var export: CSVExportRequest?
     @State private var deleting = false
     @State private var skipping = false
@@ -235,7 +215,10 @@ struct DayMenu: View {
     private var isNext: Bool { program?.id == store.data.activeProgramID && place == 0 }
     var body: some View {
         Menu {
-            if includeEdit { NavigationLink { RoutineEditor(routineID: day.id) } label: { Label(program == nil ? "Edit Template" : "Edit Day", systemImage: "pencil") } }
+            if let onRename { Button("Rename Day", systemImage: "pencil", action: onRename) }
+            if let onLink { Button("Superset / Circuit", systemImage: "link", action: onLink).disabled(day.slots.count < 2) }
+            if let onWarmups { Button("Apply Warm-up Preset", systemImage: "flame", action: onWarmups).disabled(day.slots.isEmpty) }
+            if includeEdit { NavigationLink { RoutineEditor(routineID: day.id) } label: { Label(program == nil ? "Edit Saved Day" : "Edit Day", systemImage: "pencil") } }
             if let program {
                 if isNext {
                     Button("Skip Workout", systemImage: "forward") { skipping = true }.disabled(store.data.activeSession?.routineID == day.id)
@@ -246,12 +229,12 @@ struct DayMenu: View {
                 Button("Move Later", systemImage: "arrow.down") { store.perform { try $0.moveUpcomingDay(day.id, by: 1, in: program.id) } }.disabled((place ?? program.dayIDs.count) >= program.dayIDs.count - 1)
                 Divider()
                 Button("Duplicate Day", systemImage: "plus.square.on.square") { store.perform { _ = try $0.addDay(to: program.id, templateID: day.id, name: TrainingData.uniqueName(day.name + " copy", among: store.data.routines.map(\.name))) } }
-                Button("Save as Template", systemImage: "square.and.arrow.down.on.square") { store.perform { _ = try $0.saveDayAsTemplate(day.id) } }
+                Button("Save Day Copy", systemImage: "square.and.arrow.down.on.square") { store.perform { _ = try $0.saveDayAsTemplate(day.id) } }
             } else {
                 if !store.data.programs.isEmpty {
                     Menu { ForEach(store.data.programs) { target in Button(target.name) { store.perform { _ = try $0.addDay(to: target.id, templateID: day.id) } } } } label: { Label("Add to Program", systemImage: "plus.rectangle.on.rectangle") }
                 }
-                Button("Duplicate Template", systemImage: "plus.square.on.square") { store.perform { _ = try $0.saveDayAsTemplate(day.id, name: TrainingData.uniqueName(day.name + " copy", among: store.data.dayTemplates.map(\.name))) } }
+                Button("Duplicate Saved Day", systemImage: "plus.square.on.square") { store.perform { _ = try $0.saveDayAsTemplate(day.id, name: TrainingData.uniqueName(day.name + " copy", among: store.data.dayTemplates.map(\.name))) } }
             }
             Button("Export CSV", systemImage: "square.and.arrow.up") { do { export = try .day(day.id, in: store.data) } catch { store.error = error.localizedDescription } }
             Divider()

@@ -143,8 +143,10 @@ public struct LoggedSet: Identifiable, Codable, Equatable, Sendable {
     public var rpe: Double?
     public var completedAt: Date?
     public var sourceFields: [String: String]?
+    /// Explicit entries survive later changes to the exercise's suggested load.
+    public var weightIsEdited: Bool?
     public init(plan: SetPlan, variant: Variant) {
-        id = UUID(); self.plan = plan
+        id = UUID(); self.plan = plan; weightIsEdited = false
         weight = plan.resolvedWeight(working: variant.workingWeight, increment: variant.rounding)
         reps = plan.initialReps; seconds = plan.seconds; meters = plan.meters; rpe = plan.rpe
     }
@@ -199,6 +201,9 @@ public struct Session: Identifiable, Codable, Equatable, Sendable {
     public var name: String
     public var startedAt: Date
     public var endedAt: Date?
+    public var pausedAt: Date?
+    public var pauses: [DateInterval]?
+    public var lastActivityAt: Date?
     public var notes: String
     public var exercises: [SessionExercise]
     public init(id: UUID = UUID(), routineID: UUID? = nil, name: String, startedAt: Date = Date(), endedAt: Date? = nil, exercises: [SessionExercise] = []) {
@@ -206,6 +211,10 @@ public struct Session: Identifiable, Codable, Equatable, Sendable {
     }
     public var completedSets: Int { exercises.flatMap(\.sets).filter { $0.completedAt != nil }.count }
     public var totalSets: Int { exercises.flatMap(\.sets).count }
+    public func duration(at now: Date = Date()) -> TimeInterval {
+        let pausedSeconds = (pauses ?? []).reduce(0) { $0 + $1.duration }
+        return max(0, (endedAt ?? pausedAt ?? now).timeIntervalSince(startedAt) - pausedSeconds)
+    }
     public var volume: Double { exercises.flatMap(\.sets).filter { $0.completedAt != nil && $0.plan.kind != .warmup }.reduce(0) { $0 + ($1.weight ?? 0) * Double($1.reps ?? 0) } }
 }
 
@@ -220,6 +229,9 @@ public struct Settings: Codable, Equatable, Sendable {
     public var platesKG: [Double] = [25, 20, 15, 10, 5, 2.5, 1.25]
     public var lastBackupAt: Date?
     public var autoCollapseCompleted: Bool?
+    public var workoutReminders: Bool?
+    public var collapsesCompletedExercises: Bool { autoCollapseCompleted ?? true }
+    public var remindsAboutUnfinishedWorkouts: Bool { workoutReminders ?? true }
     public var colors: ColorTheme?
     /// The two quick-add buttons under each live exercise: "drop", "myo", "warmup", "failure", or "type:<uuid>".
     public var quickAdd: [String]?

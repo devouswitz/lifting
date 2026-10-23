@@ -8,11 +8,13 @@ public struct HistoryBundle: Sendable {
 }
 
 public enum HistoryCSV {
-    public static let headers = ["date", "workout", "exercise", "variant", "variant_id", "kind", "weight_kg", "reps", "seconds", "meters", "rpe", "notes", "session_id", "ended_at", "workout_notes", "exercise_id", "mode", "muscle", "equipment", "session_exercise_id", "set_id", "recurring_notes", "rest_seconds", "exercise_rest_seconds", "completed_at", "program_id", "program_name", "target_reps", "target_rep_ceiling", "group", "group_rest_seconds", "transition_seconds", "secondary_muscles", "source_fields", "set_type_name", "set_type_badge", "active_kcal", "average_heart_rate", "health_source"]
+    public static let headers = ["date", "workout", "exercise", "variant", "variant_id", "kind", "weight_kg", "reps", "seconds", "meters", "rpe", "notes", "session_id", "ended_at", "workout_notes", "exercise_id", "mode", "muscle", "equipment", "session_exercise_id", "set_id", "recurring_notes", "rest_seconds", "exercise_rest_seconds", "completed_at", "program_id", "program_name", "target_reps", "target_rep_ceiling", "group", "group_rest_seconds", "transition_seconds", "secondary_muscles", "source_fields", "set_type_name", "set_type_badge", "active_kcal", "average_heart_rate", "health_source", "pause_intervals"]
     public static func export(_ data: TrainingData) -> Data {
         let format = ISO8601DateFormatter(); format.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .millisecondsSince1970
         var rows = [headers]
         for session in data.sessions.sorted(by: { $0.startedAt < $1.startedAt }) {
+            let pauses = session.pauses.flatMap { try? encoder.encode($0) }.flatMap { String(data: $0, encoding: .utf8) } ?? ""
             for exercise in session.exercises {
                 for set in exercise.sets where set.completedAt != nil {
                     var row: [String] = [format.string(from: session.startedAt), session.name, exercise.name, exercise.label, exercise.variantID.uuidString, set.plan.kind.rawValue]
@@ -24,6 +26,7 @@ public enum HistoryCSV {
                     row += [exercise.group ?? "", exercise.groupRestSeconds.map(String.init) ?? "", exercise.transitionSeconds.map(String.init) ?? "", exercise.secondaryMuscles?.joined(separator: "|") ?? "", sourceFields]
                     row += [data.setType(set.plan.customTypeID)?.name ?? "", data.setType(set.plan.customTypeID)?.badge ?? ""]
                     row += [session.health?.activeKcal.map { String($0) } ?? "", session.health?.averageHeartRate.map { String($0) } ?? "", session.health?.hasData == true ? session.health!.sourceName : ""]
+                    row.append(pauses)
                     rows.append(row)
                 }
             }
@@ -35,6 +38,7 @@ public enum HistoryCSV {
         let table = try CSVCodec.parse(bytes)
         let header = table[0].map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().replacingOccurrences(of: " ", with: "_") }
         guard Set(header).count == header.count, ["date", "workout", "exercise", "weight_kg"].allSatisfy(header.contains) else { throw TrainingError.invalid("Use a Lifting day/program CSV or logged-set CSV with date, workout, exercise, and weight_kg columns.") }
+        let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .millisecondsSince1970
         let formatter = ISO8601DateFormatter()
         let fractional = ISO8601DateFormatter(); fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         func date(_ value: String, row: Int) throws -> Date {
@@ -55,6 +59,7 @@ public enum HistoryCSV {
             guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !workout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw TrainingError.invalid("Missing exercise or workout on row \(r.number).") }
             let started = try date(r.text("date"), row: r.number)
             let ended = r.text("ended_at").isEmpty ? started : try date(r.text("ended_at"), row: r.number)
+            let pauses = r.text("pause_intervals").isEmpty ? nil : try decoder.decode([DateInterval].self, from: Data(r.text("pause_intervals").utf8))
             let sessionID = try r.uuid("session_id") ?? stableID("session|\(r.text("date"))|\(workout)")
             let mode: ExerciseMode
             if r.text("mode").isEmpty { mode = modes[name] ?? .strength }
@@ -68,9 +73,10 @@ public enum HistoryCSV {
             let programID = try r.uuid("program_id")
             let programName = r.text("program_name").isEmpty ? nil : r.text("program_name")
             if let existing = data.sessions.first(where: { $0.id == sessionID }) {
-                guard existing.name == workout, existing.startedAt == started, existing.endedAt == ended, existing.notes == r.text("workout_notes"), existing.programID == programID, existing.programName == programName else { throw TrainingError.invalid("Conflicting workout details on row \(r.number).") }
+                guard existing.name == workout, existing.startedAt == started, existing.endedAt == ended, existing.notes == r.text("workout_notes"), existing.programID == programID, existing.programName == programName, existing.pauses == pauses else { throw TrainingError.invalid("Conflicting workout details on row \(r.number).") }
             } else {
                 var session = Session(id: sessionID, name: workout, startedAt: started, endedAt: ended); session.notes = r.text("workout_notes"); session.programID = programID; session.programName = programName
+                session.pauses = pauses
                 let kcal = try r.double("active_kcal", maximum: 100_000), heartRate = try r.double("average_heart_rate", maximum: 300)
                 if kcal != nil || heartRate != nil { session.health = HealthLink(sourceName: String(r.text("health_source").prefix(200)), activeKcal: kcal, averageHeartRate: heartRate.flatMap { (20...300).contains($0) ? $0 : nil }) }
                 data.sessions.append(session)

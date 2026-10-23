@@ -98,7 +98,7 @@ private struct HistoryWorkoutRow: View {
                     Text(title).font(.headline).foregroundStyle(session.skipped == true ? .secondary : .primary)
                     if session.skipped == true { Text("Skipped").font(.caption).foregroundStyle(.secondary) }
                     else {
-                        Text("\(counted(session.completedSets, "set")) · \(clockText(max(0, (session.endedAt ?? session.startedAt).timeIntervalSince(session.startedAt)))) · \(number(unit.display(session.volume), decimals: 0)) \(unit.rawValue)\(session.health?.activeKcal.map { " · \(number($0, decimals: 0)) kcal" } ?? "")")
+                        Text("\(counted(session.completedSets, "set")) · \(clockText(session.duration())) · \(number(unit.display(session.volume), decimals: 0)) \(unit.rawValue)\(session.health?.activeKcal.map { " · \(number($0, decimals: 0)) kcal" } ?? "")")
                             .font(.caption).foregroundStyle(.secondary).monospacedDigit()
                     }
                 }
@@ -170,7 +170,7 @@ struct SessionDetail: View {
                     } else {
                         HStack(spacing: 16) {
                             detailMetric("Sets", value: "\(session.completedSets)")
-                            detailMetric("Duration", value: clockText(max(0, (session.endedAt ?? session.startedAt).timeIntervalSince(session.startedAt))))
+                            detailMetric("Duration", value: clockText(session.duration()))
                             detailMetric("Volume", value: "\(number(store.data.settings.unit.display(session.volume), decimals: 0)) \(store.data.settings.unit.rawValue)")
                         }
                         if let health = session.health, health.hasData {
@@ -231,11 +231,7 @@ struct SessionDetail: View {
         ThemedForm {
             Section {
                 DatePicker("Date", selection: Binding(get: { self.session?.startedAt ?? .now }, set: { date in
-                    update { value in
-                        let duration = (value.endedAt ?? value.startedAt).timeIntervalSince(value.startedAt)
-                        value.startedAt = date
-                        value.endedAt = date.addingTimeInterval(duration)
-                    }
+                    update { $0.changeStart(to: date) }
                 }))
                 SavedNameField(name: session.name) { value in update { $0.name = value } }
                 TextField("Workout note", text: Binding(get: { self.session?.notes ?? "" }, set: { value in update { $0.notes = value } }), axis: .vertical)

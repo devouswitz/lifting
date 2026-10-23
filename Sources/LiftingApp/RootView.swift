@@ -83,7 +83,7 @@ struct ResumeBar: View {
                     VStack(alignment: .leading, spacing: 1) {
                         Text(store.data.title(for: session)).font(.subheadline.weight(.semibold)).foregroundStyle(.primary).lineLimit(1)
                         TimelineView(.periodic(from: .now, by: 1)) { context in
-                            Text("\(clockText(context.date.timeIntervalSince(session.startedAt)))  \(session.completedSets) of \(session.totalSets) sets").font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                            Text("\(session.pausedAt != nil ? "Paused · " : WorkoutReminder.isOverdue(session, at: context.date) ? "Still running · " : "")\(clockText(session.duration(at: context.date)))  \(session.completedSets) of \(session.totalSets) sets").font(.caption).foregroundStyle(.secondary).monospacedDigit()
                         }
                     }
                     Spacer(minLength: 8)
@@ -92,7 +92,7 @@ struct ResumeBar: View {
                 .padding(.horizontal, accessory ? 16 : 18).padding(.vertical, accessory ? 0 : 10)
                 .frame(maxWidth: .infinity).contentShape(Rectangle())
                 .modifier(LegacyResumeBackground(enabled: !accessory))
-            }.buttonStyle(.plain).accessibilityLabel("Resume \(session.name)").accessibilityIdentifier("workout.resume")
+            }.dynamicTypeSize(...DynamicTypeSize.xxxLarge).buttonStyle(.plain).accessibilityLabel("Resume \(session.name)").accessibilityIdentifier("workout.resume")
         }
     }
 }

@@ -271,7 +271,7 @@ public extension TrainingData {
                 && (health.writeSince.map { end >= $0 } ?? false) && end <= now.addingTimeInterval(-saveDelay)
             var kept: [UUID] = []
             if canSave {
-                let gaps = HealthMatching.uncovered((session.startedAt, end), by: others.map { ($0.start, $0.end) })
+                let gaps = HealthMatching.uncovered((session.startedAt, end), by: others.map { ($0.start, $0.end) } + (session.pauses ?? []).map { ($0.start, $0.end) })
                 for copy in copies {
                     if gaps.contains(where: { abs($0.0.timeIntervalSince(copy.start)) <= HealthMatching.tolerance && abs($0.1.timeIntervalSince(copy.end)) <= HealthMatching.tolerance }) { kept.append(copy.id) }
                     else { plan.deletions.append(copy.id) }

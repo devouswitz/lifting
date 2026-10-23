@@ -10,12 +10,13 @@ struct LiveSetRow: View {
     let setID: UUID
     let index: Int
     @State private var edit: NumericEdit?
-    @State private var editingPlan = false
+    @State private var editingReps = false
+    @State private var editingDetails = false
     var item: SessionExercise? { store.data.activeSession?.exercises.first { $0.id == exerciseID } }
     var set: LoggedSet? { item?.sets.first { $0.id == setID } }
     var previous: LoggedSet? {
         guard let item, let set else { return nil }
-        let sets = (store.data.sessions.filter { $0.skipped != true }.sorted { $0.startedAt > $1.startedAt }.compactMap { $0.exercises.first { $0.variantID == item.variantID } }.first?.sets ?? []).filter { $0.plan.kind == set.plan.kind }
+        let sets = store.previousSets(for: item.variantID).filter { $0.plan.kind == set.plan.kind }
         let ordinal = item.sets.prefix(index).filter { $0.plan.kind == set.plan.kind }.count
         if sets.indices.contains(ordinal), sets[ordinal].completedAt != nil { return sets[ordinal] }
         return nil
@@ -23,6 +24,7 @@ struct LiveSetRow: View {
     var body: some View {
         if let set, let item {
             let columns = SetTableColumns(item: item)
+            SwipeToDelete(action: removeSet) {
             VStack(alignment: .leading, spacing: 3) {
                 let stacked = typeSize.isAccessibilitySize || (item.mode == .cardio && (set.weight != nil || set.reps != nil))
                 let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6)) : AnyLayout(HStackLayout(spacing: 6))
@@ -32,7 +34,11 @@ struct LiveSetRow: View {
                             .compactMenu().accessibilityLabel("\(palette.title(set.plan)), set \(setLabel(set, item: item)), options")
                         if set.plan.load == .percent { Text("\(number(set.plan.percent))%").font(.system(size: 10, weight: .medium)).monospacedDigit().foregroundStyle(.secondary) }
                     }.frame(width: 32, height: 44)
-                    HStack(spacing: 6) {
+                    let measurements = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(spacing: 6)) : AnyLayout(HStackLayout(spacing: 6))
+                    measurements {
+                        if stacked, let previous {
+                            Button("Copy previous: \(loggedSetSummary(previous, unit: store.data.settings.unit))") { copy(previous) }.font(.footnote).buttonStyle(.plain)
+                        }
                         if !stacked {
                             if let previous {
                                 Button { copy(previous) } label: { Text(previousValue(previous)).font(.footnote).monospacedDigit().foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.8).frame(width: 64, height: 44) }.buttonStyle(.plain).accessibilityLabel("Copy previous: \(loggedSetSummary(previous, unit: store.data.settings.unit))")
@@ -56,16 +62,23 @@ struct LiveSetRow: View {
                 if let rest = set.plan.restSeconds { Label(rest == 0 ? "No rest" : "\(clockText(Double(rest))) rest", systemImage: "timer").font(.caption2).foregroundStyle(palette.rest).padding(.leading, 40).padding(.bottom, 2) }
             }.padding(.horizontal, 2)
             .background(set.completedAt != nil ? palette.wash(.completed) : .clear, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-            .contextMenu { setMenu(set) }
+            }
+            .contextMenu {
+                Button("Set Details", systemImage: "slider.horizontal.3") { holdExpanded(); editingDetails = true }
+                if !columns.time { Button("Log Time", systemImage: "stopwatch") { open(.time) } }
+                if !columns.distance { Button("Log Distance", systemImage: "ruler") { open(.distance) } }
+                setMenu(set)
+            }
             .sheet(item: $edit) { NumericPad(edit: $0) }
-            .sheet(isPresented: $editingPlan) { LivePlanEditor(exerciseID: exerciseID, setID: setID, initial: set.plan).environmentObject(store).sheetSize() }
+            .sheet(isPresented: $editingDetails) { LivePlanEditor(exerciseID: exerciseID, setID: setID, initial: set.plan).sheetSize() }
+            .sheet(isPresented: $editingReps) {
+                RepTargetEditor(plan: set.plan) { plan in
+                    store.perform { data in try data.setRepTarget(plan, exerciseID: exerciseID, setID: setID) }
+                }
+            }
         }
     }
     @ViewBuilder func setMenu(_ set: LoggedSet) -> some View {
-        Button(set.plan.kind == .warmup ? "Edit Warm-up Targets" : "Edit Set Targets", systemImage: "slider.horizontal.3") { holdExpanded(); editingPlan = true }
-        Button("Log Reps", systemImage: "number") { open(.reps) }
-        Button("Log Time", systemImage: "stopwatch") { open(.time) }
-        Button("Log Distance", systemImage: "ruler") { open(.distance) }
         Button("Rest After Set", systemImage: "timer") { open(.rest) }
         Menu("Set Type") {
             ForEach(SetKind.allCases) { kind in
@@ -83,15 +96,17 @@ struct LiveSetRow: View {
             }
         }
         Divider()
-        Button("Delete Set", systemImage: "trash", role: .destructive) { store.editExercise(exerciseID) { $0.sets.removeAll { $0.id == setID } } }
+        Button("Delete Set", systemImage: "trash", role: .destructive, action: removeSet)
     }
     func cell(title: String, value: String?, field: Field, labeled: Bool = false, placeholder: String? = nil) -> some View {
         Button { open(field) } label: {
             VStack(spacing: 3) {
                 if labeled { Text(title).font(.caption2).foregroundStyle(.secondary) }
-                Text(value ?? placeholder ?? "–").font(.figure(17)).foregroundStyle(value == nil ? .secondary : .primary).lineLimit(1).minimumScaleFactor(0.7)
+                Text(value ?? placeholder ?? "–").font(.figure(17)).foregroundStyle(value == nil || (field == .weight && self.set?.weightIsEdited != true && self.set?.completedAt == nil) ? .secondary : .primary).lineLimit(1).minimumScaleFactor(0.7)
             }.frame(maxWidth: .infinity, minHeight: 36).background(self.set?.completedAt == nil ? palette.field : Color.clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        }.buttonStyle(.plain).accessibilityLabel("Set \(index + 1), \(title), \(value ?? "not set")\(placeholder.map { ", target \($0)" } ?? "")").accessibilityIdentifier("workout.\(exerciseID).\(setID).\(field.rawValue)")
+        }.buttonStyle(.plain)
+        .modifier(RepTargetInteraction(enabled: field == .reps) { holdExpanded(); editingReps = true })
+        .accessibilityLabel("Set \(index + 1), \(title), \(value ?? "not set")\(placeholder.map { ", target \($0)" } ?? "")").accessibilityIdentifier("workout.\(exerciseID).\(setID).\(field.rawValue)")
     }
     func previousValue(_ set: LoggedSet) -> String {
         if let weight = set.weight, let reps = set.reps { return "\(number(store.data.settings.unit.display(weight))) × \(reps)" }
@@ -104,9 +119,17 @@ struct LiveSetRow: View {
     }
     func copy(_ previous: LoggedSet) {
         holdExpanded()
-        store.editSet(exerciseID, setID) { s in s.weight = previous.weight; s.reps = previous.reps; s.seconds = previous.seconds; s.meters = previous.meters; s.rpe = previous.rpe }
+        store.perform { data in
+            try data.setLoggedWeight(previous.weight, exerciseID: exerciseID, setID: setID)
+            guard let e = data.activeSession?.exercises.firstIndex(where: { $0.id == exerciseID }), let s = data.activeSession?.exercises[e].sets.firstIndex(where: { $0.id == setID }) else { return }
+            data.activeSession!.exercises[e].sets[s].reps = previous.reps
+            data.activeSession!.exercises[e].sets[s].seconds = previous.seconds
+            data.activeSession!.exercises[e].sets[s].meters = previous.meters
+            data.activeSession!.exercises[e].sets[s].rpe = previous.rpe
+        }
     }
     enum Field: String { case weight, reps, time, distance, rpe, rest }
+    func removeSet() { store.editExercise(exerciseID) { $0.sets.removeAll { $0.id == setID } } }
     func holdExpanded() {
         if item?.sets.allSatisfy({ $0.completedAt != nil }) == true { store.perform { $0.setExerciseExpanded(exerciseID, expanded: true) } }
     }
@@ -124,8 +147,12 @@ struct LiveSetRow: View {
         case .rest: value = set.plan.restSeconds.map(Double.init); title = "Rest (seconds)"; step = 5; maximum = 86400
         }
         edit = NumericEdit(title: title, context: item.map { "\($0.name), set \(setLabel(set, item: $0))" }, value: value, step: step, maximum: maximum, integer: field == .reps || field == .rest) { newValue in
+            if field == .weight {
+                store.perform { try $0.setLoggedWeight(newValue.map(unit.kilograms), exerciseID: exerciseID, setID: setID) }
+                return
+            }
             store.editSet(exerciseID, setID) { s in
-                switch field { case .weight: s.weight = newValue.map(unit.kilograms); case .reps: s.reps = newValue.map(Int.init); case .time: s.seconds = newValue.map { $0 * 60 }; case .distance: s.meters = newValue; case .rpe: s.rpe = newValue; case .rest: s.plan.restSeconds = newValue.map(Int.init) }
+                switch field { case .weight: break; case .reps: s.reps = newValue.map(Int.init); case .time: s.seconds = newValue.map { $0 * 60 }; case .distance: s.meters = newValue; case .rpe: s.rpe = newValue; case .rest: s.plan.restSeconds = newValue.map(Int.init) }
             }
         }
     }
@@ -250,24 +277,6 @@ func loggedSetSummary(_ set: LoggedSet, unit: WeightUnit) -> String {
     if let meters = set.meters { parts.append("\(number(meters)) m") }
     if let rpe = set.rpe { parts.append("RPE \(number(rpe))") }
     return parts.joined(separator: " · ")
-}
-
-struct LivePlanEditor: View {
-    @EnvironmentObject var store: AppStore
-    @Environment(\.dismiss) var dismiss
-    let exerciseID: UUID
-    let setID: UUID
-    @State var plan: SetPlan
-    init(exerciseID: UUID, setID: UUID, initial: SetPlan) { self.exerciseID = exerciseID; self.setID = setID; _plan = State(initialValue: initial) }
-    var body: some View {
-        NavigationStack {
-            PlanEditor(plan: $plan, unit: store.data.settings.unit)
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                    ToolbarItem(placement: .confirmationAction) { Button("Apply Today") { if store.perform({ try $0.replaceSetPlan(exerciseID: exerciseID, setID: setID, plan: plan) }) { dismiss() } } }
-                }
-        }
-    }
 }
 
 struct SetTableColumns {

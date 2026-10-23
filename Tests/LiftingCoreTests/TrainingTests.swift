@@ -707,8 +707,144 @@ final class TrainingTests: XCTestCase {
         XCTAssertEqual(data, before)
     }
 
-    func testCompletedExerciseStaysOpenByDefaultAndManualFocusPreservesResults() throws {
+    func testWorkingWeightShadowsOnlyUntouchedSetsAndUpdatesWarmups() throws {
         var data = TrainingData.starter()
+        let id = data.routines[0].slots[0].variantID
+        let v = data.variants.firstIndex { $0.id == id }!
+        data.variants[v].workingWeight = 0
+        data.variants[v].rounding = 2.5
+        data.variants[v].sets = [
+            SetPlan(kind: .warmup, load: .percent, percent: 50, reps: 5, repCeiling: nil),
+            SetPlan(kind: .warmup, load: .percent, percent: 75, reps: 3, repCeiling: nil),
+            SetPlan(), SetPlan(), SetPlan(), SetPlan(load: .fixed, fixedWeight: 60)
+        ]
+        try data.start(routineID: data.routines[0].id)
+        let item = data.activeSession!.exercises[0]
+        try data.toggleSet(exerciseID: item.id, setID: item.sets[0].id, now: Date(timeIntervalSince1970: 100000))
+        try data.setLoggedWeight(120, exerciseID: item.id, setID: item.sets[4].id)
+        try data.setLoggedWeight(100, exerciseID: item.id, setID: item.sets[2].id)
+        let updated = data.activeSession!.exercises[0]
+        XCTAssertEqual(updated.workingWeight, 100)
+        XCTAssertEqual(updated.sets.map(\.weight), [0, 75, 100, 100, 120, 60])
+        XCTAssertEqual(updated.sets[3].weightIsEdited, false)
+        XCTAssertEqual(updated.sets[4].weightIsEdited, true)
+        let restored = try LocalRepository.decode(LocalRepository.encode(data))
+        XCTAssertEqual(restored.activeSession!.exercises[0], updated)
+        try data.setLoggedWeight(90, exerciseID: item.id, setID: item.sets[2].id)
+        XCTAssertEqual(data.activeSession!.exercises[0].sets[4].weight, 120)
+        XCTAssertThrowsError(try data.setLoggedWeight(.nan, exerciseID: item.id, setID: item.sets[2].id))
+        XCTAssertEqual(data.activeSession!.exercises[0].workingWeight, 90)
+    }
+
+    func testLegacyManualWeightsAndCompletedEditsStayIndependent() throws {
+        var data = TrainingData.starter()
+        try data.start(routineID: data.routines[0].id)
+        let item = data.activeSession!.exercises[0]
+        let work = item.sets.indices.filter { item.sets[$0].plan.load == .working }
+        XCTAssertTrue(work.count >= 2)
+        data.activeSession!.exercises[0].sets[work[1]].weight = 77
+        data.activeSession!.exercises[0].sets[work[1]].weightIsEdited = nil
+        try data.setLoggedWeight(100, exerciseID: item.id, setID: item.sets[work[0]].id)
+        XCTAssertEqual(data.activeSession!.exercises[0].sets[work[1]].weight, 77)
+        try data.toggleSet(exerciseID: item.id, setID: item.sets[work[0]].id)
+        try data.setLoggedWeight(105, exerciseID: item.id, setID: item.sets[work[0]].id)
+        XCTAssertEqual(data.activeSession!.exercises[0].workingWeight, 100)
+        try data.setWorkingWeight(110, for: item.id, saveFuture: false)
+        XCTAssertEqual(data.activeSession!.exercises[0].sets[work[0]].weight, 105)
+        XCTAssertEqual(data.activeSession!.exercises[0].sets[work[1]].weight, 110)
+    }
+
+    func testTemplateLoadResolvesAllLinkedSetsAndKeepsFixedLoads() throws {
+        var variant = Variant(exerciseID: UUID(), label: "Day", rounding: 2.5, sets: [SetPlan(kind: .warmup, load: .percent, percent: 50), SetPlan(), SetPlan(), SetPlan(load: .fixed, fixedWeight: 30)])
+        variant.setWeight(85, for: variant.sets[1].id)
+        XCTAssertEqual(variant.sets.map { $0.resolvedWeight(working: variant.workingWeight, increment: variant.rounding) }, [42.5, 85, 85, 30])
+    }
+
+    func testBatchAddingExercisesKeepsOrderAndIndependentTracks() throws {
+        var data = TrainingData.starter()
+        let day = data.routines[0].id
+        let exercises = [data.exercises[0].id, data.exercises[1].id, data.exercises[0].id]
+        try data.addExercises(exercises, to: day)
+        let added = Array(data.routine(day)!.slots.suffix(3))
+        XCTAssertEqual(added.compactMap { data.variant($0.variantID)?.exerciseID }, exercises)
+        XCTAssertEqual(Set(added.map(\.variantID)).count, 3)
+        XCTAssertNotEqual(data.variant(added[0].variantID)!.label, data.variant(added[2].variantID)!.label)
+        let before = data
+        XCTAssertThrowsError(try data.addExercises([exercises[0], UUID()], to: day))
+        XCTAssertEqual(data, before)
+        _ = try data.validated()
+    }
+
+    func testRepTargetEditingPreservesLoggedValuesAndWeightOverrides() throws {
+        var data = TrainingData.starter()
+        try data.start(routineID: data.routines[0].id)
+        let item = data.activeSession!.exercises[0]
+        let set = item.sets[0]
+        try data.setLoggedWeight(35, exerciseID: item.id, setID: set.id)
+        try data.toggleSet(exerciseID: item.id, setID: set.id)
+        let before = data.activeSession!.exercises[0].sets[0]
+        var target = set.plan; target.reps = 6; target.repCeiling = 10
+        try data.setRepTarget(target, exerciseID: item.id, setID: set.id)
+        let after = data.activeSession!.exercises[0].sets[0]
+        XCTAssertEqual(after.plan.repRange, 6...10)
+        XCTAssertEqual(after.weight, before.weight)
+        XCTAssertEqual(after.reps, before.reps)
+        XCTAssertEqual(after.completedAt, before.completedAt)
+        XCTAssertEqual(after.weightIsEdited, before.weightIsEdited)
+    }
+
+    func testDefaultCollapseAndExplicitOptOutSurviveMigration() throws {
+        var data = TrainingData.starter()
+        XCTAssertTrue(data.settings.collapsesCompletedExercises)
+        XCTAssertTrue(try LocalRepository.decode(LocalRepository.encode(data)).settings.collapsesCompletedExercises)
+        try data.start(routineID: data.routines[0].id)
+        let item = data.activeSession!.exercises[0]
+        for set in item.sets { try data.toggleSet(exerciseID: item.id, setID: set.id) }
+        XCTAssertNotNil(data.collapseCompletedExercise(item.id))
+        XCTAssertEqual(data.activeSession!.exercises[0].collapsed, true)
+        data.settings.autoCollapseCompleted = false
+        XCTAssertFalse(try LocalRepository.decode(LocalRepository.encode(data)).settings.collapsesCompletedExercises)
+    }
+
+    func testPauseDurationFinishAndReminderScheduleSurviveRestart() throws {
+        var data = TrainingData.starter()
+        let start = Date(timeIntervalSince1970: 1_000_000)
+        try data.start(routineID: data.routines[0].id, now: start)
+        let item = data.activeSession!.exercises[0]
+        try data.toggleSet(exerciseID: item.id, setID: item.sets[0].id, now: start.addingTimeInterval(60))
+        data.setWorkoutPaused(true, now: start.addingTimeInterval(600))
+        XCTAssertEqual(data.activeSession!.duration(at: start.addingTimeInterval(1000)), 600)
+        XCTAssertNil(data.restDeadline)
+        XCTAssertEqual(WorkoutReminder.dates(for: data.activeSession!)[0], start.addingTimeInterval(2400))
+        data = try LocalRepository.decode(LocalRepository.encode(data))
+        data.setWorkoutPaused(false, now: start.addingTimeInterval(900))
+        XCTAssertEqual(data.activeSession!.duration(at: start.addingTimeInterval(1200)), 900)
+        XCTAssertFalse(WorkoutReminder.isOverdue(data.activeSession!, at: start.addingTimeInterval(1000)))
+        data.setWorkoutPaused(true, now: start.addingTimeInterval(1200))
+        try data.finish(now: start.addingTimeInterval(1800))
+        XCTAssertEqual(data.sessions.last!.duration(), 900)
+        XCTAssertNil(data.sessions.last!.pausedAt)
+        XCTAssertTrue(WorkoutReminder.dates(for: data.sessions.last!).isEmpty)
+        _ = try data.validated()
+    }
+
+    func testDragReorderPreservesExerciseResultsAndSupportsBothDirections() throws {
+        var data = TrainingData.starter()
+        try data.start(routineID: data.routines[0].id)
+        let items = data.activeSession!.exercises
+        let first = items.first!, last = items.last!
+        data.moveSessionExercise(first.id, relativeTo: last.id, after: true)
+        XCTAssertEqual(data.activeSession!.exercises.last, first)
+        data.moveSessionExercise(first.id, relativeTo: items[1].id)
+        XCTAssertEqual(data.activeSession!.exercises, items)
+        data.moveSessionExercise(UUID(), relativeTo: first.id)
+        XCTAssertEqual(data.activeSession!.exercises, items)
+        XCTAssertEqual(try LocalRepository.decode(LocalRepository.encode(data)).activeSession!.exercises, items)
+    }
+
+    func testCompletedExerciseStaysOpenWhenDisabledAndManualFocusPreservesResults() throws {
+        var data = TrainingData.starter()
+        data.settings.autoCollapseCompleted = false
         try data.start(routineID: data.routines[0].id)
         let item = data.activeSession!.exercises[0]
         for set in item.sets { try data.toggleSet(exerciseID: item.id, setID: set.id) }
@@ -1456,6 +1592,31 @@ final class TrainingTests: XCTestCase {
         // With saving off, a copy that repeats another recording is still removed.
         data.settings.health?.write = false
         XCTAssertEqual(data.reconcileHealth([full, run], now: end.addingTimeInterval(40 * 60)), HealthPlan(deletions: [full.id]))
+    }
+
+    func testPausedTimeSurvivesCSVDateEditingAndIsExcludedFromHealth() throws {
+        var (data, id, start) = try healthLibrary()
+        let pause = DateInterval(start: start.addingTimeInterval(20 * 60), duration: 10 * 60)
+        let index = try XCTUnwrap(data.sessions.firstIndex { $0.id == id })
+        data.sessions[index].pauses = [pause]
+        data.settings.health = HealthSettings(read: true, write: true, writeSince: start)
+        let plan = data.reconcileHealth([], now: start.addingTimeInterval(90 * 60))
+        XCTAssertEqual(plan.saves.map { DateInterval(start: $0.start, end: $0.end) }, [
+            DateInterval(start: start, end: pause.start),
+            DateInterval(start: pause.end, end: start.addingTimeInterval(70 * 60))
+        ])
+        let imported = try HistoryCSV.decode(HistoryCSV.export(data)).content
+        XCTAssertEqual(imported.sessions.first { $0.id == id }?.pauses, [pause])
+        XCTAssertEqual(imported.sessions.first { $0.id == id }?.duration(), 60 * 60)
+        let completed = data.sessions[index].exercises[0].sets[0].completedAt
+        data.sessions[index].changeStart(to: start.addingTimeInterval(86_400))
+        XCTAssertEqual(data.sessions[index].pauses?.first?.start, pause.start.addingTimeInterval(86_400))
+        XCTAssertEqual(data.sessions[index].exercises[0].sets[0].completedAt, completed?.addingTimeInterval(86_400))
+        XCTAssertEqual(data.sessions[index].duration(), 60 * 60)
+        _ = try data.validated()
+        let duplicate = data.sessions[index].pauses![0]
+        data.sessions[index].pauses?.append(duplicate)
+        XCTAssertThrowsError(try data.validated())
     }
 
     func testHealthSavesCardioSessionsAsTheirActivity() throws {

@@ -2,14 +2,16 @@ import SwiftUI
 import LiftingCore
 
 @main
-struct LiftingApp: App {
+struct TorqueApp: App {
     @StateObject private var store = AppStore()
     @Environment(\.scenePhase) private var phase
     var body: some Scene {
-        WindowGroup {
+        WindowGroup("Torque") {
             RootView().environmentObject(store)
+                #if os(macOS)
                 .frame(minWidth: 360, idealWidth: 440, minHeight: 600, idealHeight: 840)
-                .task { await store.startHealth() }
+                #endif
+                .task { store.prepareNotifications(); await store.startHealth() }
                 .task { await store.runSyncLoop() }
                 .onChange(of: phase) { _, value in if value == .active { Task { await store.syncNow(); await store.refreshHealth() } } }
         }

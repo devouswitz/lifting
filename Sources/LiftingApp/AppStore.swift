@@ -8,7 +8,10 @@ import UserNotifications
 
 @MainActor
 final class AppStore: ObservableObject {
-    @Published var data: TrainingData
+    @Published var data: TrainingData {
+        didSet { if oldValue.sessions != data.sessions { previousByVariant = nil } }
+    }
+    private var previousByVariant: [UUID: [LoggedSet]]?
     @Published var error: String?
     @Published var storageBlocked = false
     @Published var workoutPresented = false
@@ -40,6 +43,7 @@ final class AppStore: ObservableObject {
     var syncConfigurationLoaded = false
     var pendingSync: Task<Void, Never>?
     let repository: LocalRepository?
+    let notifications = WorkoutNotifications()
     let demo: Bool
 
     init() {
@@ -67,12 +71,27 @@ final class AppStore: ObservableObject {
         var next = data
         do {
             try change(&next)
+            let workoutChanged = next.activeSession != data.activeSession
+            if workoutChanged, next.activeSession != nil { next.activeSession?.lastActivityAt = Date() }
             _ = try next.validated()
             try repository?.save(next)
+            let remindersChanged = next.settings.workoutReminders != data.settings.workoutReminders
             data = next
+            if workoutChanged || remindersChanged { refreshWorkoutReminders() }
             scheduleFolderSync()
             return true
         } catch { self.error = error.localizedDescription; return false }
+    }
+
+    func previousSets(for variantID: UUID) -> [LoggedSet] {
+        if previousByVariant == nil {
+            var result: [UUID: [LoggedSet]] = [:]
+            for session in data.sessions.filter({ $0.skipped != true }).sorted(by: { $0.startedAt > $1.startedAt }) {
+                for item in session.exercises where result[item.variantID] == nil { result[item.variantID] = item.sets }
+            }
+            previousByVariant = result
+        }
+        return previousByVariant?[variantID] ?? []
     }
 
     func start(_ routine: Routine) { perform { try $0.start(routineID: routine.id) }; if data.activeSession != nil { workoutPresented = true } }
@@ -121,14 +140,28 @@ final class AppStore: ObservableObject {
             else { d.variants.append(variant) }
         }
     }
-    func add(_ exercise: Exercise, to routineID: UUID) {
-        perform { d in
-            guard let i = d.routines.firstIndex(where: { $0.id == routineID }) else { return }
-            let base = [d.programForDay(routineID)?.name, d.routines[i].name].compactMap { $0 }.joined(separator: " · ")
-            let label = TrainingData.uniqueName(base, among: d.variants.filter { $0.exerciseID == exercise.id }.map(\.label))
-            let variant = Self.newVariant(exercise, label: label)
-            d.variants.append(variant); d.routines[i].slots.append(RoutineSlot(variantID: variant.id))
+    func add(_ exercises: [Exercise], to routineID: UUID) {
+        perform { try $0.addExercises(exercises.map(\.id), to: routineID) }
+    }
+    func prepareNotifications() {
+        notifications.configure()
+        notifications.openWorkout = { [weak self] id in
+            guard let self, self.data.activeSession?.id == id else { return }
+            self.workoutPresented = true
         }
+        refreshWorkoutReminders()
+    }
+    func refreshWorkoutReminders() {
+        guard !demo else { return }
+        notifications.refresh(session: data.activeSession, enabled: data.settings.remindsAboutUnfinishedWorkouts)
+    }
+    func requestWorkoutAlerts() {
+        guard !demo, data.settings.remindsAboutUnfinishedWorkouts else { return }
+        Task { if await notifications.requestPermission() { refreshWorkoutReminders() } }
+    }
+    func pauseWorkout(_ paused: Bool) {
+        perform { $0.setWorkoutPaused(paused) }
+        if paused { cancelRestAlert() }
     }
     func addToWorkout(_ exercise: Exercise) {
         perform { try $0.addExerciseToSession(exercise.id) }
@@ -147,7 +180,7 @@ final class AppStore: ObservableObject {
                 try raw.write(to: repository.url.appendingPathExtension("before-import"), options: .atomic)
             }
             try repository?.save(next)
-            data = next; storageBlocked = false; error = nil; workoutPresented = false; cancelRestAlert()
+            data = next; storageBlocked = false; error = nil; workoutPresented = false; cancelRestAlert(); refreshWorkoutReminders()
             scheduleFolderSync()
         } catch { self.error = "Import failed. \(error.localizedDescription)" }
     }

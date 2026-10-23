@@ -6,13 +6,9 @@ struct ProgramsView: View {
     @EnvironmentObject var store: AppStore
     @Environment(\.palette) var palette
     @State private var creatingProgram = false
-    @State private var creatingTemplate = false
-    @State private var templateName = ""
     @State private var importing = false
     @State private var detail: UUID?
-    @State private var newTemplate: UUID?
     @State private var deleting: TrainingProgram?
-    @State private var deletingTemplate: Routine?
     var body: some View {
         ThemedForm {
             StoreErrorRow()
@@ -43,24 +39,8 @@ struct ProgramsView: View {
                 .onMove { source, target in store.perform { $0.programs.move(fromOffsets: source, toOffset: target) } }
                 AddRow(title: "New Program") { creatingProgram = true }.accessibilityIdentifier("programs.new")
             }
-            Section("Day templates") {
-                ForEach(store.data.dayTemplates) { day in
-                    NavigationLink { DayView(dayID: day.id) } label: {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(day.name)
-                            Text(counted(day.slots.count, "exercise")).font(.caption).foregroundStyle(.secondary)
-                        }
-                    }
-                    .swipeActions(edge: .trailing) {
-                        Button("Delete", role: .destructive) { deletingTemplate = day }.tint(.red)
-                        Button("Duplicate") { store.perform { _ = try $0.saveDayAsTemplate(day.id, name: TrainingData.uniqueName(day.name + " copy", among: $0.dayTemplates.map(\.name))) } }.tint(.gray)
-                    }
-                }
-                .onDelete { offsets in deletingTemplate = offsets.first.map { store.data.dayTemplates[$0] } }
-                .onMove { source, target in var ids = store.data.dayTemplates.map(\.id); ids.move(fromOffsets: source, toOffset: target); store.perform { try $0.reorderTemplates(ids) } }
-                AddRow(title: "New Template") { templateName = ""; creatingTemplate = true }.accessibilityIdentifier("programs.newTemplate")
-            }
             Section {
+                NavigationLink { SavedDaysView() } label: { Label("Saved Days", systemImage: "doc.on.doc") }
                 NavigationLink { ExerciseLibraryView() } label: {
                     HStack { Label("Exercises", systemImage: "dumbbell"); Spacer(); Text("\(store.data.exercises.count)").foregroundStyle(.secondary).monospacedDigit() }
                 }.accessibilityIdentifier("programs.exercises")
@@ -74,23 +54,10 @@ struct ProgramsView: View {
             #endif
         }
         .navigationDestination(item: $detail) { ProgramEditor(programID: $0) }
-        .navigationDestination(item: $newTemplate) { RoutineEditor(routineID: $0) }
         .sheet(isPresented: $creatingProgram) { NewProgramView().environmentObject(store).sheetSize() }
-        .alert("New Template", isPresented: $creatingTemplate) {
-            TextField("Name", text: $templateName)
-            Button("Create") {
-                let name = templateName.trimmingCharacters(in: .whitespacesAndNewlines)
-                let day = Routine(name: TrainingData.uniqueName(name, among: store.data.dayTemplates.map(\.name)))
-                if !name.isEmpty, store.perform({ $0.routines.append(day) }) { newTemplate = day.id }
-            }.disabled(templateName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || templateName.count > 200)
-            Button("Cancel", role: .cancel) {}
-        }
         .confirmationDialog("Delete \(deleting?.name ?? "program") and its days?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }), titleVisibility: .visible) {
             Button("Delete Program", role: .destructive) { if let deleting { store.perform { $0.removeProgram(deleting.id) } }; deleting = nil }
         } message: { Text("Templates and workout history are kept.") }
-        .confirmationDialog("Delete \(deletingTemplate?.name ?? "template")?", isPresented: Binding(get: { deletingTemplate != nil }, set: { if !$0 { deletingTemplate = nil } }), titleVisibility: .visible) {
-            Button("Delete Template", role: .destructive) { if let deletingTemplate { store.perform { $0.removeDay(deletingTemplate.id) } }; deletingTemplate = nil }
-        } message: { Text("Program days made from it and workout history are kept.") }
         .modifier(CSVImportModifier(isPresented: $importing))
     }
 }
@@ -153,18 +120,15 @@ struct NewProgramView: View {
                 StoreErrorRow()
                 Section { TextField("Program name", text: $name).accessibilityIdentifier("program.name") }
                 if !store.data.dayTemplates.isEmpty {
-                    Section("Start with days from templates") {
-                        ForEach(store.data.dayTemplates) { day in
-                            Button { if selected.contains(day.id) { selected.remove(day.id) } else { selected.insert(day.id) } } label: {
-                                HStack {
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(day.name).foregroundStyle(Color.primary)
-                                        Text(counted(day.slots.count, "exercise")).font(.caption).foregroundStyle(.secondary)
-                                    }
-                                    Spacer()
-                                    if selected.contains(day.id) { Image(systemName: "checkmark").font(.body.weight(.semibold)).foregroundStyle(palette.action) }
-                                }.contentShape(Rectangle())
-                            }.buttonStyle(.plain).accessibilityAddTraits(selected.contains(day.id) ? .isSelected : [])
+                    Section {
+                        DisclosureGroup("Start with Saved Days") {
+                            ForEach(store.data.dayTemplates) { day in
+                                Button {
+                                    if selected.contains(day.id) { selected.remove(day.id) } else { selected.insert(day.id) }
+                                } label: {
+                                    HStack { Text(day.name).foregroundStyle(.primary); Spacer(); if selected.contains(day.id) { Image(systemName: "checkmark") } }.contentShape(Rectangle())
+                                }.buttonStyle(.plain).accessibilityAddTraits(selected.contains(day.id) ? .isSelected : [])
+                            }
                         }
                     }
                 }
@@ -185,6 +149,8 @@ struct ProgramEditor: View {
     @Environment(\.dismiss) var dismiss
     let programID: UUID
     @State private var addingBlank = false
+    @State private var importingDay = false
+    @State private var newDay: UUID?
     @State private var dayName = ""
     @State private var deleting = false
     @State private var export: CSVExportRequest?
@@ -218,10 +184,8 @@ struct ProgramEditor: View {
                         }
                     }
                     .onMove { source, target in var ids = program.dayIDs; ids.move(fromOffsets: source, toOffset: target); store.perform { try $0.reorderDays(ids, in: programID) } }
-                    Menu {
-                        Button("Blank Day", systemImage: "doc") { dayName = ""; addingBlank = true }
-                        if !store.data.dayTemplates.isEmpty { Menu { ForEach(store.data.dayTemplates) { day in Button(day.name) { store.perform { _ = try $0.addDay(to: programID, templateID: day.id) } } } } label: { Label("From Template", systemImage: "doc.on.doc") } }
-                    } label: { Label("Add Day", systemImage: "plus").foregroundStyle(palette.action) }.accessibilityIdentifier("program.addDay")
+                    AddRow(title: "Add Day") { dayName = ""; addingBlank = true }.accessibilityIdentifier("program.addDay")
+                    AddRow(title: "Import Day", symbol: "square.and.arrow.down") { importingDay = true }.accessibilityIdentifier("program.importDay")
                 } header: { Text("Days") }
                 Section("Notes") {
                     TextField("Notes", text: Binding(get: { self.program?.notes ?? "" }, set: { value in update { $0.notes = value } }), axis: .vertical)
@@ -240,9 +204,11 @@ struct ProgramEditor: View {
             EditButton()
             #endif
         }
+        .navigationDestination(item: $newDay) { RoutineEditor(routineID: $0) }
+        .sheet(isPresented: $importingDay) { DayImportPicker(programID: programID).sheetSize() }
         .alert("New Day", isPresented: $addingBlank) {
             TextField("Name", text: $dayName)
-            Button("Add") { let clean = dayName.trimmingCharacters(in: .whitespacesAndNewlines); if !clean.isEmpty { store.perform { _ = try $0.addDay(to: programID, name: clean) } } }
+            Button("Add") { let clean = dayName.trimmingCharacters(in: .whitespacesAndNewlines); if !clean.isEmpty { store.perform { newDay = try $0.addDay(to: programID, name: clean) } } }
             Button("Cancel", role: .cancel) {}
         }
         .confirmationDialog("Delete program and its days?", isPresented: $deleting, titleVisibility: .visible) { Button("Delete Program", role: .destructive) { if store.perform({ $0.removeProgram(programID) }) { dismiss() } } } message: { Text("Templates and workout history are kept.") }

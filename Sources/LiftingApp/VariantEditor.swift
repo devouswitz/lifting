@@ -23,7 +23,7 @@ struct VariantEditor: View {
                 }
                 Section("Sets") {
                     ForEach(Array($variant.sets.enumerated()), id: \.element.id) { index, $plan in
-                        NavigationLink { PlanEditor(plan: $plan, unit: unit) } label: {
+                        NavigationLink { PlanEditor(plan: $plan, unit: unit, workingWeight: $variant.workingWeight) } label: {
                             HStack(spacing: 12) {
                                 SetBadge(text: setBadge(variant.sets, index: index, types: store.data.customSetTypes), plan: plan).frame(minWidth: 26)
                                 VStack(alignment: .leading, spacing: 2) {
@@ -121,6 +121,7 @@ struct PlanEditor: View {
     @Environment(\.palette) var palette
     @Binding var plan: SetPlan
     let unit: WeightUnit
+    var workingWeight: Binding<Double>? = nil
     var warmupOnly = false
     var body: some View {
         ThemedForm {
@@ -132,7 +133,12 @@ struct PlanEditor: View {
                 }
             } }
             Section(plan.kind == .warmup ? "Warm-up weight" : "Weight") {
-                Picker("Based on", selection: $plan.load) { ForEach(LoadRule.allCases) { Text($0.title).tag($0) } }
+                Picker("Based on", selection: $plan.load) { ForEach(loadRules) { Text($0.title).tag($0) } }
+                if plan.load == .working, let workingWeight {
+                    LabeledContent("Working weight (\(unit.rawValue))") {
+                        TextField("0", value: Binding(get: { unit.display(workingWeight.wrappedValue) }, set: { workingWeight.wrappedValue = unit.kilograms($0) }), format: .number).multilineTextAlignment(.trailing)
+                    }
+                }
                 if plan.load == .percent { PercentControl(title: "Percent of working set", value: $plan.percent, range: 0...1000) }
                 if plan.load == .fixed { HStack { Text("Weight (\(unit.rawValue))"); TextField("0", value: Binding(get: { unit.display(plan.fixedWeight) }, set: { plan.fixedWeight = unit.kilograms($0) }), format: .number).multilineTextAlignment(.trailing).labelsHidden() } }
             }
@@ -153,6 +159,7 @@ struct PlanEditor: View {
 enum SetTypeChoice: Hashable { case kind(SetKind), custom(UUID) }
 
 extension PlanEditor {
+    var loadRules: [LoadRule] { LoadRule.allCases }
     var typeChoice: Binding<SetTypeChoice> {
         Binding(get: { plan.customTypeID.flatMap { id in palette.setTypes.contains { $0.id == id } ? .custom(id) : nil } ?? .kind(plan.kind) }, set: { choice in
             switch choice {
@@ -163,7 +170,7 @@ extension PlanEditor {
     }
 }
 
-struct SetTargetFields: View {
+struct RepTargetFields: View {
     @Binding var plan: SetPlan
     @State private var repSelection: RepTargetMode
     init(plan: Binding<SetPlan>) {
@@ -180,9 +187,7 @@ struct SetTargetFields: View {
                     }
                     Toggle("AMRAP", isOn: $plan.amrap)
                 }
-                HStack { Text("RPE"); OptionalNumberField(title: "Optional", value: $plan.rpe).labelsHidden().accessibilityLabel("RPE").accessibilityIdentifier("plan.rpe") }
-                HStack { Text("Time (minutes)"); OptionalNumberField(title: "Optional", value: $plan.seconds, factor: 60).labelsHidden().accessibilityLabel("Time in minutes").accessibilityIdentifier("plan.seconds") }
-                HStack { Text("Distance (meters)"); OptionalNumberField(title: "Optional", value: $plan.meters).labelsHidden().accessibilityLabel("Distance in meters").accessibilityIdentifier("plan.meters") }
+
         }
     }
     private var repMode: Binding<RepTargetMode> {
@@ -194,6 +199,39 @@ struct SetTargetFields: View {
             case .range: plan.reps = plan.reps ?? 8; plan.repCeiling = max((plan.reps ?? 8) + 1, plan.repCeiling ?? 12)
             }
         })
+    }
+}
+
+struct SetTargetFields: View {
+    @Binding var plan: SetPlan
+    var body: some View {
+        Group {
+            RepTargetFields(plan: $plan)
+                HStack { Text("RPE"); OptionalNumberField(title: "Optional", value: $plan.rpe).labelsHidden().accessibilityLabel("RPE").accessibilityIdentifier("plan.rpe") }
+                HStack { Text("Time (minutes)"); OptionalNumberField(title: "Optional", value: $plan.seconds, factor: 60).labelsHidden().accessibilityLabel("Time in minutes").accessibilityIdentifier("plan.seconds") }
+                HStack { Text("Distance (meters)"); OptionalNumberField(title: "Optional", value: $plan.meters).labelsHidden().accessibilityLabel("Distance in meters").accessibilityIdentifier("plan.meters") }
+        }
+    }
+}
+
+struct RepTargetEditor: View {
+    @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(\.dismiss) private var dismiss
+    @State var plan: SetPlan
+    let onSave: (SetPlan) -> Bool
+    var body: some View {
+        NavigationStack {
+            ThemedForm { Section { RepTargetFields(plan: $plan) } }
+                .navigationTitle("Rep Target").inlineTitle()
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                    ToolbarItem(placement: .confirmationAction) { Button("Save") { if onSave(plan) { dismiss() } }.disabled(!valid) }
+                }
+        }.frame(idealWidth: 440, idealHeight: 420)
+        .presentationDetents(typeSize.isAccessibilitySize ? [.large] : [.height(400), .large])
+    }
+    private var valid: Bool {
+        (plan.reps.map { (0...10000).contains($0) } ?? true) && (plan.repCeiling.map { $0 >= (plan.reps ?? 0) && $0 <= 10000 } ?? true)
     }
 }
 
