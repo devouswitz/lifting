@@ -31,7 +31,9 @@ struct WarmupPresetEditor: View {
     @Environment(\.dismiss) private var dismiss
     @State var preset: WarmupPreset
     var body: some View {
-        NavigationStack {
+        DraftEditor(valid: !preset.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && preset.name.count <= 200 && !preset.sets.isEmpty && preset.sets.allSatisfy(\.isValid), changed: store.data.warmupPresets.first { $0.id == preset.id } != preset, saveID: "warmups.save", save: {
+            store.perform { try $0.saveWarmupPreset(preset) }
+        }) {
             ThemedForm {
                 StoreErrorRow()
                 Section { TextField("Preset name", text: $preset.name).accessibilityIdentifier("warmups.name") }
@@ -53,12 +55,6 @@ struct WarmupPresetEditor: View {
                     }.accessibilityIdentifier("warmups.addSet")
                 }
             }.formStyle(.grouped).navigationTitle(preset.name.isEmpty ? "New Preset" : preset.name).inlineTitle()
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) { Button("Save") {
-                    if store.perform({ try $0.saveWarmupPreset(preset) }) { dismiss() }
-                }.disabled(preset.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || preset.sets.isEmpty).accessibilityIdentifier("warmups.save") }
-            }
         }
     }
 }

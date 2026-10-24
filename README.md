@@ -36,7 +36,7 @@ open -n '../Torque.app' --args --demo
 - Day editor: workout-style cards with independent set weights, warm-up percentages, per-set targets, notes, and batch exercise selection. Exercise Settings retains progression, rounding, all load rules, custom types, and warm-up preset management. Each exercise menu opens its current superset or circuit for editing or unlinking.
 - Prescription: configure working load, each set, percentage warm-ups, rep ranges, AMRAP, time, distance, RPE, rest, notes, and optional progression.
 - Set targets: choose No count for RPE-only sets, Reps for a fixed target, or Rep range for minimum and maximum reps. Warm-ups can use a percentage of the working set.
-- Workout: tap the check to log a set, tap a value for its native number editor, or tap Rest to change rest between sets. The weight summary is read-only and shows a range when sets differ. Swap Exercise is in each exercise's menu.
+- Workout: tap the check to log a set, tap a value for the large keypad, or tap Rest to change rest between sets. The weight summary is read-only and shows a range when sets differ. Swap Exercise is in each exercise's menu.
 - Substitute: choose Today only or Future sessions, then an exercise. Completed sets stay on the original exercise. Future changes affect this day slot only.
 - Drop: choose reductions, number of drops, and reps. Recurring drop loads stay relative to working weight.
 - MYO: choose activation reps, mini-set count, mini-set reps, and rest. Replace remaining work sets if desired. Add mini-sets, change values, or remove sets during the workout.
@@ -46,6 +46,10 @@ open -n '../Torque.app' --args --demo
 - Save to this day: makes live load, drop/MYO, warm-up, or link changes recur. Otherwise they apply to the current workout.
 - Tap an exercise header to expand or collapse it. Opening one focuses that exercise. Warm-ups and working sets have separate compact tables. Completed exercises collapse by default; Settings can turn this off. Hold an exercise header and drag to reorder it in a day or workout. Move Up and Move Down remain accessibility actions on the header. Workout options include Collapse All and Expand All.
 - Set values: tap to edit one actual value. Hold the reps field to edit its exact/range/AMRAP target. Hold the row for Set Details, including load rules, RPE, time, distance, and rest. The set badge changes type or rest. Swipe left to reveal Delete, or continue swiping to delete. Range targets never assume an exact rep count; unknown reps do not contribute to volume, estimated max, or progression.
+- Exercise categories: choose equipment and muscles from searchable categories, or create a custom category. Custom choices are reused across the exercise library and travel with existing backups and sync. Existing imported labels remain intact.
+- Editing: Save confirms and closes an editor. Back or sheet dismissal retains valid changes; Cancel discards a draft. Incomplete edited drafts require correction or Cancel. Live workout logging remains immediate.
+- Set controls: tap the set badge to change type. Hold the badge for details, reps for the target mode, or weight for load settings. Template range editing keeps both bounds. Hold either quick-action button to assign any supported or custom set type; the two slots are shared by templates and workouts.
+- History comparisons use equal elapsed days for an unfinished period and show their exact dates. Rest days show No data when a period has no recorded history; future days are excluded.
 - Independent weights: later untouched working sets follow the nearest earlier explicit entry, in both days and active workouts. Entering 100, then 110 in the next set gives 100/110/110; changing the first to 105 keeps 105/110/110. Fixed loads, completed sets, and later explicit entries are preserved. Percentage warm-ups follow the first working set. Save Weights to This Day in the exercise menu saves the individual loads and inheritance. Native number fields select their contents on first focus and support paste; the entire form row focuses its field.
 - Pause Workout stops duration, exercise timers, and rest. Resume continues elapsed active time. With notification permission, unfinished workouts remind after 45 minutes without changes, or 30 minutes paused, with one follow-up 90 minutes later. Finishing, discarding, or disabling reminders cancels them.
 - History: browse dated results or a monthly calendar. Tap a day to see its workouts. The comparison covers the past week, month, three months, or year against the period before, including average volume per muscle. Rest days count only days that have passed. Open a workout to inspect or edit its sets and notes; swipe a set in Edit to delete it.
@@ -121,7 +125,7 @@ See `VERIFICATION.md` for completed checks and remaining device checks. `DESIGN.
 Export using the existing App Store Connect app and signing team. Verify the actual signed package before uploading:
 
 ```sh
-python3 scripts/verify-ipa.py /path/to/Torque.ipa --build 4
+python3 scripts/verify-ipa.py /path/to/Torque.ipa --build 5
 ```
 
 A build produced with `CODE_SIGNING_ALLOWED=NO` does not carry signed entitlements. Before distribution export, sign its embedded frameworks and app locally, with `Resources/Lifting.entitlements` on the app, so Xcode preserves HealthKit while applying distribution signing. The exported IPA must pass the capability check above. Keep the bundle identifier and storage paths unchanged for updates.

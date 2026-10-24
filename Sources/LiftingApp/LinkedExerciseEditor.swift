@@ -12,6 +12,11 @@ struct LinkedExerciseEditor: View {
     @State private var transition = 0
     @State private var future = false
     @State private var originalGroup: String?
+    @State private var initialSelection: Set<UUID> = []
+    @State private var initialRest = 90
+    @State private var initialTransition = 0
+    @State private var loaded = false
+    @State private var unlinked = false
     struct Member: Identifiable { var id: UUID; var name: String; var group: String; var rest: Int?; var transition: Int? }
     private var members: [Member] {
         if let routineID, let routine = store.data.routine(routineID) {
@@ -23,7 +28,12 @@ struct LinkedExerciseEditor: View {
         return (store.data.activeSession?.exercises ?? []).map { Member(id: $0.id, name: $0.name, group: $0.group ?? "", rest: $0.groupRestSeconds, transition: $0.transitionSeconds) }
     }
     var body: some View {
-        NavigationStack {
+        DraftEditor(valid: selection.count >= 2 && (0...86400).contains(rest) && (0...86400).contains(transition), changed: loaded && !unlinked && (selection != initialSelection || rest != initialRest || transition != initialTransition || future), saveID: "link.save", save: {
+            store.perform { data in
+                if let routineID { try data.linkRoutineExercises(routineID: routineID, slots: selection, rest: rest, transition: transition) }
+                else { try data.linkSessionExercises(selection, rest: rest, transition: transition, saveFuture: future) }
+            }
+        }) {
             ThemedForm {
                 StoreErrorRow()
                 Section {
@@ -47,28 +57,20 @@ struct LinkedExerciseEditor: View {
                         if store.perform({ d in
                             if let routineID { d.unlinkRoutineGroup(routineID: routineID, group: originalGroup) }
                             else { d.unlinkSessionGroup(originalGroup, saveFuture: future) }
-                    }) { store.cancelRestAlert(); dismiss() }
+                    }) { unlinked = true; store.cancelRestAlert(); dismiss() }
                     }
                 }
             }.formStyle(.grouped).navigationTitle(selection.count > 2 ? "Circuit" : "Superset").inlineTitle()
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
-                        if store.perform({ d in
-                            if let routineID { try d.linkRoutineExercises(routineID: routineID, slots: selection, rest: rest, transition: transition) }
-                            else { try d.linkSessionExercises(selection, rest: rest, transition: transition, saveFuture: future) }
-                        }) { dismiss() }
-                    }.disabled(selection.count < 2 || !(0...86400).contains(rest) || !(0...86400).contains(transition)).accessibilityIdentifier("link.save")
+        }.onAppear {
+            guard !loaded else { return }
+            if let exerciseID, let member = members.first(where: { $0.id == exerciseID }) {
+                selection = [exerciseID]
+                if !member.group.isEmpty {
+                    originalGroup = member.group; selection = Set(members.filter { $0.group == member.group }.map(\.id))
+                    rest = member.rest ?? 90; transition = member.transition ?? 0
                 }
             }
-        }.onAppear {
-            guard let exerciseID, let member = members.first(where: { $0.id == exerciseID }) else { return }
-            selection = [exerciseID]
-            if !member.group.isEmpty {
-                originalGroup = member.group; selection = Set(members.filter { $0.group == member.group }.map(\.id))
-                rest = member.rest ?? 90; transition = member.transition ?? 0
-            }
+            initialSelection = selection; initialRest = rest; initialTransition = transition; loaded = true
         }
     }
 }

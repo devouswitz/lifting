@@ -6,6 +6,105 @@ import Foundation
 #endif
 
 final class TrainingTests: XCTestCase {
+    func testNumericKeypadReplacesExistingValueAndPreservesZero() {
+        var entry = NumericEntry(value: 100, maximum: 1000, integer: false)
+        XCTAssertEqual(entry.text, "100"); XCTAssertFalse(entry.changed)
+        entry.insert("0"); XCTAssertEqual(entry.value, 0)
+        entry.insert("2"); XCTAssertEqual(entry.text, "2")
+        entry.insert(","); entry.insert("5"); XCTAssertEqual(entry.value, 2.5)
+        entry.backspace(); XCTAssertEqual(entry.text, "2.")
+        entry.adjust(by: 5); XCTAssertEqual(entry.value, 7)
+        entry.insert("1"); XCTAssertEqual(entry.value, 1)
+        entry.clear(); XCTAssertNil(entry.value); XCTAssertTrue(entry.isValid)
+    }
+
+    func testNumericKeypadRejectsMalformedInputAndInvalidLimits() {
+        var entry = NumericEntry(value: 8, maximum: 10, integer: true)
+        entry.insert("."); XCTAssertEqual(entry.value, 8); XCTAssertFalse(entry.changed)
+        entry.insert("11"); XCTAssertFalse(entry.isValid)
+        entry.select(); entry.insert("9"); XCTAssertTrue(entry.isValid)
+        entry.insert("-1"); XCTAssertEqual(entry.value, 9)
+        var decimal = NumericEntry(value: nil, maximum: 100, integer: false)
+        decimal.insert("."); XCTAssertEqual(decimal.text, "0.")
+        decimal.insert("."); XCTAssertEqual(decimal.text, "0.")
+        decimal.insert("25"); XCTAssertEqual(decimal.value, 0.25)
+    }
+
+    func testCategoryChoicesReuseSpellingAndKeepCustomAndImportedLabels() throws {
+        var exercise = Exercise(name: "Custom", muscle: "  chest ", equipment: "  BELT   SQUAT  ")
+        exercise.secondaryMuscles = ["Biceps", "Rotator Cuff"]
+        let muscles = ExerciseCategory.muscle.choices(in: [exercise])
+        XCTAssertEqual(muscles.filter { ExerciseCategory.key($0) == "chest" }, ["Chest"])
+        XCTAssertTrue(muscles.contains("Rotator Cuff"))
+        let equipment = ExerciseCategory.equipment.choices(in: [exercise])
+        XCTAssertEqual(ExerciseCategory.resolve("belt squat", choices: equipment), "BELT SQUAT")
+        XCTAssertNil(ExerciseCategory.resolve(" \n ", choices: equipment))
+        XCTAssertNil(ExerciseCategory.resolve(String(repeating: "a", count: 201), choices: equipment))
+        var data = TrainingData(); data.exercises = [exercise]
+        XCTAssertEqual(try LocalRepository.decode(LocalRepository.encode(data)).exercises, [exercise])
+    }
+
+    func testCalendarPartialPeriodsUseEqualElapsedDaysWithoutDroppingCurrentDays() {
+        let calendar = comparisonCalendar()
+        let now = comparisonDate(2026, 10, 23, calendar)
+        for period in ComparisonPeriod.allCases {
+            let ranges = period.ranges(month: now, now: now, calendar: calendar)
+            XCTAssertEqual(ranges.current.end, comparisonDate(2026, 10, 24, calendar))
+            XCTAssertEqual(calendar.dateComponents([.day], from: ranges.current.start, to: ranges.current.end).day,
+                           calendar.dateComponents([.day], from: ranges.previous.start, to: ranges.previous.end).day)
+            XCTAssertTrue(ranges.previous.end <= ranges.current.start)
+        }
+        let march = comparisonDate(2026, 3, 30, calendar)
+        let ranges = ComparisonPeriod.month.ranges(month: march, now: march, calendar: calendar)
+        XCTAssertEqual(ranges.current.end, comparisonDate(2026, 3, 31, calendar))
+        XCTAssertEqual(calendar.dateComponents([.day], from: ranges.previous.start, to: ranges.previous.end).day, 30)
+        XCTAssertTrue(ranges.previous.end <= ranges.current.start)
+    }
+
+    func testCalendarCompletedLeapMonthAndFutureMonth() {
+        let calendar = comparisonCalendar(), now = comparisonDate(2026, 10, 23, comparisonCalendar())
+        let leap = ComparisonPeriod.month.ranges(month: comparisonDate(2024, 2, 15, calendar), now: now, calendar: calendar)
+        XCTAssertEqual(calendar.dateComponents([.day], from: leap.current.start, to: leap.current.end).day, 29)
+        XCTAssertEqual(calendar.dateComponents([.day], from: leap.previous.start, to: leap.previous.end).day, 31)
+        for period in ComparisonPeriod.allCases {
+            let future = period.ranges(month: comparisonDate(2026, 11, 1, calendar), now: now, calendar: calendar)
+            XCTAssertEqual(future.current.duration, 0); XCTAssertEqual(future.previous.duration, 0)
+        }
+    }
+
+    func testCalendarEmptyHistoryIsUnknownAndCountsUniqueWorkoutDays() throws {
+        let calendar = comparisonCalendar(), now = comparisonDate(2026, 3, 10, comparisonCalendar())
+        let interval = ComparisonPeriod.month.ranges(month: now, now: now, calendar: calendar).current
+        XCTAssertNil(HistoryPeriodStats(interval: interval, sessions: [], calendar: calendar, now: now).restDays)
+        var data = TrainingData.starter()
+        for date in [comparisonDate(2026, 3, 8, calendar), comparisonDate(2026, 3, 8, calendar), comparisonDate(2026, 3, 11, calendar)] {
+            try data.start(routineID: data.dayTemplates[0].id, now: date)
+            let item = data.activeSession!.exercises[0]
+            try data.toggleSet(exerciseID: item.id, setID: item.sets[0].id, now: date)
+            try data.finish(now: date.addingTimeInterval(60))
+        }
+        let stats = HistoryPeriodStats(interval: interval, sessions: data.sessions, calendar: calendar, now: now)
+        XCTAssertEqual(stats.workouts, 2); XCTAssertEqual(stats.restDays, 9)
+        XCTAssertEqual(stats.duration, 120)
+    }
+
+    func testEveryQuickActionAssignmentSurvivesBackup() throws {
+        var data = TrainingData.starter()
+        for raw in ["drop", "myo", "warmup", "failure", "working", "myoActivation", "myoMini"] {
+            data.settings.quickAdd = [raw, "myo"]
+            XCTAssertEqual(try LocalRepository.decode(LocalRepository.encode(data)).settings.quickAdd, [raw, "myo"])
+        }
+    }
+
+    private func comparisonCalendar() -> Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "America/New_York")!
+        return calendar
+    }
+    private func comparisonDate(_ year: Int, _ month: Int, _ day: Int, _ calendar: Calendar) -> Date {
+        calendar.date(from: DateComponents(year: year, month: month, day: day))!
+    }
+
     func testTimedStrengthImportsRemainStrengthAndMatchCatalog() throws {
         let bytes = CSVCodec.render([["title", "start_time", "exercise_title", "duration_seconds", "weight_kg", "reps"],
             ["Upper", "2026-10-18T10:00:00Z", "Plank", "60", "", ""],

@@ -63,6 +63,14 @@ public struct SetPlan: Identifiable, Codable, Equatable, Sendable {
         self.id = id; self.kind = kind; self.load = load; self.fixedWeight = fixedWeight; self.percent = percent
         self.reps = reps; self.repCeiling = repCeiling; self.seconds = seconds; self.meters = meters; self.rpe = rpe; self.amrap = amrap; self.restSeconds = restSeconds
     }
+    public var isValid: Bool {
+        func number(_ value: Double, maximum: Double = 10_000_000) -> Bool { value.isFinite && (0...maximum).contains(value) }
+        return number(fixedWeight) && (weightOverride.map { number($0) } ?? true)
+            && number(percent, maximum: 1000) && (reps.map { (0...10000).contains($0) } ?? true)
+            && (repCeiling.map { $0 >= (reps ?? 0) && $0 <= 10000 } ?? true)
+            && (seconds.map { number($0) } ?? true) && (meters.map { number($0) } ?? true)
+            && (rpe.map { number($0, maximum: 10) } ?? true) && (restSeconds.map { (0...86400).contains($0) } ?? true)
+    }
     public var repRange: ClosedRange<Int>? {
         guard let reps, let repCeiling, repCeiling > reps else { return nil }
         return reps...repCeiling

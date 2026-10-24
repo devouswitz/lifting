@@ -27,11 +27,13 @@ struct HistoryCalendar: View {
     @EnvironmentObject private var store: AppStore
     @State private var period = ComparisonPeriod.month
     private var ranges: (current: DateInterval, previous: DateInterval) { period.ranges(month: monthStart, now: Date(), calendar: calendar) }
-    private var stats: HistoryPeriodStats { HistoryPeriodStats(interval: ranges.current, sessions: sessions, calendar: calendar) }
-    private var previousStats: HistoryPeriodStats { HistoryPeriodStats(interval: ranges.previous, sessions: sessions, calendar: calendar) }
 
     var body: some View {
-        VStack(spacing: 20) {
+        let ranges = ranges
+        let stats = HistoryPeriodStats(interval: ranges.current, sessions: sessions, calendar: calendar)
+        let previousStats = HistoryPeriodStats(interval: ranges.previous, sessions: sessions, calendar: calendar)
+        let workoutDays = workoutDays, skippedDays = skippedDays
+        return VStack(spacing: 20) {
             HStack {
                 Button { moveMonth(-1) } label: { Image(systemName: "chevron.left").frame(width: 36, height: 36).contentShape(Rectangle()) }
                     .accessibilityLabel("Previous month").accessibilityIdentifier("history.previousMonth")
@@ -47,27 +49,23 @@ struct HistoryCalendar: View {
                     Text(day).font(.caption).foregroundStyle(.secondary).frame(maxWidth: .infinity).padding(.bottom, 2)
                 }
                 ForEach(Array(days.enumerated()), id: \.offset) { _, date in
-                    if let date { dayButton(date) }
+                    if let date { dayButton(date, workoutDays: workoutDays, skippedDays: skippedDays) }
                     else { Color.clear.frame(height: 36).accessibilityHidden(true) }
                 }
             }
             VStack(alignment: .leading, spacing: 12) {
                 Divider()
-                HStack(spacing: 4) {
-                    Text(period == .month ? "Compared with" : "\(period.label(ranges.current, month: monthStart, calendar: calendar)) compared with")
-                    Menu {
-                        Picker("Period", selection: $period) { ForEach(ComparisonPeriod.allCases) { Text($0.title).tag($0) } }
-                    } label: {
-                        HStack(spacing: 3) {
-                            Text(period.label(ranges.previous, month: monthStart, calendar: calendar))
-                            Image(systemName: "chevron.up.chevron.down").font(.caption2.weight(.semibold))
-                        }.foregroundStyle(palette.action)
-                    }.compactMenu().fixedSize().accessibilityIdentifier("history.period")
-                }.font(.subheadline.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.8)
+                Menu {
+                    Picker("Period", selection: $period) { ForEach(ComparisonPeriod.allCases) { Text($0.title).tag($0) } }
+                } label: {
+                    Label(period.title, systemImage: "chevron.up.chevron.down")
+                }.compactMenu().font(.subheadline.weight(.semibold)).accessibilityIdentifier("history.period")
+                Text("\(rangeLabel(ranges.current)) compared with \(rangeLabel(ranges.previous))")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 Grid(alignment: .leading, horizontalSpacing: 20, verticalSpacing: 14) {
                     GridRow {
                         statistic("Workouts", value: "\(stats.workouts)", delta: delta(Double(stats.workouts - previousStats.workouts)))
-                        statistic("Rest days", value: "\(stats.restDays)", delta: delta(Double(stats.restDays - previousStats.restDays)))
+                        statistic("Rest days", value: stats.restDays.map(String.init) ?? "No data", delta: restDelta(stats, previousStats))
                     }
                     GridRow {
                         statistic("Sets", value: "\(stats.sets)", delta: delta(Double(stats.sets - previousStats.sets)))
@@ -82,14 +80,14 @@ struct HistoryCalendar: View {
                         statistic("Average volume", value: number(unit.display(stats.averageVolume), decimals: 0), delta: delta(unit.display(stats.averageVolume - previousStats.averageVolume)))
                     }
                 }
-                muscleAverages
+                muscleAverages(ranges: ranges, stats: stats, previousStats: previousStats)
             }
         }
         .card(padding: 16)
     }
 
     /// Volume per workout for each primary muscle, so the rows add up to Average volume.
-    @ViewBuilder private var muscleAverages: some View {
+    @ViewBuilder private func muscleAverages(ranges: (current: DateInterval, previous: DateInterval), stats: HistoryPeriodStats, previousStats: HistoryPeriodStats) -> some View {
         let current = averages(ranges.current, workouts: stats.workouts)
         let previous = averages(ranges.previous, workouts: previousStats.workouts)
         let names = Set(current.keys).union(previous.keys).sorted { a, b in
@@ -130,7 +128,7 @@ struct HistoryCalendar: View {
         selectedDay = nil
     }
 
-    private func dayButton(_ date: Date) -> some View {
+    private func dayButton(_ date: Date, workoutDays: Set<Date>, skippedDays: Set<Date>) -> some View {
         let hasWorkout = workoutDays.contains(date)
         let skipped = !hasWorkout && skippedDays.contains(date)
         let selected = selectedDay.map { calendar.isDate($0, inSameDayAs: date) } ?? false
@@ -164,79 +162,20 @@ struct HistoryCalendar: View {
         .accessibilityElement(children: .combine)
     }
 
+    private func restDelta(_ stats: HistoryPeriodStats, _ previousStats: HistoryPeriodStats) -> String {
+        guard let current = stats.restDays, let previous = previousStats.restDays else { return "" }
+        return delta(Double(current - previous))
+    }
+    private func rangeLabel(_ interval: DateInterval) -> String {
+        guard interval.duration > 0 else { return "No data" }
+        let last = calendar.date(byAdding: .day, value: -1, to: interval.end) ?? interval.end
+        let style: Date.FormatStyle = .dateTime.month(.abbreviated).day().year()
+        return "\(interval.start.formatted(style))–\(last.formatted(style))"
+    }
+
     private func delta(_ value: Double) -> String {
         let rounded = value.rounded()
         return rounded == 0 ? "same" : "\(rounded > 0 ? "+" : "−")\(number(abs(rounded), decimals: 0))"
     }
     private func timeDelta(_ value: Double) -> String { abs(value) < 1 ? "same" : "\(value > 0 ? "+" : "−")\(clockText(abs(value)))" }
-}
-
-/// The span the calendar's comparison covers, ending with the shown month (or today in the current month).
-enum ComparisonPeriod: String, CaseIterable, Identifiable {
-    case week, month, quarter, year
-    var id: String { rawValue }
-    var title: String {
-        switch self { case .week: return "Past Week"; case .month: return "Month"; case .quarter: return "3 Months"; case .year: return "Year" }
-    }
-    func ranges(month: Date, now: Date, calendar: Calendar) -> (current: DateInterval, previous: DateInterval) {
-        let shown = calendar.dateInterval(of: .month, for: month) ?? DateInterval(start: month, duration: 0)
-        func back(_ component: Calendar.Component, _ value: Int, from date: Date) -> Date { calendar.date(byAdding: component, value: -value, to: date) ?? date }
-        switch self {
-        case .week:
-            let tomorrow = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: now)) ?? now
-            let end = min(shown.end, tomorrow)
-            let start = back(.day, 7, from: end)
-            return (DateInterval(start: start, end: end), DateInterval(start: back(.day, 7, from: start), end: start))
-        case .month:
-            let start = shown.start
-            return (shown, DateInterval(start: back(.month, 1, from: start), end: start))
-        case .quarter, .year:
-            let months = self == .quarter ? 3 : 12
-            let start = back(.month, months - 1, from: shown.start)
-            return (DateInterval(start: start, end: shown.end), DateInterval(start: back(.month, months, from: start), end: start))
-        }
-    }
-    /// Names a range briefly, adding the year only when it differs from the shown month's.
-    func label(_ range: DateInterval, month: Date, calendar: Calendar) -> String {
-        let last = calendar.date(byAdding: .day, value: -1, to: range.end) ?? range.end
-        let year = calendar.component(.year, from: month)
-        let withYear = calendar.component(.year, from: range.start) != year || calendar.component(.year, from: last) != year
-        switch self {
-        case .week:
-            let sameMonth = calendar.isDate(range.start, equalTo: last, toGranularity: .month)
-            let first = range.start.formatted(.dateTime.month(.abbreviated).day())
-            let end = sameMonth ? last.formatted(.dateTime.day()) : last.formatted(.dateTime.month(.abbreviated).day())
-            return "\(first)–\(end)\(withYear ? ", \(calendar.component(.year, from: last))" : "")"
-        case .month:
-            return range.start.formatted(withYear ? .dateTime.month(.wide).year() : .dateTime.month(.wide))
-        case .quarter, .year:
-            let style: Date.FormatStyle = withYear ? .dateTime.month(.abbreviated).year() : .dateTime.month(.abbreviated)
-            return "\(range.start.formatted(style))–\(last.formatted(style))"
-        }
-    }
-}
-
-private struct HistoryPeriodStats {
-    let workouts: Int
-    let restDays: Int
-    let sets: Int
-    let reps: Int
-    let duration: Double
-    let volume: Double
-    var averageDuration: Double { workouts > 0 ? duration / Double(workouts) : 0 }
-    var averageVolume: Double { workouts > 0 ? volume / Double(workouts) : 0 }
-
-    init(interval: DateInterval, sessions: [Session], calendar: Calendar, now: Date = Date()) {
-        let sessions = sessions.filter { $0.skipped != true && $0.startedAt >= interval.start && $0.startedAt < interval.end }
-        let completed = sessions.flatMap(\.exercises).flatMap(\.sets).filter { $0.completedAt != nil }
-        workouts = sessions.count
-        // Only days that have already happened can be rest days.
-        let tomorrow = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: now)) ?? now
-        let elapsed = max(0, calendar.dateComponents([.day], from: interval.start, to: min(interval.end, tomorrow)).day ?? 0)
-        restDays = max(0, elapsed - Set(sessions.map { calendar.startOfDay(for: $0.startedAt) }).count)
-        sets = completed.count
-        reps = completed.reduce(0) { $0 + ($1.reps ?? 0) }
-        duration = sessions.reduce(0) { $0 + $1.duration() }
-        volume = sessions.reduce(0) { $0 + $1.volume }
-    }
 }

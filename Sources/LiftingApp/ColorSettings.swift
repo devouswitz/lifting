@@ -32,7 +32,7 @@ struct ColorSettingsView: View {
                     .disabled((dark ? theme.dark : theme.light).isEmpty)
                 Button("Reset All Colors", role: .destructive) { resetting = true }.disabled(theme == ColorTheme())
             }
-        }.formStyle(.grouped).navigationTitle("Colors").inlineTitle()
+        }.formStyle(.grouped).navigationTitle("Colors").inlineTitle().modifier(SaveAndClose())
         .onAppear {
             guard !loaded else { return }
             loaded = true; dark = scheme == .dark; theme = store.data.settings.colors ?? ColorTheme()

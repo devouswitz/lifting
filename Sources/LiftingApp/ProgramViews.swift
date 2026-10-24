@@ -63,7 +63,7 @@ struct ProgramsView: View {
         #endif
         .toolbar {
             #if os(iOS)
-            ToolbarItem(placement: .primaryAction) { if store.data.programs.count > 1 || isEditing { Button(isEditing ? "Done" : "Reorder") { withAnimation { editMode = isEditing ? .inactive : .active } } } }
+            ToolbarItem(placement: .primaryAction) { if store.data.programs.count > 1 || isEditing { Button(isEditing ? "Save" : "Reorder") { withAnimation { editMode = isEditing ? .inactive : .active } } } }
             #endif
         }
         .navigationDestination(item: $detail) { ProgramEditor(programID: $0) }
@@ -129,7 +129,12 @@ struct NewProgramView: View {
     @State private var selected: Set<UUID> = []
     var clean: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
     var body: some View {
-        NavigationStack {
+        DraftEditor(valid: !clean.isEmpty && clean.count <= 200, changed: !name.isEmpty || !selected.isEmpty, saveID: "program.create", save: {
+            store.perform { data in
+                let id = try data.createProgram(name: clean, templateIDs: data.dayTemplates.filter { selected.contains($0.id) }.map(\.id))
+                try data.loadProgram(id)
+            }
+        }) {
             ThemedForm {
                 StoreErrorRow()
                 Section { TextField("Program name", text: $name).accessibilityIdentifier("program.name") }
@@ -147,12 +152,6 @@ struct NewProgramView: View {
                     }
                 }
             }.formStyle(.grouped).navigationTitle("New Program").inlineTitle()
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) { Button("Create") {
-                    if store.perform({ d in let id = try d.createProgram(name: clean, templateIDs: d.dayTemplates.filter { selected.contains($0.id) }.map(\.id)); try d.loadProgram(id) }) { dismiss() }
-                }.disabled(clean.isEmpty || clean.count > 200).accessibilityIdentifier("program.create") }
-            }
         }
     }
 }
@@ -161,6 +160,9 @@ struct ProgramEditor: View {
     @EnvironmentObject var store: AppStore
     @Environment(\.palette) var palette
     @Environment(\.dismiss) var dismiss
+    #if os(iOS)
+    @State private var editMode = EditMode.inactive
+    #endif
     let programID: UUID
     @State private var addingBlank = false
     @State private var importingDay = false
@@ -213,12 +215,13 @@ struct ProgramEditor: View {
                 }
                 Section { Button("Delete Program", role: .destructive) { deleting = true } }
             }
-        }.formStyle(.grouped).titleInContent(program?.name ?? "Program")
+        }.formStyle(.grouped).titleInContent(program?.name ?? "Program").modifier(SaveAndClose())
+        #if os(iOS)
+        .environment(\.editMode, $editMode)
         .toolbar {
-            #if os(iOS)
-            EditButton()
-            #endif
+            if editMode != .active { ToolbarItem(placement: .primaryAction) { Button("Reorder") { withAnimation { editMode = .active } } } }
         }
+        #endif
         .navigationDestination(item: $newDay) { RoutineEditor(routineID: $0) }
         .sheet(isPresented: $importingDay) { DayImportPicker(programID: programID).sheetSize() }
         .alert("New Day", isPresented: $addingBlank) {

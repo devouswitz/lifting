@@ -185,17 +185,12 @@ public extension TrainingData {
         func group(_ key: String?, rest: Int?, transition: Int?) -> Bool { (key?.count ?? 0) <= 200 && (rest.map { (0...86400).contains($0) } ?? true) && (transition.map { (0...86400).contains($0) } ?? true) }
         guard exercises.allSatisfy({ $0.muscle.count <= 200 && ($0.secondaryMuscles ?? []).count <= 50 && ($0.secondaryMuscles ?? []).allSatisfy { $0.count <= 200 } }),
               routines.flatMap(\.slots).allSatisfy({ group($0.group, rest: $0.groupRestSeconds, transition: $0.transitionSeconds) }) else { throw TrainingError.invalid("Invalid muscle groups or linked exercise settings.") }
-        func plan(_ p: SetPlan) -> Bool {
-            number(p.fixedWeight) && (p.weightOverride.map { number($0) } ?? true) && number(p.percent, max: 1000) && (p.reps.map { (0...10000).contains($0) } ?? true)
-            && (p.repCeiling.map { $0 >= (p.reps ?? 0) && $0 <= 10000 } ?? true)
-            && (p.seconds.map { number($0) } ?? true) && (p.meters.map { number($0) } ?? true) && (p.rpe.map { number($0, max: 10) } ?? true) && (p.restSeconds.map { (0...86400).contains($0) } ?? true)
-        }
         guard unique(customSetTypes), customSetTypes.count <= 100, customSetTypes.allSatisfy(\.isValid),
               Set(customSetTypes.map { $0.name.lowercased() }).count == customSetTypes.count,
-              (settings.quickAdd ?? []).count <= 4, (settings.quickAdd ?? []).allSatisfy({ ["drop", "myo", "warmup", "failure"].contains($0) || ($0.hasPrefix("type:") && UUID(uuidString: String($0.dropFirst(5))) != nil) }) else { throw TrainingError.invalid("Invalid set types.") }
-        guard unique(warmupPresets), warmupPresets.count <= 10000, warmupPresets.allSatisfy({ !$0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && $0.name.count <= 200 && (1...1000).contains($0.sets.count) && unique($0.sets) && $0.sets.allSatisfy { $0.kind == .warmup && plan($0) } }) else { throw TrainingError.invalid("Invalid warm-up preset.") }
+              (settings.quickAdd ?? []).count <= 4, (settings.quickAdd ?? []).allSatisfy({ ["drop", "myo", "warmup", "failure", "working", "myoActivation", "myoMini"].contains($0) || ($0.hasPrefix("type:") && UUID(uuidString: String($0.dropFirst(5))) != nil) }) else { throw TrainingError.invalid("Invalid set types.") }
+        guard unique(warmupPresets), warmupPresets.count <= 10000, warmupPresets.allSatisfy({ !$0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && $0.name.count <= 200 && (1...1000).contains($0.sets.count) && unique($0.sets) && $0.sets.allSatisfy { $0.kind == .warmup && $0.isValid } }) else { throw TrainingError.invalid("Invalid warm-up preset.") }
         guard exercises.allSatisfy({ !$0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && $0.name.count <= 200 }),
-              variants.allSatisfy({ v in exercise(v.exerciseID) != nil && !v.label.isEmpty && v.label.count <= 200 && number(v.workingWeight) && number(v.rounding) && (0...86400).contains(v.restSeconds) && (0...1000).contains(v.sets.count) && unique(v.sets) && v.sets.allSatisfy(plan) && number(v.progression.increment) && number(v.progression.deloadPercent, max: 100) && (0...100).contains(v.progression.deloadAfter) && (0...1000).contains(v.progression.failures) }),
+              variants.allSatisfy({ v in exercise(v.exerciseID) != nil && !v.label.isEmpty && v.label.count <= 200 && number(v.workingWeight) && number(v.rounding) && (0...86400).contains(v.restSeconds) && (0...1000).contains(v.sets.count) && unique(v.sets) && v.sets.allSatisfy(\.isValid) && number(v.progression.increment) && number(v.progression.deloadPercent, max: 100) && (0...100).contains(v.progression.deloadAfter) && (0...1000).contains(v.progression.failures) }),
               routines.allSatisfy({ r in !r.name.isEmpty && r.name.count <= 200 && unique(r.slots) && r.slots.allSatisfy { variant($0.variantID) != nil } }),
               number(settings.barWeight), (settings.platesLB + settings.platesKG).allSatisfy({ number($0) && $0 > 0 }), ["system", "light", "dark"].contains(settings.theme), settings.colors?.isValid ?? true else { throw TrainingError.invalid("The backup contains invalid exercises or prescriptions.") }
         for session in sessions + [activeSession].compactMap({ $0 }) {
@@ -216,7 +211,7 @@ public extension TrainingData {
             }
             for item in session.exercises {
                 guard group(item.group, rest: item.groupRestSeconds, transition: item.transitionSeconds), (item.muscle?.count ?? 0) <= 200, (item.secondaryMuscles ?? []).count <= 50, (item.secondaryMuscles ?? []).allSatisfy({ $0.count <= 200 }) else { throw TrainingError.invalid("Invalid workout muscle or group settings.") }
-                guard variant(item.variantID)?.exerciseID == item.exerciseID, exercise(item.exerciseID) != nil, unique(item.sets), (0...86400).contains(item.restSeconds), number(item.timerElapsed), item.workingWeight.map({ number($0) }) ?? true, item.roundingIncrement.map({ number($0) }) ?? true, item.sets.allSatisfy({ plan($0.plan) }) else { throw TrainingError.invalid("A session references a missing exercise or variant.") }
+                guard variant(item.variantID)?.exerciseID == item.exerciseID, exercise(item.exerciseID) != nil, unique(item.sets), (0...86400).contains(item.restSeconds), number(item.timerElapsed), item.workingWeight.map({ number($0) }) ?? true, item.roundingIncrement.map({ number($0) }) ?? true, item.sets.allSatisfy({ $0.plan.isValid }) else { throw TrainingError.invalid("A session references a missing exercise or variant.") }
                 for set in item.sets { try Self.validateLoggedSet(set) }
             }
         }

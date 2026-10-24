@@ -3,20 +3,23 @@ import LiftingCore
 
 /// One of the quick-add buttons under each live exercise.
 enum QuickAdd: Hashable {
-    case drop, myo, warmup, failure, custom(UUID)
+    case drop, myo, warmup, failure, working, myoActivation, myoMini, custom(UUID)
     init?(_ raw: String) {
         switch raw {
         case "drop": self = .drop
         case "myo": self = .myo
         case "warmup": self = .warmup
         case "failure": self = .failure
+        case "working": self = .working
+        case "myoActivation": self = .myoActivation
+        case "myoMini": self = .myoMini
         default:
             guard raw.hasPrefix("type:"), let id = UUID(uuidString: String(raw.dropFirst(5))) else { return nil }
             self = .custom(id)
         }
     }
     var raw: String {
-        switch self { case .drop: return "drop"; case .myo: return "myo"; case .warmup: return "warmup"; case .failure: return "failure"; case .custom(let id): return "type:\(id.uuidString)" }
+        switch self { case .drop: return "drop"; case .myo: return "myo"; case .warmup: return "warmup"; case .failure: return "failure"; case .working: return "working"; case .myoActivation: return "myoActivation"; case .myoMini: return "myoMini"; case .custom(let id): return "type:\(id.uuidString)" }
     }
     static let defaults: [QuickAdd] = [.drop, .myo]
     /// The two buttons in use, falling back to the defaults for a missing or deleted choice.
@@ -27,14 +30,15 @@ enum QuickAdd: Hashable {
             return value
         }
     }
-    static func options(_ data: TrainingData) -> [QuickAdd] { [.drop, .myo, .warmup, .failure] + data.customSetTypes.map { .custom($0.id) } }
+    static func options(_ data: TrainingData) -> [QuickAdd] { [.drop, .myo, .warmup, .failure, .working, .myoActivation, .myoMini] + data.customSetTypes.map { .custom($0.id) } }
     func isAvailable(in data: TrainingData) -> Bool { if case .custom(let id) = self { return data.setType(id) != nil }; return true }
     func title(_ data: TrainingData) -> String {
-        switch self { case .drop: return "Drop"; case .myo: return "MYO"; case .warmup: return "Warm-up"; case .failure: return "Failure"; case .custom(let id): return data.setType(id)?.name ?? "Set" }
+        switch self { case .drop: return "Drop"; case .myo: return "MYO"; case .warmup: return "Warm-up"; case .failure: return "Failure"; case .working: return "Working"; case .myoActivation: return "MYO activation"; case .myoMini: return "MYO mini-set"; case .custom(let id): return data.setType(id)?.name ?? "Set" }
     }
     func color(_ palette: Palette) -> Color {
         switch self {
-        case .drop, .myo: return palette.technique
+        case .drop, .myo, .myoActivation, .myoMini: return palette.technique
+        case .working: return palette.action
         case .warmup: return palette.warmup
         case .failure: return palette.failure
         case .custom(let id): return palette.color(for: SetPlan(customTypeID: id))
@@ -83,9 +87,9 @@ struct SetTypesView: View {
                         ForEach(QuickAdd.options(store.data), id: \.self) { Text($0.title(store.data)).tag($0) }
                     }
                 }
-            } header: { Text("Quick-add buttons") } footer: { Text("Shown next to Add Set in workouts. Long-press either button during a workout to change it.") }
+            } header: { Text("Quick-add buttons") } footer: { Text("Shown next to Add Set in templates and workouts.") }
         }
-        .formStyle(.grouped).navigationTitle("Set Types").inlineTitle()
+        .formStyle(.grouped).navigationTitle("Set Types").inlineTitle().modifier(SaveAndClose())
         .sheet(item: $editing) { SetTypeEditor(type: $0).environmentObject(store).sheetSize() }
     }
     private func builtIn(_ badge: String, _ plan: SetPlan, _ name: String, _ detail: String) -> some View {
@@ -112,10 +116,11 @@ struct SetTypeEditor: View {
     @Environment(\.palette) var palette
     @State var type: CustomSetType
     @State private var deleting = false
+    @State private var deleted = false
     private var isNew: Bool { !store.data.customSetTypes.contains { $0.id == type.id } }
     private var preview: Palette { var p = palette; p.setTypes = [type]; return p }
     var body: some View {
-        NavigationStack {
+        DraftEditor(valid: type.isValid && !deleted, changed: !deleted && store.data.customSetTypes.first { $0.id == type.id } != type, save: { store.perform { try $0.saveSetType(type) } }) {
             ThemedForm {
                 StoreErrorRow()
                 Section {
@@ -148,15 +153,8 @@ struct SetTypeEditor: View {
                 }
             }
             .formStyle(.grouped).navigationTitle(isNew ? "New Set Type" : type.name).inlineTitle()
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") { if store.perform({ try $0.saveSetType(type) }) { dismiss() } }
-                        .disabled(type.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || type.badge.trimmingCharacters(in: .whitespaces).isEmpty)
-                }
-            }
             .confirmationDialog("Delete \(type.name)?", isPresented: $deleting, titleVisibility: .visible) {
-                Button("Delete Set Type", role: .destructive) { if store.perform({ $0.removeSetType(type.id) }) { dismiss() } }
+                Button("Delete Set Type", role: .destructive) { if store.perform({ $0.removeSetType(type.id) }) { deleted = true; dismiss() } }
             } message: { Text("Sets that used it keep counting the same way and show as \(type.countsAs.title).") }
         }
     }

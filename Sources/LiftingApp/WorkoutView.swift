@@ -72,7 +72,7 @@ struct WorkoutView: View {
                         Section("Name") { SavedNameField(name: store.data.activeSession?.name ?? "") { value in store.editActive { $0.name = value } } }
                         Section("Note") { TextField("Workout note", text: Binding(get: { store.data.activeSession?.notes ?? "" }, set: { value in store.editActive { $0.notes = value } }), axis: .vertical).lineLimit(5...12) }
                     }.formStyle(.grouped).navigationTitle("Workout").inlineTitle()
-                    .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { sessionNotes = false } } }
+                    .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Save") { sessionNotes = false } } }
                 }.sheetSize()
             }
         }.tint(palette.action)
@@ -266,7 +266,7 @@ struct WorkoutExerciseCard: View {
                     actions {
                         Button { appendSet(item) } label: { Label(item.mode == .cardio ? "Add Interval" : item.sets.last?.plan.kind == .myoMini ? "Add Mini-set" : "Add Set", systemImage: "plus") }.buttonStyle(FieldButtonStyle())
                         if item.mode != .cardio {
-                            ForEach(Array(QuickAdd.slots(store.data).enumerated()), id: \.offset) { index, slot in quickButton(slot, index: index, item: item) }
+                            ForEach(0..<2, id: \.self) { index in quickButton(index: index, item: item) }
                         }
                     }.padding(.top, 2)
                 }
@@ -320,7 +320,7 @@ struct WorkoutExerciseCard: View {
         return VStack(alignment: .leading, spacing: 2) {
             if !typeSize.isAccessibilitySize {
                 HStack(spacing: 6) {
-                    Text("Set").frame(width: 32)
+                    Text("Set").frame(width: 44)
                     Text("Previous").frame(width: 64)
                     if columns.weight { Text(store.data.settings.unit.rawValue).frame(maxWidth: .infinity) }
                     if columns.reps { Text("Reps").frame(maxWidth: .infinity) }
@@ -340,21 +340,9 @@ struct WorkoutExerciseCard: View {
             }
         }
     }
-    /// A quick-add slot. Long-press to swap it for another set type; the choice applies to every exercise.
-    private func quickButton(_ slot: QuickAdd, index: Int, item: SessionExercise) -> some View {
-        Button { runQuickAdd(slot, item: item) } label: { Text(slot.title(store.data)).lineLimit(1).minimumScaleFactor(0.75).foregroundStyle(slot.color(palette)) }
-            .buttonStyle(FieldButtonStyle(role: .technique)).frame(width: typeSize.isAccessibilitySize ? nil : 80)
-            .contextMenu {
-                Section("Swap this button for") {
-                    ForEach(QuickAdd.options(store.data), id: \.self) { option in
-                        Button { store.perform { d in var slots = QuickAdd.slots(d).map(\.raw); slots[index] = option.raw; d.settings.quickAdd = slots } } label: {
-                            if option == slot { Label(option.title(store.data), systemImage: "checkmark") } else { Text(option.title(store.data)) }
-                        }
-                    }
-                }
-                NavigationLink { SetTypesView() } label: { Label("Manage Set Types", systemImage: "square.stack.3d.up") }
-            }
-            .accessibilityHint("Long-press to swap for another set type")
+    private func quickButton(index: Int, item: SessionExercise) -> some View {
+        QuickAddButton(index: index) { runQuickAdd($0, item: item) }
+            .frame(width: typeSize.isAccessibilitySize ? nil : 96)
             .accessibilityIdentifier(index == 0 ? "workout.\(exerciseID).addDrop" : "workout.\(exerciseID).addMyo")
     }
     private func runQuickAdd(_ slot: QuickAdd, item: SessionExercise) {
@@ -362,6 +350,9 @@ struct WorkoutExerciseCard: View {
         case .drop: technique = .drop
         case .myo: technique = .myo
         case .warmup: appendSet(item, warmup: true); store.perform { $0.setExerciseExpanded(exerciseID, expanded: true, focus: true) }
+        case .working: appendSet(item)
+        case .myoActivation: store.perform { try $0.addTypedSet(to: exerciseID, kind: .myoActivation) }
+        case .myoMini: store.perform { try $0.addTypedSet(to: exerciseID, kind: .myoMini) }
         case .failure: store.perform { try $0.addTypedSet(to: exerciseID, kind: .failure) }
         case .custom(let id): store.perform { try $0.addTypedSet(to: exerciseID, kind: $0.setType(id)?.countsAs ?? .working, customTypeID: id) }
         }

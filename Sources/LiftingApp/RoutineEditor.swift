@@ -52,7 +52,7 @@ struct RoutineEditor: View {
                 }.padding(16)
             }
         }
-        .background(palette.background).navigationTitle(routine?.name ?? "Day").inlineTitle()
+        .background(palette.background).navigationTitle(routine?.name ?? "Day").inlineTitle().modifier(SaveAndClose())
         .toolbar {
             if let routine {
                 ToolbarItem(placement: .primaryAction) {
@@ -160,8 +160,9 @@ struct ExercisePicker: View {
             }
             .sheet(isPresented: $creating) {
                 ExerciseEditor(initialName: search) { exercise in
-                    store.perform { $0.exercises.append(exercise) }
+                    guard store.perform({ $0.exercises.append(exercise) }) else { return false }
                     choose(exercise)
+                    return true
                 }.sheetSize()
             }
         }
@@ -181,29 +182,50 @@ private extension ExercisePicker {
 }
 
 struct ExerciseEditor: View {
-    @Environment(\.dismiss) var dismiss
-    var initialName = ""
-    var initialExercise: Exercise? = nil
-    var onSave: (Exercise) -> Void
-    @State private var exercise = Exercise(name: "")
+    @EnvironmentObject private var store: AppStore
+    private let original: Exercise
+    private let isNew: Bool
+    private let onSave: (Exercise) -> Bool
+    @State private var exercise: Exercise
+
+    init(initialName: String = "", initialExercise: Exercise? = nil, onSave: @escaping (Exercise) -> Bool) {
+        let value = initialExercise ?? Exercise(name: initialName)
+        original = value; isNew = initialExercise == nil; self.onSave = onSave
+        _exercise = State(initialValue: value)
+    }
+    private var valid: Bool {
+        let name = exercise.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !name.isEmpty && name.count <= 200
+    }
     var body: some View {
-        NavigationStack {
+        DraftEditor(valid: valid, changed: exercise != original, save: {
+            var edited = exercise
+            edited.name = edited.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            return onSave(edited)
+        }) {
             ThemedForm {
                 StoreErrorRow()
                 Section {
                     TextField("Name", text: $exercise.name)
                     Picker("Type", selection: $exercise.mode) { ForEach(ExerciseMode.allCases) { Text($0.title).tag($0) } }
-                    TextField("Equipment", text: $exercise.equipment)
+                    category("Equipment", kind: .equipment, value: $exercise.equipment, allowsEmpty: true)
                 }
                 Section("Muscles") {
-                    TextField("Primary muscle", text: $exercise.muscle)
-                    TextField("Secondary muscles, comma separated", text: Binding(get: { exercise.secondaryMuscles?.joined(separator: ", ") ?? "" }, set: { exercise.secondaryMuscles = $0.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty } }))
+                    category("Primary muscle", kind: .muscle, value: $exercise.muscle)
+                    NavigationLink {
+                        CategoryPicker(title: "Secondary Muscles", choices: ExerciseCategory.muscle.choices(in: catalog).filter { ExerciseCategory.key($0) != ExerciseCategory.key(exercise.muscle) }, selection: Binding(get: { exercise.secondaryMuscles ?? [] }, set: { exercise.secondaryMuscles = $0 }), multiple: true)
+                    } label: { LabeledContent("Secondary muscles", value: (exercise.secondaryMuscles ?? []).isEmpty ? "None" : (exercise.secondaryMuscles ?? []).joined(separator: ", ")) }
                 }
-            }.formStyle(.grouped).navigationTitle(initialExercise == nil ? "New Exercise" : "Edit Exercise").inlineTitle()
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) { Button("Save") { exercise.name = exercise.name.trimmingCharacters(in: .whitespacesAndNewlines); onSave(exercise); dismiss() }.disabled(exercise.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) }
-            }
-        }.onAppear { if let initialExercise { exercise = initialExercise } else { exercise.name = initialName } }
+            }.formStyle(.grouped).navigationTitle(isNew ? "New Exercise" : "Edit Exercise").inlineTitle()
+        }
+    }
+    private var catalog: [Exercise] { store.data.exercises + [exercise] }
+    private func category(_ title: String, kind: ExerciseCategory, value: Binding<String>, allowsEmpty: Bool = false) -> some View {
+        NavigationLink {
+            CategoryPicker(title: title, choices: kind.choices(in: catalog), selection: Binding(get: { value.wrappedValue.isEmpty ? [] : [value.wrappedValue] }, set: { values in
+                value.wrappedValue = values.first ?? ""
+                if kind == .muscle { exercise.secondaryMuscles?.removeAll { ExerciseCategory.key($0) == ExerciseCategory.key(value.wrappedValue) } }
+            }), allowsEmpty: allowsEmpty)
+        } label: { LabeledContent(title, value: value.wrappedValue.isEmpty ? "None" : value.wrappedValue) }
     }
 }

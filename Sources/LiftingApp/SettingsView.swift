@@ -192,7 +192,7 @@ struct PlateInventoryView: View {
                     #endif
                     Button("Add") { if let value = Double(newSize.replacingOccurrences(of: ",", with: ".")), value.isFinite, value > 0, !sizes.contains(value) { save(sizes + [value]); newSize = "" } }.disabled(Double(newSize.replacingOccurrences(of: ",", with: ".")) == nil) }
             }
-        }.formStyle(.grouped).navigationTitle("Plate sizes").inlineTitle()
+        }.formStyle(.grouped).navigationTitle("Plate sizes").inlineTitle().modifier(SaveAndClose())
     }
 }
 

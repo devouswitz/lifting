@@ -12,6 +12,7 @@ struct LiveSetRow: View {
     @State private var edit: NumericEdit?
     @State private var editingReps = false
     @State private var editingDetails = false
+    @State private var editingLoad = false
     var item: SessionExercise? { store.data.activeSession?.exercises.first { $0.id == exerciseID } }
     var set: LoggedSet? { item?.sets.first { $0.id == setID } }
     var previous: LoggedSet? {
@@ -29,11 +30,15 @@ struct LiveSetRow: View {
                 let stacked = typeSize.isAccessibilitySize || (item.mode == .cardio && (set.weight != nil || set.reps != nil))
                 let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6)) : AnyLayout(HStackLayout(spacing: 6))
                 layout {
-                    VStack(spacing: 1) {
-                        Menu { setMenu(set) } label: { SetBadge(text: setLabel(set, item: item), plan: set.plan) }
-                            .compactMenu().accessibilityLabel("\(palette.title(set.plan)), set \(setLabel(set, item: item)), options")
-                        if set.plan.load == .percent { Text("\(number(set.plan.percent))%").font(.system(size: 10, weight: .medium)).monospacedDigit().foregroundStyle(.secondary) }
-                    }.frame(width: 32, height: 44)
+                    SetTypeButton(plan: set.plan, change: { plan in
+                        store.perform { try $0.replaceSetPlan(exerciseID: exerciseID, setID: setID, plan: plan) }
+                    }, details: { holdExpanded(); editingDetails = true }) {
+                        VStack(spacing: 1) {
+                            SetBadge(text: setLabel(set, item: item), plan: set.plan)
+                            if set.plan.load == .percent { Text("\(number(set.plan.percent))%").font(.system(size: 10, weight: .medium)).monospacedDigit().foregroundStyle(.secondary) }
+                        }
+                    }.frame(width: typeSize.isAccessibilitySize ? nil : 44)
+                    .accessibilityLabel("\(palette.title(set.plan)), set \(setLabel(set, item: item)), change set type")
                     let measurements = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(spacing: 6)) : AnyLayout(HStackLayout(spacing: 6))
                     measurements {
                         if stacked, let previous {
@@ -70,6 +75,11 @@ struct LiveSetRow: View {
                 setMenu(set)
             }
             .sheet(item: $edit) { NumberEditor(edit: $0) }
+            .sheet(isPresented: $editingLoad) {
+                LoadRuleEditor(plan: set.plan, unit: store.data.settings.unit, suggestedWeight: set.weight) { plan in
+                    store.perform { try $0.replaceSetPlan(exerciseID: exerciseID, setID: setID, plan: plan) }
+                }
+            }
             .sheet(isPresented: $editingDetails) { LivePlanEditor(exerciseID: exerciseID, setID: setID, initial: set.plan).sheetSize() }
             .sheet(isPresented: $editingReps) {
                 RepTargetEditor(plan: set.plan) { plan in
@@ -80,21 +90,6 @@ struct LiveSetRow: View {
     }
     @ViewBuilder func setMenu(_ set: LoggedSet) -> some View {
         Button("Rest After Set", systemImage: "timer") { open(.rest) }
-        Menu("Set Type") {
-            ForEach(SetKind.allCases) { kind in
-                Button { store.editSet(exerciseID, setID) { $0.plan.kind = kind; $0.plan.customTypeID = nil } } label: {
-                    if set.plan.kind == kind && set.plan.customTypeID == nil { Label(kind.title, systemImage: "checkmark") } else { Text(kind.title) }
-                }
-            }
-            if !store.data.customSetTypes.isEmpty {
-                Divider()
-                ForEach(store.data.customSetTypes) { type in
-                    Button { store.editSet(exerciseID, setID) { $0.plan.kind = type.countsAs; $0.plan.customTypeID = type.id } } label: {
-                        if set.plan.customTypeID == type.id { Label(type.name, systemImage: "checkmark") } else { Text(type.name) }
-                    }
-                }
-            }
-        }
         Divider()
         Button("Delete Set", systemImage: "trash", role: .destructive, action: removeSet)
     }
@@ -106,6 +101,7 @@ struct LiveSetRow: View {
             }.frame(maxWidth: .infinity, minHeight: 44).background(self.set?.completedAt == nil ? palette.field : Color.clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         }.buttonStyle(.plain)
         .modifier(RepTargetInteraction(enabled: field == .reps) { holdExpanded(); editingReps = true })
+        .modifier(WeightSettingsInteraction(enabled: field == .weight) { holdExpanded(); editingLoad = true })
         .accessibilityLabel("Set \(index + 1), \(title), \(value ?? "not set")\(placeholder.map { ", target \($0)" } ?? "")").accessibilityIdentifier("workout.\(exerciseID).\(setID).\(field.rawValue)")
     }
     func previousValue(_ set: LoggedSet) -> String {
@@ -187,65 +183,6 @@ struct NumericEdit: Identifiable {
     let maximum: Double
     let integer: Bool
     let onSave: (Double?) -> Void
-}
-
-/// One-value editing uses the same native selection, paste and keyboard as form fields.
-struct NumberEditor: View {
-    @Environment(\.dismiss) private var dismiss
-    @Environment(\.palette) private var palette
-    @Environment(\.dynamicTypeSize) private var typeSize
-    let edit: NumericEdit
-    @ScaledMetric(relativeTo: .largeTitle) private var valueHeight: CGFloat = 56
-    @State private var focused = false
-    @State private var text: String
-    @State private var error: String?
-
-    init(edit: NumericEdit) {
-        self.edit = edit
-        _text = State(initialValue: edit.value.map { number($0, decimals: 3) } ?? "")
-    }
-    var body: some View {
-        NavigationStack {
-            VStack(spacing: 16) {
-                if let context = edit.context { Text(context).font(.subheadline).foregroundStyle(.secondary) }
-                NativeNumberInput(text: $text, focused: $focused, title: edit.title, placeholder: "Optional", integer: edit.integer, large: true)
-                    .frame(height: valueHeight).padding(.horizontal, 16).background(palette.field, in: RoundedRectangle(cornerRadius: 12))
-                    .accessibilityIdentifier("number.value")
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: typeSize.isAccessibilitySize ? 2 : 4), spacing: 8) {
-                    ForEach([-2.0, -1, 1, 2], id: \.self) { multiplier in
-                        Button {
-                            let value = Double(text.replacingOccurrences(of: ",", with: ".")) ?? 0
-                            text = number(min(edit.maximum, max(0, value + edit.step * multiplier)), decimals: 3)
-                        } label: {
-                            Text("\(multiplier > 0 ? "+" : "−")\(number(edit.step * abs(multiplier)))")
-                                .font(.subheadline.weight(.semibold).monospacedDigit()).lineLimit(1).minimumScaleFactor(0.8)
-                                .frame(maxWidth: .infinity, minHeight: 44)
-                        }.buttonStyle(.bordered)
-                    }
-                }
-                if let error { Text(error).font(.footnote).foregroundStyle(palette.failure) }
-                Spacer(minLength: 0)
-            }.padding(20).navigationTitle(edit.title).inlineTitle()
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                    ToolbarItem(placement: .confirmationAction) { Button("Done", action: save).accessibilityIdentifier("number.done") }
-                }
-        }.frame(idealWidth: 420, idealHeight: 280)
-        .presentationDetents(typeSize.isAccessibilitySize ? [.large] : [.height(280), .large])
-        .presentationDragIndicator(.visible)
-        .onAppear { focused = true }
-        .onChange(of: text) { _, _ in error = nil }
-    }
-    private func save() {
-        if text.isEmpty { edit.onSave(nil); dismiss(); return }
-        guard let value = Double(text.replacingOccurrences(of: ",", with: ".")), value.isFinite,
-              (0...edit.maximum).contains(value), !edit.integer || value.rounded() == value else {
-            error = "Enter a value from 0 to \(number(edit.maximum))."
-            return
-        }
-        edit.onSave(value)
-        dismiss()
-    }
 }
 
 func loggedSetSummary(_ set: LoggedSet, unit: WeightUnit) -> String {

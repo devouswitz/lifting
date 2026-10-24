@@ -172,3 +172,14 @@ Number fields now use shared native controls with select-all on initial focus an
 Day and workout menus contain their own scope; exercise linking and configuration live on exercise menus. Exercise weights are derived, read-only summaries, including mixed-weight ranges. Native exercise drag/drop is shared by days and active workouts. Move Up/Down remains as accessibility actions on headers and was exercised in the simulator. Sustained touch dragging and physical iPhone/Watch behavior remain unverified through this automation interface. No claim of physical gesture verification is made.
 
 The iOS simulator build and device Release archive pass. The exported distribution IPA passes signature, bundle identity, build number and HealthKit capability verification. All test data is isolated; user workout data was not changed. See the build 4 release report for distribution status and measured package sizes.
+
+
+## Build 5 interaction polish
+
+All 93 core cases pass, including the prior 86 regression cases. New cases cover keypad replacement, zero/decimal/clear input, category spelling and backup compatibility, equal elapsed calendar comparisons across daylight saving, short/leap months, future months, unknown rest days, unique workout days, and every quick-action assignment in backups.
+
+Observed on isolated iPhone 17e and iPad mini simulators running iOS/iPadOS 27: restored keypad; first-digit replacement; valid dismissal saves; explicit Cancel discards; independent weight propagation and warm-up recalculation; template range editing from 8–10 to 9–12; direct set-type choices; custom equipment creation through nested navigation without premature parent saving; persistent shared quick-action assignments; No data for empty rest-day history; session state retained after app update and relaunch. Inspected portrait, landscape, light/dark appearance, and the largest Dynamic Type size. Fixed warm-up badge clipping found during review.
+
+Both simulator and device Release builds pass. The exported build 5 IPA passes signature, identity, and HealthKit entitlement checks. No third-party dependencies or category-storage migration were introduced. Calendar summaries and day sets are computed once per render instead of repeatedly for each displayed statistic/day. Shared draft, load, set-type, and quick-action controls replace repeated implementations.
+
+Physical-device gestures, VoiceOver speech, external iPad keyboards, older supported OS versions, live watch/Health sync, and notification delivery were not retested in this pass. Existing code and core coverage for these features remain. No Mac-specific release was prepared. See the interaction-polish release report for final TestFlight status and measured sizes.

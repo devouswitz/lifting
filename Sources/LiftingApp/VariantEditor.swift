@@ -7,12 +7,18 @@ struct VariantEditor: View {
     @Environment(\.dismiss) var dismiss
     @State var variant: Variant
     @State private var technique: TechniqueKind?
-    @State private var validationError: String?
     @State private var savingWarmups = false
     var unit: WeightUnit { store.data.settings.unit }
     var exercise: Exercise? { store.data.exercise(variant.exerciseID) }
+    private var valid: Bool {
+        !variant.label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && variant.label.count <= 200
+            && !variant.sets.isEmpty && variant.sets.allSatisfy(\.isValid)
+            && variant.rounding.isFinite && variant.rounding >= 0
+            && variant.progression.increment.isFinite && variant.progression.increment >= 0
+            && (0...100).contains(variant.progression.deloadPercent)
+    }
     var body: some View {
-        NavigationStack {
+        DraftEditor(valid: valid, changed: store.data.variant(variant.id) != variant, save: { store.saveVariant(variant) }) {
             let weights = variant.resolvedWeights
             ThemedForm {
                 Section("Load and rest") {
@@ -73,17 +79,7 @@ struct VariantEditor: View {
                     LabeledContent("Track") { TextField("Track name", text: $variant.label).multilineTextAlignment(.trailing) }
                 } footer: { Text("Progress keeps each track separate.") }
                 Section("Note shown every session") { TextField("Optional", text: $variant.notes, axis: .vertical).lineLimit(3...8) }
-                if let validationError { Text(validationError).foregroundStyle(.red) }
             }.formStyle(.grouped).navigationTitle(exercise?.name ?? "Prescription").inlineTitle()
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) { Button("Save") {
-                    var check = store.data
-                    if let i = check.variants.firstIndex(where: { $0.id == variant.id }) { check.variants[i] = variant }
-                    else { check.variants.append(variant) }
-                    do { _ = try check.validated(); if store.saveVariant(variant) { dismiss() } } catch { validationError = error.localizedDescription }
-                }.disabled(variant.label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || variant.sets.isEmpty) }
-            }
             .sheet(item: $technique) { kind in TechniqueEditor(kind: kind, workingWeight: variant.referenceWeight, rounding: variant.rounding) { plans, replace, _ in
                 if replace { variant.sets.removeAll { $0.kind != .warmup } }
                 if kind == .drop, let last = variant.sets.indices.last { variant.sets[last].restSeconds = 0 }
@@ -119,11 +115,14 @@ extension VariantEditor {
 }
 
 struct PlanEditor: View {
+    @Environment(\.dismiss) private var dismiss
     @Environment(\.palette) var palette
     @Binding var plan: SetPlan
     let unit: WeightUnit
     var suggestedWeight: Double? = nil
     var warmupOnly = false
+    var showsSave = true
+    @State private var original: SetPlan?
     var body: some View {
         ThemedForm {
             StoreErrorRow()
@@ -133,14 +132,7 @@ struct PlanEditor: View {
                     ForEach(palette.setTypes) { Text($0.name).tag(SetTypeChoice.custom($0.id)) }
                 }
             } }
-            Section(plan.kind == .warmup ? "Warm-up weight" : "Weight") {
-                Picker("Based on", selection: $plan.load) { ForEach(loadRules) { Text($0.title).tag($0) } }
-                if plan.load == .working {
-                    NumberRow("Weight (\(unit.rawValue))", value: Binding(get: { plan.weightOverride ?? suggestedWeight }, set: { plan.weightOverride = $0 }), placeholder: "Suggested", factor: unit.kilograms(1))
-                }
-                if plan.load == .percent { PercentControl(title: "Percent of working set", value: $plan.percent, range: 0...1000) }
-                if plan.load == .fixed { NumberRow("Weight (\(unit.rawValue))", value: $plan.fixedWeight, factor: unit.kilograms(1)) }
-            }
+            SetLoadFields(plan: $plan, unit: unit, suggestedWeight: suggestedWeight)
             Section("Targets") {
                 SetTargetFields(plan: $plan)
             }
@@ -148,6 +140,17 @@ struct PlanEditor: View {
                 NumberRow("Rest in seconds", value: Binding(get: { plan.restSeconds.map(Double.init) }, set: { plan.restSeconds = $0.map { Int($0) } }), placeholder: "Exercise default", integer: true).accessibilityIdentifier("plan.rest")
             }
         }.formStyle(.grouped).navigationTitle(palette.title(plan)).inlineTitle()
+        .toolbar {
+            if showsSave {
+                ToolbarItem(placement: .confirmationAction) { Button("Save") { dismiss() }.disabled(!plan.isValid) }
+                if !plan.isValid {
+                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { if let original { plan = original }; dismiss() } }
+                }
+            }
+        }
+        .onAppear { if original == nil { original = plan } }
+        .navigationBarBackButtonHidden(!plan.isValid)
+        .interactiveDismissDisabled(!plan.isValid)
         #if os(iOS)
         .keyboardType(.decimalPad)
         #endif
@@ -158,7 +161,6 @@ struct PlanEditor: View {
 enum SetTypeChoice: Hashable { case kind(SetKind), custom(UUID) }
 
 extension PlanEditor {
-    var loadRules: [LoadRule] { LoadRule.allCases }
     var typeChoice: Binding<SetTypeChoice> {
         Binding(get: { plan.customTypeID.flatMap { id in palette.setTypes.contains { $0.id == id } ? .custom(id) : nil } ?? .kind(plan.kind) }, set: { choice in
             switch choice {
@@ -218,22 +220,16 @@ struct SetTargetFields: View {
 
 struct RepTargetEditor: View {
     @Environment(\.dynamicTypeSize) private var typeSize
-    @Environment(\.dismiss) private var dismiss
     @State var plan: SetPlan
     let onSave: (SetPlan) -> Bool
+    @State private var original: SetPlan?
     var body: some View {
-        NavigationStack {
+        DraftEditor(valid: plan.isValid, changed: original.map { $0 != plan } ?? false, save: { onSave(plan) }) {
             ThemedForm { Section { RepTargetFields(plan: $plan) } }
                 .navigationTitle("Rep Target").inlineTitle()
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                    ToolbarItem(placement: .confirmationAction) { Button("Save") { if onSave(plan) { dismiss() } }.disabled(!valid) }
-                }
         }.frame(idealWidth: 440, idealHeight: 420)
         .presentationDetents(typeSize.isAccessibilitySize ? [.large] : [.height(400), .large])
-    }
-    private var valid: Bool {
-        (plan.reps.map { (0...10000).contains($0) } ?? true) && (plan.repCeiling.map { $0 >= (plan.reps ?? 0) && $0 <= 10000 } ?? true)
+        .onAppear { if original == nil { original = plan } }
     }
 }
 
@@ -291,6 +287,7 @@ struct TechniqueEditor: View {
     @State private var rest = 20
     @State private var replace = true
     @State private var saveFuture = false
+    @State private var initialTargets: [SetPlan]?
     var plans: [SetPlan] { kind == .drop ? SetTechniques.drops(workingWeight: workingWeight, rounding: rounding, reductionPercent: reduction, count: dropCount, reps: dropTarget.reps, repCeiling: dropTarget.repCeiling, rpe: dropTarget.rpe, seconds: dropTarget.seconds, meters: dropTarget.meters, amrap: dropTarget.amrap) : SetTechniques.myo(activation: activationTarget, mini: miniTarget, miniSets: miniCount, rest: rest) }
     private var validTargets: Bool {
         guard reduction.isFinite, (0...100).contains(reduction), (1...10).contains(dropCount), (1...20).contains(miniCount), (0...86400).contains(rest) else { return false }
@@ -299,7 +296,9 @@ struct TechniqueEditor: View {
         return (try? data.validated()) != nil && plans.allSatisfy { $0.reps != nil || $0.rpe != nil || $0.seconds != nil || $0.meters != nil }
     }
     var body: some View {
-        NavigationStack {
+        DraftEditor(valid: validTargets, changed: initialTargets.map { $0 != [dropTarget, activationTarget, miniTarget] } == true || reduction != 20 || dropCount != 1 || miniCount != 4 || rest != 20 || !replace || saveFuture, saveID: "technique.add", save: {
+            onAdd(plans, kind == .myo && replace, saveFuture); return true
+        }) {
             ThemedForm {
                 if kind == .drop {
                     Section {
@@ -323,13 +322,10 @@ struct TechniqueEditor: View {
                     ForEach(plans) { plan in VStack(alignment: .leading, spacing: 5) { Text(plan.kind.title).font(.headline); Text(setPlanSummary(plan, unit: store.data.settings.unit)).font(.subheadline).foregroundStyle(.secondary) } }
                 }
             }.formStyle(.grouped).navigationTitle(kind.title).inlineTitle()
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) { Button("Add") { onAdd(plans, kind == .myo && replace, saveFuture); dismiss() }.disabled(!validTargets).accessibilityIdentifier("technique.add") }
-            }
-        }
+        }.onAppear { if initialTargets == nil { initialTargets = [dropTarget, activationTarget, miniTarget] } }
     }
 }
+
 
 struct PercentControl: View {
     let title: String

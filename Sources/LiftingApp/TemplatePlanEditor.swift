@@ -9,18 +9,12 @@ struct TemplatePlanEditor: View {
     let save: (Variant) -> Bool
 
     var body: some View {
-        NavigationStack {
-            PlanEditor(plan: $plan, unit: store.data.settings.unit, suggestedWeight: variant.weight(for: plan))
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("Save") {
-                            guard let index = variant.sets.firstIndex(where: { $0.id == plan.id }) else { return }
-                            variant.sets[index] = plan
-                            if save(variant) { dismiss() }
-                        }
-                    }
-                }
+        DraftEditor(valid: plan.isValid, changed: variant.sets.first { $0.id == plan.id } != plan, save: {
+            guard let index = variant.sets.firstIndex(where: { $0.id == plan.id }) else { return false }
+            var edited = variant; edited.sets[index] = plan
+            return save(edited)
+        }) {
+            PlanEditor(plan: $plan, unit: store.data.settings.unit, suggestedWeight: variant.weight(for: plan), showsSave: false)
         }
     }
 }

@@ -18,6 +18,8 @@ struct TemplateExerciseCard: View {
     let remove: () -> Void
     @State private var numberEdit: NumericEdit?
     @State private var repEdit: SetPlan?
+    @State private var repValues: SetPlan?
+    @State private var loadEdit: SetPlan?
     @State private var planEdit: SetPlan?
     @State private var settings = false
     @State private var technique: TechniqueKind?
@@ -66,7 +68,7 @@ struct TemplateExerciseCard: View {
                 }.font(.subheadline.weight(.medium)).buttonStyle(.plain).frame(minHeight: 36)
                 TextField("Add a note", text: $variant.notes, axis: .vertical).font(.subheadline).lineLimit(1...5)
                 if !typeSize.isAccessibilitySize { HStack(spacing: 8) {
-                    Text("Set").frame(width: 36)
+                    Text("Set").frame(width: 44)
                     Text(exercise?.mode == .cardio ? "Time" : unit.rawValue).frame(maxWidth: .infinity)
                     Text("Reps").frame(maxWidth: .infinity)
                     Text("RPE").frame(width: 50)
@@ -83,13 +85,14 @@ struct TemplateExerciseCard: View {
                 actions {
                     Button { addSet() } label: { Label("Add Set", systemImage: "plus") }.buttonStyle(FieldButtonStyle())
                     if exercise?.mode != .cardio {
-                        Button("Drop") { technique = .drop }.buttonStyle(FieldButtonStyle(role: .technique))
-                        Button("MYO") { technique = .myo }.buttonStyle(FieldButtonStyle(role: .technique))
+                        ForEach(0..<2, id: \.self) { index in QuickAddButton(index: index, action: runQuickAdd) }
                     }
                 }
             }
         }.card(padding: 16)
         .sheet(item: $numberEdit) { NumberEditor(edit: $0) }
+        .sheet(item: $repValues) { plan in RepValuesEditor(plan: plan, save: saveReps) }
+        .sheet(item: $loadEdit) { plan in LoadRuleEditor(plan: plan, unit: unit, suggestedWeight: variant.weight(for: plan)) { edited in update(plan.id) { $0 = edited }; return true } }
         .sheet(item: $repEdit) { plan in RepTargetEditor(plan: plan) { edited in update(plan.id) { $0.reps = edited.reps; $0.repCeiling = edited.repCeiling; $0.amrap = edited.amrap }; return true } }
         .sheet(item: $planEdit) { plan in
             TemplatePlanEditor(variant: variant, plan: plan) { edited in store.saveVariant(edited) }.sheetSize()
@@ -108,33 +111,21 @@ struct TemplateExerciseCard: View {
     private func row(_ plan: SetPlan, index: Int, weight: Double?) -> some View {
         let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6)) : AnyLayout(HStackLayout(spacing: 8))
         return layout {
-            Menu {
-                ForEach(SetKind.allCases) { kind in
-                    Button(kind.title) { update(plan.id) { $0.kind = kind; $0.customTypeID = nil; if kind == .warmup { $0.load = .percent } else if kind == .working { $0.load = .working } } }
-                }
-                if !store.data.customSetTypes.isEmpty {
-                    Divider()
-                    ForEach(store.data.customSetTypes) { type in
-                        Button(type.name) { update(plan.id) { $0.kind = type.countsAs; $0.customTypeID = type.id } }
-                    }
-                }
-            } label: {
+            SetTypeButton(plan: plan, change: { edited in update(plan.id) { $0 = edited } }, details: { planEdit = plan }) {
                 VStack(spacing: 1) {
                     SetBadge(text: setBadge(variant.sets, index: index, types: store.data.customSetTypes), plan: plan)
                     if plan.load == .percent { Text("\(number(plan.percent))%").font(.system(size: 10)).foregroundStyle(.secondary) }
                 }
-            }.compactMenu().frame(width: 36, height: 44)
+            }.accessibilityLabel("\(palette.title(plan)), set \(index + 1), change set type")
             field(exercise?.mode == .cardio ? plan.seconds.map(clockText) ?? "Time" : weight.map { number(unit.display($0)) } ?? "–", label: "Set \(index + 1), \(exercise?.mode == .cardio ? "time" : "weight")") {
                 if exercise?.mode == .cardio {
                     numberEdit = NumericEdit(title: "Time (minutes)", value: plan.seconds.map { $0 / 60 }, step: 1, maximum: 100000, integer: false) { value in update(plan.id) { $0.seconds = value.map { $0 * 60 } } }
                 } else { editWeight(plan) }
             }
-            .contextMenu {
-                Button("Use Suggested Weight") { update(plan.id) { $0.load = .working; $0.weightOverride = nil } }
-                Button("Use Separate Weight") { update(plan.id) { $0.fixedWeight = weight ?? 0; $0.load = .fixed }; editWeight(variant.sets.first { $0.id == plan.id } ?? plan) }
-                if plan.kind == .warmup || plan.kind == .drop { Button("Use Percentage") { update(plan.id) { $0.load = .percent } } }
-            }
-            field(plan.repTarget ?? "–", label: "Set \(index + 1), rep target") { repEdit = plan }
+            .contextMenu { Button("Weight Settings") { loadEdit = plan } }
+            .accessibilityAction(named: "Weight settings") { loadEdit = plan }
+            field(plan.repTarget ?? "–", label: "Set \(index + 1), rep target") { repValues = plan }
+                .modifier(RepTargetInteraction(enabled: true) { repEdit = plan })
             field(plan.rpe.map { number($0) } ?? "–", label: "Set \(index + 1), RPE") {
                 numberEdit = NumericEdit(title: "RPE", value: plan.rpe, step: 0.5, maximum: 10, integer: false) { value in update(plan.id) { $0.rpe = value } }
             }.frame(maxWidth: typeSize.isAccessibilitySize ? .infinity : 50)
@@ -151,16 +142,36 @@ struct TemplateExerciseCard: View {
         change(&edited.sets[index]); variant = edited
     }
     private func editWeight(_ plan: SetPlan) {
-        if plan.load == .working {
-            numberEdit = NumericEdit(title: "Weight (\(unit.rawValue))", context: exercise?.name, value: unit.display(variant.weight(for: plan) ?? 0), step: 2.5, maximum: 100000, integer: false) { value in
-                variant.setWeight(unit.kilograms(value ?? 0), for: plan.id)
-            }
-            return
+        numberEdit = NumericEdit(title: "Weight (\(unit.rawValue))", context: exercise?.name, value: variant.weight(for: plan).map(unit.display), step: 2.5, maximum: 100000, integer: false) { value in
+            if let value { variant.setWeight(unit.kilograms(value), for: plan.id) }
+            else { update(plan.id) { $0.load = plan.kind == .warmup ? .none : .working; $0.weightOverride = nil } }
         }
-        let percent = plan.load == .percent
-        numberEdit = NumericEdit(title: percent ? "% of working weight" : "Weight (\(unit.rawValue))", context: exercise?.name, value: percent ? plan.percent : unit.display(plan.fixedWeight), step: percent ? 5 : 2.5, maximum: percent ? 1000 : 100000, integer: false) { value in
-            update(plan.id) { if percent { $0.percent = value ?? 0 } else { $0.load = .fixed; $0.fixedWeight = unit.kilograms(value ?? 0) } }
+    }
+    private func saveReps(_ edited: SetPlan) -> Bool {
+        update(edited.id) { $0.reps = edited.reps; $0.repCeiling = edited.repCeiling; $0.amrap = edited.amrap }
+        return true
+    }
+    private func runQuickAdd(_ action: QuickAdd) {
+        switch action {
+        case .drop: technique = .drop
+        case .myo: technique = .myo
+        case .warmup: addWarmup()
+        case .working: addSet()
+        case .failure: addTyped(.failure)
+        case .myoActivation: addTyped(.myoActivation)
+        case .myoMini: addTyped(.myoMini)
+        case .custom(let id):
+            let kind = store.data.setType(id)?.countsAs ?? .working
+            if kind == .warmup {
+                addWarmup()
+                if let index = variant.sets.lastIndex(where: { $0.kind == .warmup }) { variant.sets[index].customTypeID = id }
+            } else { addTyped(kind, customID: id) }
         }
+    }
+    private func addTyped(_ kind: SetKind, customID: UUID? = nil) {
+        addSet()
+        guard let index = variant.sets.indices.last else { return }
+        variant.sets[index].kind = kind; variant.sets[index].customTypeID = customID
     }
     private func addWarmup() {
         let index = variant.sets.lastIndex(where: { $0.kind == .warmup }).map { $0 + 1 } ?? 0

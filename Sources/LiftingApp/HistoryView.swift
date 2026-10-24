@@ -151,7 +151,7 @@ struct SessionDetail: View {
             } else { EmptyState(symbol: "clock", text: "Workout unavailable.") }
         }
         .navigationTitle(session.map { store.data.title(for: $0) } ?? "Workout").inlineTitle()
-        .toolbar { if session != nil { Button(editing ? "Done" : "Edit") { editing.toggle() }.fontWeight(editing ? .semibold : .regular).accessibilityIdentifier("history.edit") } }
+        .toolbar { if session != nil { Button(editing ? "Save" : "Edit") { editing.toggle() }.fontWeight(editing ? .semibold : .regular).accessibilityIdentifier("history.edit") } }
         .confirmationDialog("Delete this workout?", isPresented: $deleting) {
             Button("Delete workout", role: .destructive) {
                 store.deleteSession(sessionID)
@@ -364,6 +364,6 @@ struct LoggedSetEditor: View {
             NumberRow("Time (minutes)", value: $set.seconds, factor: 60)
             NumberRow("Distance (meters)", value: $set.meters)
             NumberRow("RPE", value: $set.rpe)
-        }.formStyle(.grouped).navigationTitle("Edit set").inlineTitle()
+        }.formStyle(.grouped).navigationTitle("Edit set").inlineTitle().modifier(SaveAndClose())
     }
 }
