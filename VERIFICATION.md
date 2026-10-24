@@ -151,10 +151,12 @@ Report anything that differs, especially how many minutes the watch workout took
 
 
 
-## Pass of 2026-10-23 (Torque 1.0 build 2)
+## Pass of 2026-10-23 (Torque 1.0 build 3)
 
-82 core cases pass, with all earlier feature tests retained. Release simulator and arm64 archive builds pass. Tested isolated iPhone 17e/iOS 27 and iPad mini/iPadOS 27 sessions: template batch add, shared weights/warm-ups, live shadow weights/header sync, short/full swipe deletion, rep target range editing without replacing logged reps, default collapse/focus, pause/restart/save, and a delivered background reminder opening the matching workout. Tablet portrait/landscape picker search and multiselect passed. The largest accessibility text size exposed wrapping issues that were corrected. macOS logging/save and workout toolbar actions were verified.
+83 core cases pass, with all earlier feature tests retained. Release simulator and arm64 archive builds pass. Tested isolated iPhone 17e/iOS 27 and iPad mini/iPadOS 27 sessions: template batch add, shared weights/warm-ups, live shadow weights/header sync, short/full swipe deletion, rep target range editing without replacing logged reps, default collapse/focus, pause/restart/save, and a delivered background reminder opening the matching workout. Tablet portrait/landscape picker search and multiselect passed. The largest accessibility text size exposed wrapping issues that were corrected. macOS logging/save and workout toolbar actions were verified.
 
 The bundle/storage identities are unchanged. Exact reps, ranges, AMRAP, no-count, RPE/time/distance, all load rules, progression, warm-up presets, Drop/MYO/custom types, substitution scope, linking, templates, import/export, history, analytics, sync and Health remain available. The global template collection is under Programs > Saved Days.
 
 Physical phone/Watch checks remain unrun. The native hold-and-drag UI could not be exercised with a sustained touch drag through the automation interface; the reorder mutation is tested, with Move Up/Down retained. TestFlight distribution status is recorded separately in the release deliverables.
+
+Distribution IPA verification checks its signature, original bundle identity, exact build number, and HealthKit entitlements. A negative check rejects an export missing HealthKit. Fractional CSV pause boundaries have a regression test so timestamp precision cannot reject a valid paused workout on import.

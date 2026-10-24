@@ -14,7 +14,14 @@ public enum HistoryCSV {
         let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .millisecondsSince1970
         var rows = [headers]
         for session in data.sessions.sorted(by: { $0.startedAt < $1.startedAt }) {
-            let pauses = session.pauses.flatMap { try? encoder.encode($0) }.flatMap { String(data: $0, encoding: .utf8) } ?? ""
+            // CSV dates have millisecond precision. Keep pause boundaries at that same
+            // precision so a pause ending with the workout cannot extend beyond it.
+            let intervals = session.pauses?.map { interval in
+                let start = format.date(from: format.string(from: interval.start)) ?? interval.start
+                let end = format.date(from: format.string(from: interval.end)) ?? interval.end
+                return DateInterval(start: start, end: max(start, end))
+            }
+            let pauses = intervals.flatMap { try? encoder.encode($0) }.flatMap { String(data: $0, encoding: .utf8) } ?? ""
             for exercise in session.exercises {
                 for set in exercise.sets where set.completedAt != nil {
                     var row: [String] = [format.string(from: session.startedAt), session.name, exercise.name, exercise.label, exercise.variantID.uuidString, set.plan.kind.rawValue]

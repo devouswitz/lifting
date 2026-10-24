@@ -122,7 +122,7 @@ See `VERIFICATION.md` for completed checks and remaining device checks. `DESIGN.
 Export using the existing App Store Connect app and signing team. Verify the actual signed package before uploading:
 
 ```sh
-python3 scripts/verify-ipa.py /path/to/Torque.ipa --build 2
+python3 scripts/verify-ipa.py /path/to/Torque.ipa --build 3
 ```
 
 A build produced with `CODE_SIGNING_ALLOWED=NO` does not carry signed entitlements. Before distribution export, sign its embedded frameworks and app locally, with `Resources/Lifting.entitlements` on the app, so Xcode preserves HealthKit while applying distribution signing. The exported IPA must pass the capability check above. Keep the bundle identifier and storage paths unchanged for updates.

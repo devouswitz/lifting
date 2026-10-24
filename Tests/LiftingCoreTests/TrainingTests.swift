@@ -1619,6 +1619,19 @@ final class TrainingTests: XCTestCase {
         XCTAssertThrowsError(try data.validated())
     }
 
+    func testPausedCSVAlignsFractionalTimestampsAtSessionBoundaries() throws {
+        var (data, id, start) = try healthLibrary()
+        let index = try XCTUnwrap(data.sessions.firstIndex { $0.id == id })
+        data.sessions[index].changeStart(to: start.addingTimeInterval(0.0004))
+        let session = data.sessions[index]
+        data.sessions[index].pauses = [DateInterval(start: session.startedAt.addingTimeInterval(1200), end: session.endedAt!)]
+        let imported = try HistoryCSV.decode(HistoryCSV.export(data)).content
+        let restored = try XCTUnwrap(imported.sessions.first { $0.id == id })
+        XCTAssertEqual(restored.duration(), data.sessions[index].duration(), accuracy: 0.001)
+        XCTAssertEqual(restored.pauses?.last?.end, restored.endedAt)
+        _ = try imported.validated()
+    }
+
     func testHealthSavesCardioSessionsAsTheirActivity() throws {
         var data = TrainingData.starter()
         let start = Date(timeIntervalSince1970: 1_792_000_000)
