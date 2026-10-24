@@ -71,6 +71,7 @@ final class AppStore: ObservableObject {
         var next = data
         do {
             try change(&next)
+            guard next != data else { return true }
             let workoutChanged = next.activeSession != data.activeSession
             if workoutChanged, next.activeSession != nil { next.activeSession?.lastActivityAt = Date() }
             _ = try next.validated()
@@ -142,7 +143,7 @@ final class AppStore: ObservableObject {
             else { d.variants.append(variant) }
         }
     }
-    func add(_ exercises: [Exercise], to routineID: UUID) {
+    @discardableResult func add(_ exercises: [Exercise], to routineID: UUID) -> Bool {
         perform { try $0.addExercises(exercises.map(\.id), to: routineID) }
     }
     func prepareNotifications() {

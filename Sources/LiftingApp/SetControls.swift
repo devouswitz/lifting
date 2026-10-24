@@ -6,6 +6,7 @@ struct SetTypeButton<Label: View>: View {
     let plan: SetPlan
     let change: (SetPlan) -> Void
     let details: () -> Void
+    var duplicate: (() -> Void)? = nil
     @ViewBuilder let label: () -> Label
     @State private var choosing = false
 
@@ -15,9 +16,11 @@ struct SetTypeButton<Label: View>: View {
             .confirmationDialog("Set Type", isPresented: $choosing, titleVisibility: .visible) {
                 ForEach(SetKind.allCases) { kind in Button(kind.title) { select(kind) } }
                 ForEach(store.data.customSetTypes) { type in Button(type.name) { select(type.countsAs, customID: type.id) } }
+                Button("Set Details", action: details)
+                if let duplicate { Button("Duplicate Set", action: duplicate) }
                 Button("Cancel", role: .cancel) {}
             }
-            .contextMenu { Button(plan.kind == .warmup ? "Warm-up Settings" : "Set Details", systemImage: "slider.horizontal.3", action: details) }
+            .highPriorityGesture(LongPressGesture().onEnded { _ in details() })
             .accessibilityAction(named: "Set details", details)
             .accessibilityLabel("\(plan.kind.title), change set type")
             .accessibilityValue(plan.load == .percent ? "\(number(plan.percent))% of working weight" : "")

@@ -128,6 +128,33 @@ final class TrainingTests: XCTestCase {
             XCTAssertEqual(data.variants[v].workingWeight, reps == 5 ? 100 + data.variants[v].progression.increment : 100)
         }
     }
+    func testAdHocWarmupsKeepScopeAndDoNotCreateLibraryRecords() throws {
+        var data = TrainingData.starter()
+        let day = data.dayTemplates[0], variantID = day.slots[0].variantID
+        let original = data.variant(variantID)!, other = data.variant(day.slots[1].variantID)!
+        let plans = [(50.0, 8), (70.0, 5), (85.0, 2)].map {
+            SetPlan(kind: .warmup, load: .percent, percent: $0.0, reps: $0.1, repCeiling: nil)
+        }
+        try data.start(routineID: day.id)
+        let item = data.activeSession!.exercises[0]
+        try data.toggleSet(exerciseID: item.id, setID: item.sets[0].id)
+        let completed = data.activeSession!.exercises[0].sets[0]
+        try data.applyWarmups(plans, toSessionExercises: [item.id], saveFuture: false)
+        let live = data.activeSession!.exercises[0]
+        XCTAssertEqual(live.sets[0], completed)
+        XCTAssertEqual(live.sets.filter { $0.plan.kind == .warmup && $0.completedAt == nil }.map { $0.plan.percent }, [50, 70, 85])
+        XCTAssertEqual(data.variant(variantID), original)
+        XCTAssertTrue(data.warmupPresets.isEmpty)
+        try data.applyWarmups(plans, toVariants: [variantID])
+        XCTAssertEqual(data.variant(variantID)!.sets.prefix(3).map(\.percent), [50, 70, 85])
+        XCTAssertEqual(data.variant(other.id), other)
+        let before = data
+        var invalid = plans; invalid[0].percent = .nan
+        XCTAssertThrowsError(try data.applyWarmups(invalid, toVariants: [variantID]))
+        XCTAssertEqual(data, before)
+        XCTAssertNoThrow(try LocalRepository.decode(LocalRepository.encode(data)).validated())
+    }
+
     func testNamedWarmupPresetsApplyIndependentCopiesAndKeepCompletedSets() throws {
         var data = TrainingData.starter()
         let preset = WarmupPreset(name: "Descending", sets: [80.0, 60, 40].map { SetPlan(kind: .warmup, load: .percent, percent: $0, reps: 5, repCeiling: 8, rpe: 6) })

@@ -6,7 +6,7 @@ struct RepTargetInteraction: ViewModifier {
 
     func body(content: Content) -> some View {
         if enabled {
-            content.contextMenu { Button("Edit Rep Target", action: edit) }
+            content.highPriorityGesture(LongPressGesture().onEnded { _ in edit() })
                 .accessibilityAction(named: "Edit rep target", edit)
         } else { content }
     }
@@ -17,7 +17,7 @@ struct WeightSettingsInteraction: ViewModifier {
     let edit: () -> Void
     func body(content: Content) -> some View {
         if enabled {
-            content.contextMenu { Button("Weight Settings", action: edit) }
+            content.highPriorityGesture(LongPressGesture().onEnded { _ in edit() })
                 .accessibilityAction(named: "Weight settings", edit)
         } else { content }
     }

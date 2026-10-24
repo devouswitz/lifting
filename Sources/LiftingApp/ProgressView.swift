@@ -239,7 +239,7 @@ struct ExerciseProgress: View {
             }
             .sheetSize()
         }
-        .sheet(item: $variantEditor) { VariantEditor(variant: $0).environmentObject(store).sheetSize() }
+        .sheet(item: $variantEditor) { SavedExerciseEditor(variantID: $0.id).environmentObject(store).sheetSize() }
     }
 
     @ViewBuilder private func trackPicker(_ tracks: [ProgressTrack]) -> some View {

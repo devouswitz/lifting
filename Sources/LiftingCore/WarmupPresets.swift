@@ -25,21 +25,29 @@ public extension TrainingData {
         return warmups + existing.filter { $0.kind != .warmup }
     }
     mutating func applyWarmupPreset(_ id: UUID, toVariants ids: Set<UUID>, replacing: Bool = true) throws {
-        guard let preset = warmupPresets.first(where: { $0.id == id }), !ids.isEmpty, ids.allSatisfy({ variant($0) != nil }) else { throw TrainingError.invalid("Choose a warm-up preset and exercises.") }
-        for v in variants.indices where ids.contains(variants[v].id) { variants[v].sets = Self.applyingWarmups(preset.sets, to: variants[v].sets, replacing: replacing) }
+        guard let preset = warmupPresets.first(where: { $0.id == id }) else { throw TrainingError.invalid("Choose a warm-up preset.") }
+        try applyWarmups(preset.sets, toVariants: ids, replacing: replacing)
+    }
+    mutating func applyWarmups(_ plans: [SetPlan], toVariants ids: Set<UUID>, replacing: Bool = true) throws {
+        guard !plans.isEmpty, plans.allSatisfy(\.isValid), !ids.isEmpty, ids.allSatisfy({ variant($0) != nil }) else { throw TrainingError.invalid("Choose valid warm-ups and exercises.") }
+        for v in variants.indices where ids.contains(variants[v].id) { variants[v].sets = Self.applyingWarmups(plans, to: variants[v].sets, replacing: replacing) }
     }
     mutating func applyWarmupPreset(_ id: UUID, toSessionExercises ids: Set<UUID>, replacing: Bool = true, saveFuture: Bool = false) throws {
-        guard let preset = warmupPresets.first(where: { $0.id == id }), let session = activeSession, !ids.isEmpty, ids.isSubset(of: Set(session.exercises.map(\.id))) else { throw TrainingError.invalid("Choose a warm-up preset and exercises.") }
+        guard let preset = warmupPresets.first(where: { $0.id == id }) else { throw TrainingError.invalid("Choose a warm-up preset.") }
+        try applyWarmups(preset.sets, toSessionExercises: ids, replacing: replacing, saveFuture: saveFuture)
+    }
+    mutating func applyWarmups(_ plans: [SetPlan], toSessionExercises ids: Set<UUID>, replacing: Bool = true, saveFuture: Bool = false) throws {
+        guard !plans.isEmpty, plans.allSatisfy(\.isValid), let session = activeSession, !ids.isEmpty, ids.isSubset(of: Set(session.exercises.map(\.id))) else { throw TrainingError.invalid("Choose valid warm-ups and exercises.") }
         for e in activeSession!.exercises.indices where ids.contains(activeSession!.exercises[e].id) {
             let item = activeSession!.exercises[e]
             guard var variant = variant(item.variantID) else { throw TrainingError.invalid("Exercise unavailable.") }
             variant.workingWeight = item.workingLoad(fallback: variant.workingWeight); variant.rounding = item.roundingIncrement ?? variant.rounding
-            let plans = Self.warmupCopies(preset.sets)
+            let copies = Self.warmupCopies(plans)
             if replacing { activeSession!.exercises[e].sets.removeAll { $0.plan.kind == .warmup && $0.completedAt == nil } }
             let position = activeSession!.exercises[e].sets.firstIndex { $0.plan.kind != .warmup && $0.completedAt == nil } ?? activeSession!.exercises[e].sets.count
-            activeSession!.exercises[e].sets.insert(contentsOf: plans.map { LoggedSet(plan: $0, variant: variant) }, at: position)
+            activeSession!.exercises[e].sets.insert(contentsOf: copies.map { LoggedSet(plan: $0, variant: variant) }, at: position)
             activeSession!.exercises[e].keepExpanded = nil
-            if saveFuture { try applyWarmupPreset(id, toVariants: [variant.id], replacing: replacing) }
+            if saveFuture { try applyWarmups(plans, toVariants: [variant.id], replacing: replacing) }
         }
         restDeadline = nil
     }

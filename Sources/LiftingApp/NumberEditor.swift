@@ -1,74 +1,152 @@
 import SwiftUI
 import LiftingCore
 
+struct NumericEdit: Identifiable {
+    let id = UUID()
+    let title: String
+    var context: String? = nil
+    let value: Double?
+    let step: Double
+    let maximum: Double
+    let integer: Bool
+    var previous: (() -> NumericEdit?)? = nil
+    var next: (() -> NumericEdit?)? = nil
+    let onSave: (Double?) -> Bool
+}
+
+/// A keypad stays open while moving through sets. Only edited values become overrides.
 struct NumberEditor: View {
-    let edit: NumericEdit
+    @Environment(\.dismiss) private var dismiss
+    @State private var edit: NumericEdit
     @State private var entry: NumericEntry
+    @State private var resolved = false
     init(edit: NumericEdit) {
-        self.edit = edit
+        _edit = State(initialValue: edit)
         _entry = State(initialValue: NumericEntry(value: edit.value, maximum: edit.maximum, integer: edit.integer))
     }
     var body: some View {
-        DraftEditor(valid: entry.isValid, changed: entry.changed, saveID: "number.done", save: {
-            edit.onSave(entry.value); return true
-        }) {
+        NavigationStack {
             ScrollView {
                 VStack(spacing: 12) {
                     if let context = edit.context { Text(context).font(.subheadline).foregroundStyle(.secondary) }
+                    if edit.previous != nil || edit.next != nil {
+                        HStack {
+                            Button("Previous Set", systemImage: "chevron.left") { advance(edit.previous) }.disabled(edit.previous == nil)
+                            Spacer()
+                            Button("Next Set", systemImage: "chevron.right") { advance(edit.next) }.disabled(edit.next == nil)
+                        }.font(.subheadline).buttonStyle(.plain).frame(minHeight: 44).disabled(!entry.isValid)
+                    }
                     NumericDisplay(entry: $entry, title: edit.title)
                     NumericKeys(entry: $entry, step: edit.step)
+                    StoreErrorRow()
                 }.padding(20)
             }.navigationTitle(edit.title).inlineTitle()
-        }.modifier(KeypadPresentation())
+                .toolbar {
+                    if !entry.isValid { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { resolved = true; dismiss() } } }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Close", systemImage: "xmark") { if commit() { resolved = true; dismiss() } }
+                            .labelStyle(.iconOnly).disabled(!entry.isValid).keyboardShortcut(.cancelAction)
+                    }
+                }
+        }
+        .interactiveDismissDisabled(!entry.isValid)
+        .onDisappear { if !resolved { _ = commit() } }
+        .modifier(KeypadPresentation())
+    }
+    private func commit() -> Bool {
+        guard entry.isValid else { return false }
+        guard entry.changed else { return true }
+        guard edit.onSave(entry.value) else { return false }
+        entry = NumericEntry(value: entry.value, maximum: edit.maximum, integer: edit.integer)
+        return true
+    }
+    private func advance(_ destination: (() -> NumericEdit?)?) {
+        guard commit(), let next = destination?() else { return }
+        edit = next
+        entry = NumericEntry(value: next.value, maximum: next.maximum, integer: next.integer)
     }
 }
 
-/// Editing a prescribed range keeps both bounds and the existing target mode.
+/// Ranges retain both bounds. Navigation commits a complete valid target, never a partial range.
 struct RepValuesEditor: View {
-    let plan: SetPlan
+    @State var plan: SetPlan
     let save: (SetPlan) -> Bool
+    var adjacent: ((UUID, Int) -> SetPlan?)? = nil
+    @State private var exact: NumericEntry
     @State private var lower: NumericEntry
     @State private var upper: NumericEntry
-    @State private var editingUpper = false
-    init(plan: SetPlan, save: @escaping (SetPlan) -> Bool) {
-        self.plan = plan; self.save = save
+    private enum Bound { case exact, lower, upper }
+    @State private var selection = Bound.lower
+    init(plan: SetPlan, save: @escaping (SetPlan) -> Bool, adjacent: ((UUID, Int) -> SetPlan?)? = nil) {
+        _plan = State(initialValue: plan); self.save = save; self.adjacent = adjacent
+        _exact = State(initialValue: NumericEntry(value: nil, maximum: 10000, integer: true))
         _lower = State(initialValue: NumericEntry(value: plan.reps.map(Double.init), maximum: 10000, integer: true))
         _upper = State(initialValue: NumericEntry(value: plan.repCeiling.map(Double.init), maximum: 10000, integer: true))
     }
     private var isRange: Bool { plan.repRange != nil }
+    private var usesExact: Bool { isRange && selection == .exact }
+    private var changed: Bool { usesExact ? exact.changed : lower.changed || upper.changed }
     private var valid: Bool {
-        lower.isValid && (!isRange || (upper.isValid && lower.value != nil && upper.value != nil && upper.value! >= lower.value!))
+        if usesExact { return exact.isValid && (!exact.changed || exact.value != nil) }
+        return lower.isValid && (!isRange || (upper.isValid && lower.value != nil && upper.value != nil && upper.value! >= lower.value!))
     }
+    private var selectedEntry: Binding<NumericEntry> { selection == .exact ? $exact : selection == .upper ? $upper : $lower }
     var body: some View {
-        DraftEditor(valid: valid, changed: lower.changed || upper.changed, save: {
-            var edited = plan
-            edited.reps = lower.value.map(Int.init)
-            edited.repCeiling = isRange ? upper.value.map(Int.init) : nil
-            return save(edited)
-        }) {
+        DraftEditor(valid: valid, changed: changed, save: commit) {
             ScrollView {
                 VStack(spacing: 12) {
+                    if isRange { bound("Exact reps", entry: $exact, selection: .exact) }
+                    if let adjacent {
+                        HStack {
+                            Button("Previous Set", systemImage: "chevron.left") { advance(-1) }.disabled(adjacent(plan.id, -1) == nil)
+                            Spacer()
+                            Button("Next Set", systemImage: "chevron.right") { advance(1) }.disabled(adjacent(plan.id, 1) == nil)
+                        }.font(.subheadline).buttonStyle(.plain).frame(minHeight: 44).disabled(!valid)
+                    }
                     if isRange {
                         HStack(spacing: 12) {
-                            bound("Minimum", entry: $lower, upper: false)
-                            bound("Maximum", entry: $upper, upper: true)
+                            bound("Minimum", entry: $lower, selection: .lower)
+                            bound("Maximum", entry: $upper, selection: .upper)
                         }
                     } else { NumericDisplay(entry: $lower, title: "Target reps") }
-                    NumericKeys(entry: editingUpper ? $upper : $lower, step: 1)
-                    if !valid { Text("Maximum reps must be at least the minimum.").font(.footnote).foregroundStyle(.red) }
+                    NumericKeys(entry: selectedEntry, step: 1)
+                    if !valid && !usesExact { Text("Maximum reps must be at least the minimum.").font(.footnote).foregroundStyle(.red) }
+                    StoreErrorRow()
                 }.padding(20)
             }.navigationTitle(isRange ? "Rep Range" : "Target Reps").inlineTitle()
-        }.modifier(KeypadPresentation())
+        }.modifier(KeypadPresentation(height: isRange ? 620 : 540))
     }
-    private func bound(_ title: String, entry: Binding<NumericEntry>, upper: Bool) -> some View {
-        Button { editingUpper = upper; entry.wrappedValue.select() } label: {
-            VStack(spacing: 6) {
+    private func commit() -> Bool {
+        guard valid else { return false }
+        guard changed else { return true }
+        var edited = plan
+        edited.reps = (usesExact ? exact.value : lower.value).map(Int.init)
+        edited.repCeiling = isRange && !usesExact ? upper.value.map(Int.init) : nil
+        guard save(edited) else { return false }
+        load(edited)
+        return true
+    }
+    private func load(_ value: SetPlan) {
+        plan = value; selection = .lower
+        exact = NumericEntry(value: nil, maximum: 10000, integer: true)
+        lower = NumericEntry(value: value.reps.map(Double.init), maximum: 10000, integer: true)
+        upper = NumericEntry(value: value.repCeiling.map(Double.init), maximum: 10000, integer: true)
+    }
+    private func advance(_ offset: Int) {
+        guard commit(), let next = adjacent?(plan.id, offset) else { return }
+        load(next)
+    }
+    private func bound(_ title: String, entry: Binding<NumericEntry>, selection bound: Bound) -> some View {
+        let layout = bound == .exact ? AnyLayout(HStackLayout(spacing: 12)) : AnyLayout(VStackLayout(spacing: 6))
+        return Button { selection = bound; entry.wrappedValue.select() } label: {
+            layout {
                 Text(title).font(.subheadline)
-                Text(entry.wrappedValue.text.isEmpty ? "–" : entry.wrappedValue.text).font(.largeTitle.monospacedDigit())
-            }.frame(maxWidth: .infinity, minHeight: 80)
+                if bound == .exact { Spacer() }
+                Text(entry.wrappedValue.text.isEmpty ? "–" : entry.wrappedValue.text).font((bound == .exact ? Font.title2 : .largeTitle).monospacedDigit())
+            }.padding(.horizontal, bound == .exact ? 16 : 0).frame(maxWidth: .infinity, minHeight: bound == .exact ? 44 : 80)
                 .background(.quaternary, in: RoundedRectangle(cornerRadius: 12))
-                .overlay(RoundedRectangle(cornerRadius: 12).stroke(editingUpper == upper ? Color.accentColor : .clear, lineWidth: 2))
-        }.buttonStyle(.plain).accessibilityAddTraits(editingUpper == upper ? .isSelected : [])
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(selection == bound ? Color.accentColor : .clear, lineWidth: 2))
+        }.buttonStyle(.plain).accessibilityAddTraits(selection == bound ? .isSelected : [])
     }
 }
 
@@ -127,9 +205,10 @@ private struct NumericKeys: View {
 private struct KeypadPresentation: ViewModifier {
     @Environment(\.palette) private var palette
     @Environment(\.dynamicTypeSize) private var typeSize
+    var height: CGFloat = 540
     func body(content: Content) -> some View {
-        content.frame(idealWidth: 420, idealHeight: 540)
-            .presentationDetents(typeSize.isAccessibilitySize ? [.large] : [.height(540), .large])
+        content.frame(idealWidth: 420, idealHeight: height)
+            .presentationDetents(typeSize.isAccessibilitySize ? [.large] : [.height(height), .large])
             .presentationDragIndicator(.visible).presentationBackground(palette.card)
     }
 }

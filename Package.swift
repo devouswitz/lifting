@@ -2,9 +2,9 @@
 import PackageDescription
 
 let package = Package(
-    name: "Torque",
+    name: "Setform",
     platforms: [.iOS(.v17), .macOS(.v14)],
-    products: [.library(name: "LiftingCore", targets: ["LiftingCore"]), .executable(name: "Torque", targets: ["LiftingApp"])],
+    products: [.library(name: "LiftingCore", targets: ["LiftingCore"]), .executable(name: "Setform", targets: ["LiftingApp"])],
     targets: [
         .target(name: "LiftingCore"),
         .executableTarget(name: "LiftingApp", dependencies: ["LiftingCore"]),

@@ -2,6 +2,7 @@ import SwiftUI
 import LiftingCore
 
 struct CategoryPicker: View {
+    @Environment(\.dismiss) private var dismiss
     let title: String
     let choices: [String]
     @Binding var selection: [String]
@@ -21,10 +22,9 @@ struct CategoryPicker: View {
         }
         .navigationTitle(title).inlineTitle()
         .searchable(text: $search, prompt: "Search categories")
-        .modifier(SaveAndClose())
         .alert("Create Category", isPresented: $creating) {
             TextField("Category name", text: $name)
-            Button("Save") { if let resolvedName { select(resolvedName, toggle: false) } }.disabled(resolvedName == nil)
+            Button("Create") { if let resolvedName { select(resolvedName, toggle: false) } }.disabled(resolvedName == nil)
             Button("Cancel", role: .cancel) {}
         }
     }
@@ -42,6 +42,6 @@ struct CategoryPicker: View {
         if multiple {
             if let index = selection.firstIndex(where: { ExerciseCategory.key($0) == ExerciseCategory.key(value) }) { if toggle { selection.remove(at: index) } }
             else if selection.count < 50 { selection.append(value) }
-        } else { selection = value.isEmpty ? [] : [value] }
+        } else { selection = value.isEmpty ? [] : [value]; dismiss() }
     }
 }

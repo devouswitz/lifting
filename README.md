@@ -1,4 +1,4 @@
-# Torque
+# Setform
 
 Native SwiftUI workout tracker. iOS 17 or later. Offline by default, with optional backup and sync through a user-selected folder. No app accounts, subscriptions, external packages, or hosted backend.
 
@@ -6,14 +6,14 @@ Native SwiftUI workout tracker. iOS 17 or later. Offline by default, with option
 
 1. Install Xcode, then add an iOS simulator runtime or connect an iPhone.
 2. Open `Lifting.xcodeproj`.
-3. Select the Torque target and your signing team under Signing & Capabilities. Keep the existing bundle identifier when updating an installed copy.
-4. Choose the Torque scheme and your device, then Run.
+3. Select the Setform target and your signing team under Signing & Capabilities. Keep the existing bundle identifier when updating an installed copy.
+4. Choose the Setform scheme and your device, then Run.
 
 The app retains `local.lifting.app` and its existing storage locations so updates preserve installed data. The project directory and core module keep their original names for compatibility.
 
 ## Mac preview
 
-Open the included `Torque.app`, or build with:
+Open the included `Setform.app`, or build with:
 
 ```sh
 ./scripts/build-mac-preview.sh
@@ -24,7 +24,7 @@ The preview runs the same SwiftUI views and training engine. It does not replace
 For sample history without saving any changes:
 
 ```sh
-open -n '../Torque.app' --args --demo
+open -n '../Setform.app' --args --demo
 ```
 
 `--showcase` loads a fuller sample instead: a finished 5/3/1 block and four months of Push Pull Legs, used for screenshots and the demo video.
@@ -33,7 +33,7 @@ open -n '../Torque.app' --args --demo
 
 - Train: the loaded program's next day with Start, its later days in the order they come up, and Start Empty Workout. Tap the program row to switch programs or open one. Each program remembers its place. Completing another day does not skip the next one. Skip Workout in the next day's menu saves it to History with every set unchecked and moves on. Reorder days in the program editor.
 - Programs: tap a program to load it, or its info button to edit days, order, and notes. Add Day creates a day inside that program. Import Day copies selected days from another program or Saved Days with independent prescriptions and tracking. Programs > Saved Days retains reusable templates, including creation, reordering, duplication, deletion, and CSV export. New Program can optionally start with saved days. Hold a program for Duplicate or Delete; these actions also remain in its details. Reorder appears when multiple programs exist.
-- Day editor: workout-style cards with independent set weights, warm-up percentages, per-set targets, notes, and batch exercise selection. Exercise Settings retains progression, rounding, all load rules, custom types, and warm-up preset management. Each exercise menu opens its current superset or circuit for editing or unlinking.
+- Day editor: notes above workout-style cards with independent set weights, warm-up percentages, and per-set targets. One Add Exercises button opens the picker directly. Tap an exercise to add it and return, or choose Select Multiple for ordered batch addition. Plan Settings contains progression, rounding, and track naming; set details and warm-up presets remain on the primary card. Each exercise menu opens its current superset or circuit for editing or unlinking.
 - Prescription: configure working load, each set, percentage warm-ups, rep ranges, AMRAP, time, distance, RPE, rest, notes, and optional progression.
 - Set targets: choose No count for RPE-only sets, Reps for a fixed target, or Rep range for minimum and maximum reps. Warm-ups can use a percentage of the working set.
 - Workout: tap the check to log a set, tap a value for the large keypad, or tap Rest to change rest between sets. The weight summary is read-only and shows a range when sets differ. Swap Exercise is in each exercise's menu.
@@ -45,10 +45,10 @@ open -n '../Torque.app' --args --demo
 - Warm-up presets: create named, ordered schemes in Settings, or save a prescription's current warm-ups. Apply a preset to selected day exercises or live exercises. Replace or append warm-ups, and optionally save live changes to the day variants. Completed warm-ups are retained. Presets copy their plans, so editing a preset does not rewrite existing days.
 - Save to this day: makes live load, drop/MYO, warm-up, or link changes recur. Otherwise they apply to the current workout.
 - Tap an exercise header to expand or collapse it. Opening one focuses that exercise. Warm-ups and working sets have separate compact tables. Completed exercises collapse by default; Settings can turn this off. Hold an exercise header and drag to reorder it in a day or workout. Move Up and Move Down remain accessibility actions on the header. Workout options include Collapse All and Expand All.
-- Set values: tap to edit one actual value. Hold the reps field to edit its exact/range/AMRAP target. Hold the row for Set Details, including load rules, RPE, time, distance, and rest. The set badge changes type or rest. Swipe left to reveal Delete, or continue swiping to delete. Range targets never assume an exact rep count; unknown reps do not contribute to volume, estimated max, or progression.
+- Set values: tap to edit one actual value. Hold the reps field to edit its exact/range/AMRAP target. Hold the set badge for Set Details, including load rules, RPE, time, distance, and rest. The badge also offers Set Details by tap. Logged time and distance remain editable in live set details. Swipe left to reveal Delete, or continue swiping to delete. Range targets never assume an exact rep count; unknown reps do not contribute to volume, estimated max, or progression.
 - Exercise categories: choose equipment and muscles from searchable categories, or create a custom category. Custom choices are reused across the exercise library and travel with existing backups and sync. Existing imported labels remain intact.
-- Editing: Save confirms and closes an editor. Back or sheet dismissal retains valid changes; Cancel discards a draft. Incomplete edited drafts require correction or Cancel. Live workout logging remains immediate.
-- Set controls: tap the set badge to change type. Hold the badge for details, reps for the target mode, or weight for load settings. Template range editing keeps both bounds. Hold either quick-action button to assign any supported or custom set type; the two slots are shared by templates and workouts.
+- Editing: existing records retain valid edits on Close, Back, or sheet dismissal. New records use Create; batch and technique changes use Add or Apply. Dismissing a technique preview does not apply it. Incomplete edited drafts require correction or Cancel. Live workout logging remains immediate. Keypads offer Previous Set and Next Set, committing edited values without reopening; visiting an inherited weight leaves it inherited.
+- Set controls: tap the set badge to change type. Hold the badge for details, reps for the target mode, or weight for load settings. Template range editing keeps both bounds and offers a separate Exact reps entry. Tap a template set badge for Duplicate Set; Reorder Sets in its exercise menu exposes drag handles and accessible move actions. Hold either quick-action button to assign any supported or custom set type; the two slots are shared by templates and workouts.
 - History comparisons use equal elapsed days for an unfinished period and show their exact dates. Rest days show No data when a period has no recorded history; future days are excluded.
 - Independent weights: later untouched working sets follow the nearest earlier explicit entry, in both days and active workouts. Entering 100, then 110 in the next set gives 100/110/110; changing the first to 105 keeps 105/110/110. Fixed loads, completed sets, and later explicit entries are preserved. Percentage warm-ups follow the first working set. Save Weights to This Day in the exercise menu saves the individual loads and inheritance. Native number fields select their contents on first focus and support paste; the entire form row focuses its field.
 - Pause Workout stops duration, exercise timers, and rest. Resume continues elapsed active time. With notification permission, unfinished workouts remind after 45 minutes without changes, or 30 minutes paused, with one follow-up 90 minutes later. Finishing, discarding, or disabling reminders cancels them.
@@ -56,7 +56,7 @@ open -n '../Torque.app' --args --demo
 - Progress: choose a program or All programs, then compare separate exercise and day tracks, choose a metric and date range, or scrub a graph for actual recorded values. Exercise details include dated results. Hide an exercise you no longer do from its menu or by long-pressing its record; Hidden exercises lists them to show again.
 - Progress > Muscles: compare logged sets or load volume by primary muscle, with optional half-set credit for secondary muscles. Program and date filters apply. Warm-ups and cardio are excluded; drop/MYO sets count individually. Unknown rep counts contribute no invented volume. Muscle assignments can be edited with an exercise; new sessions snapshot them.
 - Settings: units, appearance, and colors, workout preferences, plate sizes, Apple Health, folder backup/sync, JSON backup/restore, and CSV import/export.
-- Set types: Settings > Set Types lists the built-in types (Warm-up, Working, Drop, MYO, Failure) and custom ones. A custom type has a name, a 1-3 character badge, an optional color, and counts as a working set, warm-up, or failure set, which decides volume, records, progression, and warm-up handling. Custom types appear in every set-type menu, the prescription editor's Add Sets menu, history, CSV, backups, and sync. Changing what a type counts as updates saved prescriptions; deleting one leaves its sets counting the same way under the built-in name.
+- Set types: Settings > Set Types lists the built-in types (Warm-up, Working, Drop, MYO, Failure) and custom ones. A custom type has a name, a 1-3 character badge, an optional color, and counts as a working set, warm-up, or failure set, which decides volume, records, progression, and warm-up handling. Custom types appear in set-type choices, configurable quick-add buttons, history, CSV, backups, and sync. Changing what a type counts as updates saved prescriptions; deleting one leaves its sets counting the same way under the built-in name.
 - Quick-add buttons: the two buttons next to Add Set in a workout default to Drop and MYO. Long-press either to swap it for Drop, MYO, Warm-up, Failure, or a custom type; the choice applies to every exercise and can also be set in Settings > Set Types.
 - Exercises: Programs > Exercises lists every exercise; New Exercise adds one without putting it in a day, and tapping one edits it.
 - Support: Settings ends with a Ko-fi link.
@@ -90,12 +90,12 @@ Imports preserve units, actual values, supported set types, notes, groups, avail
 
 Two switches in Settings, both off initially.
 
-- Add Calories from Apple Health reads workouts from the last 60 days. A workout from another source (an Apple Watch, the Fitness app, another app) is matched to a Torque session when at least half of it falls within the session, give or take 10 minutes. The session's log then shows its active calories and average heart rate, for example "412 kcal · 128 bpm average · Apple Watch". Lifting and cardio work in any order:
-  - A strength workout and a run recorded separately on the watch during one Torque session both count; the workout's detail lists each with its time and calories.
-  - One watch workout left running across two Torque sessions (a lift, then a separate cardio session) is split between them by when the energy was burned, using the watch's per-minute samples, so no calorie counts twice. The values stay in Torque's log if Health access is later turned off. A wrong match can be removed in the workout's Edit screen.
-- Save Workouts to Apple Health writes a workout for a finished session only for active time nothing else recorded. Pauses are excluded. If the watch recorded only the run at the end, Torque saves the lifting before it, so Fitness shows both without overlap. Gaps shorter than 5 minutes beside another recording are not saved. A session of only cardio exercises is saved as that activity (Run, Walk, Cycling, Rowing, Stairs, Elliptical, Swim, or Cardio); anything with lifting is saved as strength training. Torque waits 10 minutes after Finish for a watch workout to reach the phone first. If a watch workout for the same time shows up later, Torque deletes its own copy (or trims it to the time still uncovered) and takes the watch's calories. Saving starts with sessions finished after the switch is turned on; old history is never copied.
+- Add Calories from Apple Health reads workouts from the last 60 days. A workout from another source (an Apple Watch, the Fitness app, another app) is matched to a Setform session when at least half of it falls within the session, give or take 10 minutes. The session's log then shows its active calories and average heart rate, for example "412 kcal · 128 bpm average · Apple Watch". Lifting and cardio work in any order:
+  - A strength workout and a run recorded separately on the watch during one Setform session both count; the workout's detail lists each with its time and calories.
+  - One watch workout left running across two Setform sessions (a lift, then a separate cardio session) is split between them by when the energy was burned, using the watch's per-minute samples, so no calorie counts twice. The values stay in Setform's log if Health access is later turned off. A wrong match can be removed in the workout's Edit screen.
+- Save Workouts to Apple Health writes a workout for a finished session only for active time nothing else recorded. Pauses are excluded. If the watch recorded only the run at the end, Setform saves the lifting before it, so Fitness shows both without overlap. Gaps shorter than 5 minutes beside another recording are not saved. A session of only cardio exercises is saved as that activity (Run, Walk, Cycling, Rowing, Stairs, Elliptical, Swim, or Cardio); anything with lifting is saved as strength training. Setform waits 10 minutes after Finish for a watch workout to reach the phone first. If a watch workout for the same time shows up later, Setform deletes its own copy (or trims it to the time still uncovered) and takes the watch's calories. Saving starts with sessions finished after the switch is turned on; old history is never copied.
 
-Torque never edits or deletes a workout it did not save. HealthKit only allows an app to delete samples that app wrote, and Torque also checks the source before any deletion. Deleting a session in History also deletes the copy Torque saved for it. Health values are not written to the sync or backup folder, which may be iCloud Drive; each device reads them from Apple Health. Exported JSON backups and logged-set CSV keep them.
+Setform never edits or deletes a workout it did not save. HealthKit only allows an app to delete samples that app wrote, and Setform also checks the source before any deletion. Deleting a session in History also deletes the copy Setform saved for it. Health values are not written to the sync or backup folder, which may be iCloud Drive; each device reads them from Apple Health. Exported JSON backups and logged-set CSV keep them.
 
 Apple Health is iPhone only; the Mac preview hides these settings. Running from Xcode needs the HealthKit capability on your signing team, which `Resources/Lifting.entitlements` declares.
 
@@ -115,7 +115,7 @@ Apple references: [directory access](https://developer.apple.com/documentation/u
 ./scripts/check.sh
 ```
 
-This compiles and runs the actual XCTest case bodies with a small compatibility harness, including on machines without Xcode. With Xcode, run the Torque scheme's tests normally.
+This compiles and runs the actual XCTest case bodies with a small compatibility harness, including on machines without Xcode. With Xcode, run the Setform scheme's tests normally.
 
 
 See `VERIFICATION.md` for completed checks and remaining device checks. `DESIGN.md` describes the current UI; `RESEARCH.md` lists its references.
@@ -125,7 +125,7 @@ See `VERIFICATION.md` for completed checks and remaining device checks. `DESIGN.
 Export using the existing App Store Connect app and signing team. Verify the actual signed package before uploading:
 
 ```sh
-python3 scripts/verify-ipa.py /path/to/Torque.ipa --build 5
+python3 scripts/verify-ipa.py /path/to/Setform.ipa --build 5
 ```
 
 A build produced with `CODE_SIGNING_ALLOWED=NO` does not carry signed entitlements. Before distribution export, sign its embedded frameworks and app locally, with `Resources/Lifting.entitlements` on the app, so Xcode preserves HealthKit while applying distribution signing. The exported IPA must pass the capability check above. Keep the bundle identifier and storage paths unchanged for updates.

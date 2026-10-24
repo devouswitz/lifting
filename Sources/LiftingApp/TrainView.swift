@@ -144,9 +144,12 @@ struct ExerciseTargets: View {
 struct StartDayButton: View {
     @EnvironmentObject var store: AppStore
     let day: Routine
+    @State private var adding = false
     var body: some View {
         if day.slots.isEmpty {
-            NavigationLink { RoutineEditor(routineID: day.id) } label: { Label("Add Exercises", systemImage: "plus").frame(maxWidth: .infinity) }.buttonStyle(AccentButtonStyle())
+            Button { adding = true } label: { Label("Add Exercises", systemImage: "plus").frame(maxWidth: .infinity) }
+                .buttonStyle(AccentButtonStyle())
+                .sheet(isPresented: $adding) { ExercisePicker(title: "Add Exercises", onAdd: { store.add($0, to: day.id) }).sheetSize() }
         } else if let session = store.data.activeSession {
             Button { store.workoutPresented = true } label: { Text(session.routineID == day.id ? "Resume Workout" : "Resume \(session.name)").frame(maxWidth: .infinity) }
                 .buttonStyle(AccentButtonStyle()).accessibilityIdentifier("train.resume")

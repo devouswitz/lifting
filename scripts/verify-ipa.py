@@ -30,7 +30,7 @@ def main():
         info = plistlib.loads((app / 'Info.plist').read_bytes())
         checks = {
             'bundle identity': info.get('CFBundleIdentifier') == 'local.lifting.app',
-            'display name': info.get('CFBundleDisplayName') == 'Torque',
+            'display name': info.get('CFBundleDisplayName') == 'Setform',
             'build number': info.get('CFBundleVersion') == args.build,
             'distribution signing': entitlements.get('get-task-allow') is False,
         }
@@ -39,7 +39,7 @@ def main():
         failed = [name for name, passed in checks.items() if not passed]
         if failed:
             raise SystemExit('IPA validation failed: ' + ', '.join(failed))
-        print(f'Verified Torque build {args.build}: signature, identity, and capabilities.')
+        print(f'Verified Setform build {args.build}: signature, identity, and capabilities.')
 
 
 if __name__ == '__main__':

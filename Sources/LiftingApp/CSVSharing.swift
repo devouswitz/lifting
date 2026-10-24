@@ -17,7 +17,7 @@ struct CSVExportModifier: ViewModifier {
     @EnvironmentObject var store: AppStore
     @Binding var request: CSVExportRequest?
     func body(content: Content) -> some View {
-        content.fileExporter(isPresented: Binding(get: { request != nil }, set: { if !$0 { request = nil } }), document: BackupDocument(bytes: request?.bytes ?? Data()), contentType: .commaSeparatedText, defaultFilename: safeName(request?.name ?? "Torque")) { result in
+        content.fileExporter(isPresented: Binding(get: { request != nil }, set: { if !$0 { request = nil } }), document: BackupDocument(bytes: request?.bytes ?? Data()), contentType: .commaSeparatedText, defaultFilename: safeName(request?.name ?? "Setform")) { result in
             if case .failure(let error) = result { store.error = error.localizedDescription }
             request = nil
         }

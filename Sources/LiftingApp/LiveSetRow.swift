@@ -30,15 +30,18 @@ struct LiveSetRow: View {
                 let stacked = typeSize.isAccessibilitySize || (item.mode == .cardio && (set.weight != nil || set.reps != nil))
                 let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6)) : AnyLayout(HStackLayout(spacing: 6))
                 layout {
-                    SetTypeButton(plan: set.plan, change: { plan in
-                        store.perform { try $0.replaceSetPlan(exerciseID: exerciseID, setID: setID, plan: plan) }
-                    }, details: { holdExpanded(); editingDetails = true }) {
-                        VStack(spacing: 1) {
+                    VStack(spacing: 0) {
+                        SetTypeButton(plan: set.plan, change: { plan in
+                            store.perform { try $0.replaceSetPlan(exerciseID: exerciseID, setID: setID, plan: plan) }
+                        }, details: { holdExpanded(); editingDetails = true }) {
                             SetBadge(text: setLabel(set, item: item), plan: set.plan)
-                            if set.plan.load == .percent { Text("\(number(set.plan.percent))%").font(.system(size: 10, weight: .medium)).monospacedDigit().foregroundStyle(.secondary) }
+                        }.accessibilityLabel("\(palette.title(set.plan)), set \(setLabel(set, item: item)), change set type")
+                        if set.plan.load == .percent {
+                            Button("\(number(set.plan.percent))%") { open(.percent) }
+                                .font(.caption).frame(minWidth: 44, minHeight: 44)
+                                .modifier(WeightSettingsInteraction(enabled: true) { holdExpanded(); editingLoad = true })
                         }
                     }.frame(width: typeSize.isAccessibilitySize ? nil : 44)
-                    .accessibilityLabel("\(palette.title(set.plan)), set \(setLabel(set, item: item)), change set type")
                     let measurements = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(spacing: 6)) : AnyLayout(HStackLayout(spacing: 6))
                     measurements {
                         if stacked, let previous {
@@ -68,12 +71,10 @@ struct LiveSetRow: View {
             }.padding(.horizontal, 2)
             .background(set.completedAt != nil ? palette.wash(.completed) : .clear, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
             }
-            .contextMenu {
-                Button("Set Details", systemImage: "slider.horizontal.3") { holdExpanded(); editingDetails = true }
-                if !columns.time { Button("Log Time", systemImage: "stopwatch") { open(.time) } }
-                if !columns.distance { Button("Log Distance", systemImage: "ruler") { open(.distance) } }
-                setMenu(set)
-            }
+            .accessibilityAction(named: "Set Details") { holdExpanded(); editingDetails = true }
+            .accessibilityAction(named: "Log Time") { open(.time) }
+            .accessibilityAction(named: "Log Distance") { open(.distance) }
+            .accessibilityAction(named: "Rest After Set") { open(.rest) }
             .sheet(item: $edit) { NumberEditor(edit: $0) }
             .sheet(isPresented: $editingLoad) {
                 LoadRuleEditor(plan: set.plan, unit: store.data.settings.unit, suggestedWeight: set.weight) { plan in
@@ -88,16 +89,11 @@ struct LiveSetRow: View {
             }
         }
     }
-    @ViewBuilder func setMenu(_ set: LoggedSet) -> some View {
-        Button("Rest After Set", systemImage: "timer") { open(.rest) }
-        Divider()
-        Button("Delete Set", systemImage: "trash", role: .destructive, action: removeSet)
-    }
     func cell(title: String, value: String?, field: Field, labeled: Bool = false, placeholder: String? = nil) -> some View {
         Button { open(field) } label: {
             VStack(spacing: 3) {
                 if labeled { Text(title).font(.caption2).foregroundStyle(.secondary) }
-                Text(value ?? placeholder ?? "–").font(.figure(17)).foregroundStyle(value == nil || (field == .weight && self.set?.weightIsEdited != true && self.set?.completedAt == nil) ? .secondary : .primary).lineLimit(1).minimumScaleFactor(0.7)
+                Text(value ?? placeholder ?? "–").font(labeled ? .title3.monospacedDigit() : .figure(17)).foregroundStyle(value == nil || (field == .weight && self.set?.weightIsEdited != true && self.set?.completedAt == nil) ? .secondary : .primary).lineLimit(1).minimumScaleFactor(0.7)
             }.frame(maxWidth: .infinity, minHeight: 44).background(self.set?.completedAt == nil ? palette.field : Color.clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         }.buttonStyle(.plain)
         .modifier(RepTargetInteraction(enabled: field == .reps) { holdExpanded(); editingReps = true })
@@ -124,17 +120,22 @@ struct LiveSetRow: View {
             data.activeSession!.exercises[e].sets[s].rpe = previous.rpe
         }
     }
-    enum Field: String { case weight, reps, time, distance, rpe, rest }
+    enum Field: String { case weight, reps, time, distance, rpe, rest, percent }
     func removeSet() { store.editExercise(exerciseID) { $0.sets.removeAll { $0.id == setID } } }
     func holdExpanded() {
         if item?.sets.allSatisfy({ $0.completedAt != nil }) == true { store.perform { $0.setExerciseExpanded(exerciseID, expanded: true) } }
     }
     func open(_ field: Field) {
-        guard let set else { return }
         holdExpanded()
+        edit = numericEdit(for: setID, field: field)
+    }
+    private func numericEdit(for id: UUID, field: Field) -> NumericEdit? {
+        guard let item, let index = item.sets.firstIndex(where: { $0.id == id }) else { return nil }
+        let set = item.sets[index]
         let unit = store.data.settings.unit
         let value: Double?, title: String, step: Double, maximum: Double
         switch field {
+        case .percent: value = set.plan.percent; title = "Percent of working set"; step = 5; maximum = 1000
         case .weight: value = set.weight.map(unit.display); title = "Weight (\(unit.rawValue))"; step = 2.5; maximum = 100000
         case .reps: value = set.reps.map(Double.init); title = "Reps completed"; step = 1; maximum = 10000
         case .time: value = set.seconds.map { $0 / 60 }; title = "Time (minutes)"; step = 1; maximum = 100000
@@ -142,15 +143,40 @@ struct LiveSetRow: View {
         case .rpe: value = set.rpe; title = "RPE"; step = 0.5; maximum = 10
         case .rest: value = set.plan.restSeconds.map(Double.init); title = "Rest (seconds)"; step = 5; maximum = 86400
         }
-        edit = NumericEdit(title: title, context: item.map { "\($0.name), set \(setLabel(set, item: $0))" }, value: value, step: step, maximum: maximum, integer: field == .reps || field == .rest) { newValue in
-            if field == .weight {
-                store.perform { try $0.setLoggedWeight(newValue.map(unit.kilograms), exerciseID: exerciseID, setID: setID) }
-                return
-            }
-            store.editSet(exerciseID, setID) { s in
-                switch field { case .weight: break; case .reps: s.reps = newValue.map(Int.init); case .time: s.seconds = newValue.map { $0 * 60 }; case .distance: s.meters = newValue; case .rpe: s.rpe = newValue; case .rest: s.plan.restSeconds = newValue.map(Int.init) }
+        return NumericEdit(title: title, context: "\(item.name), set \(setBadge(item.sets.map(\.plan), index: index, types: store.data.customSetTypes))", value: value, step: step, maximum: maximum, integer: field == .reps || field == .rest,
+            previous: adjacentID(id, offset: -1, field: field) != nil ? { adjacent(id, offset: -1, field: field) } : nil,
+            next: adjacentID(id, offset: 1, field: field) != nil ? { adjacent(id, offset: 1, field: field) } : nil
+        ) { newValue in
+            store.perform { data in
+                if field == .weight {
+                    try data.setLoggedWeight(newValue.map(unit.kilograms), exerciseID: exerciseID, setID: id)
+                } else if field == .percent {
+                    guard var plan = data.activeSession?.exercises.first(where: { $0.id == exerciseID })?.sets.first(where: { $0.id == id })?.plan else { throw TrainingError.invalid("Set unavailable.") }
+                    plan.percent = newValue ?? 0
+                    try data.replaceSetPlan(exerciseID: exerciseID, setID: id, plan: plan)
+                } else {
+                    guard let e = data.activeSession?.exercises.firstIndex(where: { $0.id == exerciseID }),
+                          let s = data.activeSession?.exercises[e].sets.firstIndex(where: { $0.id == id }) else { throw TrainingError.invalid("Set unavailable.") }
+                    switch field {
+                    case .weight, .percent: break
+                    case .reps: data.activeSession!.exercises[e].sets[s].reps = newValue.map(Int.init)
+                    case .time: data.activeSession!.exercises[e].sets[s].seconds = newValue.map { $0 * 60 }
+                    case .distance: data.activeSession!.exercises[e].sets[s].meters = newValue
+                    case .rpe: data.activeSession!.exercises[e].sets[s].rpe = newValue
+                    case .rest: data.activeSession!.exercises[e].sets[s].plan.restSeconds = newValue.map(Int.init)
+                    }
+                }
             }
         }
+    }
+    private func adjacent(_ id: UUID, offset: Int, field: Field) -> NumericEdit? {
+        guard let next = adjacentID(id, offset: offset, field: field) else { return nil }
+        return numericEdit(for: next, field: field)
+    }
+    private func adjacentID(_ id: UUID, offset: Int, field: Field) -> UUID? {
+        let ids = (item?.sets ?? []).filter { field != .percent || $0.plan.load == .percent }.map(\.id)
+        guard let index = ids.firstIndex(of: id), ids.indices.contains(index + offset) else { return nil }
+        return ids[index + offset]
     }
     func setLabel(_ set: LoggedSet, item: SessionExercise) -> String { setBadge(item.sets.map(\.plan), index: index, types: store.data.customSetTypes) }
 }
@@ -172,17 +198,6 @@ func setBadge(_ plans: [SetPlan], index: Int, types: [CustomSetType]) -> String 
     case .myoMini: return "M\(prefix.reversed().prefix { $0 == .myoMini }.count)"
     case .working: return "\(prefix.filter { $0 == .working }.count)"
     }
-}
-
-struct NumericEdit: Identifiable {
-    let id = UUID()
-    let title: String
-    var context: String? = nil
-    let value: Double?
-    let step: Double
-    let maximum: Double
-    let integer: Bool
-    let onSave: (Double?) -> Void
 }
 
 func loggedSetSummary(_ set: LoggedSet, unit: WeightUnit) -> String {

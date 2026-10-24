@@ -2,11 +2,11 @@ import SwiftUI
 import LiftingCore
 
 @main
-struct TorqueApp: App {
+struct SetformApp: App {
     @StateObject private var store = AppStore()
     @Environment(\.scenePhase) private var phase
     var body: some Scene {
-        WindowGroup("Torque") {
+        WindowGroup("Setform") {
             RootView().environmentObject(store)
                 #if os(macOS)
                 .frame(minWidth: 360, idealWidth: 440, minHeight: 600, idealHeight: 840)

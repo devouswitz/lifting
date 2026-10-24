@@ -89,7 +89,7 @@ struct SetTypesView: View {
                 }
             } header: { Text("Quick-add buttons") } footer: { Text("Shown next to Add Set in templates and workouts.") }
         }
-        .formStyle(.grouped).navigationTitle("Set Types").inlineTitle().modifier(SaveAndClose())
+        .formStyle(.grouped).navigationTitle("Set Types").inlineTitle()
         .sheet(item: $editing) { SetTypeEditor(type: $0).environmentObject(store).sheetSize() }
     }
     private func builtIn(_ badge: String, _ plan: SetPlan, _ name: String, _ detail: String) -> some View {
@@ -120,7 +120,7 @@ struct SetTypeEditor: View {
     private var isNew: Bool { !store.data.customSetTypes.contains { $0.id == type.id } }
     private var preview: Palette { var p = palette; p.setTypes = [type]; return p }
     var body: some View {
-        DraftEditor(valid: type.isValid && !deleted, changed: !deleted && store.data.customSetTypes.first { $0.id == type.id } != type, save: { store.perform { try $0.saveSetType(type) } }) {
+        DraftEditor(valid: type.isValid && !deleted, changed: !deleted && store.data.customSetTypes.first { $0.id == type.id } != type, confirmation: isNew ? "Create" : nil, save: { store.perform { try $0.saveSetType(type) } }) {
             ThemedForm {
                 StoreErrorRow()
                 Section {

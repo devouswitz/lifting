@@ -3,8 +3,8 @@ import LiftingCore
 #if canImport(HealthKit) && os(iOS)
 import HealthKit
 
-/// Reads workouts from Apple Health and, when saving is on, writes Torque's own.
-/// Workouts from an Apple Watch or another app are only read; Torque deletes only workouts it saved.
+/// Reads workouts from Apple Health and, when saving is on, writes Setform's own.
+/// Workouts from an Apple Watch or another app are only read; Setform deletes only workouts it saved.
 @MainActor
 final class HealthBridge {
     static var isAvailable: Bool { HKHealthStore.isHealthDataAvailable() }
@@ -17,10 +17,10 @@ final class HealthBridge {
     func requestAccess(write: Bool) async throws {
         try await store.requestAuthorization(toShare: write ? [HKObjectType.workoutType()] : [], read: [HKObjectType.workoutType(), energy, heartRate])
     }
-    /// Apple Health reports whether Torque may save workouts; read access is never revealed.
+    /// Apple Health reports whether Setform may save workouts; read access is never revealed.
     var canSave: Bool { store.authorizationStatus(for: HKObjectType.workoutType()) == .sharingAuthorized }
 
-    /// Calls `changed` whenever workouts change in Apple Health while Torque is running.
+    /// Calls `changed` whenever workouts change in Apple Health while Setform is running.
     func observe(_ changed: @escaping @Sendable () -> Void) {
         guard observer == nil else { return }
         let query = HKObserverQuery(sampleType: HKObjectType.workoutType(), predicate: nil) { _, completion, error in
@@ -59,7 +59,7 @@ final class HealthBridge {
         return result
     }
 
-    /// Saves a workout for part or all of a session, tagged with the session so Torque can find it again.
+    /// Saves a workout for part or all of a session, tagged with the session so Setform can find it again.
     func save(_ request: HealthSave) async throws -> UUID {
         let configuration = HKWorkoutConfiguration()
         configuration.activityType = Self.activityType(request.activity)
@@ -72,7 +72,7 @@ final class HealthBridge {
         return workout.uuid
     }
 
-    /// Deletes workouts Torque saved. Anything from another source is skipped, even if asked for.
+    /// Deletes workouts Setform saved. Anything from another source is skipped, even if asked for.
     func delete(_ ids: [UUID]) async throws {
         guard !ids.isEmpty else { return }
         let descriptor = HKSampleQueryDescriptor(predicates: [.workout(HKQuery.predicateForObjects(with: Set(ids)))], sortDescriptors: [])
@@ -165,7 +165,7 @@ extension AppStore {
         guard let health else { return }
         if on {
             do { try await health.requestAccess(write: true) } catch { self.error = error.localizedDescription; return }
-            guard health.canSave else { self.error = "Allow Torque to save workouts in the Health app, under Sharing > Apps > Torque."; return }
+            guard health.canSave else { self.error = "Allow Setform to save workouts in the Health app, under Sharing > Apps > Setform."; return }
             perform { d in var value = d.settings.health ?? HealthSettings(read: true); value.write = true; value.writeSince = Date(); d.settings.health = value }
             await refreshHealth()
         } else {
@@ -173,7 +173,7 @@ extension AppStore {
         }
     }
 
-    /// Matches recent sessions with Apple Health, removes Torque copies that duplicate another recording,
+    /// Matches recent sessions with Apple Health, removes Setform copies that duplicate another recording,
     /// and saves copies that are due. Runs again if Health changes while it works.
     func refreshHealth() async {
         guard let health, healthSettings.read, !storageBlocked else { return }
@@ -203,7 +203,7 @@ extension AppStore {
         } while healthRefreshPending
     }
 
-    /// Checks right after a workout and again once Torque may save its own copy.
+    /// Checks right after a workout and again once Setform may save its own copy.
     func scheduleHealthCheck() {
         guard health != nil, healthSettings.read else { return }
         Task { [weak self] in
@@ -213,7 +213,7 @@ extension AppStore {
         }
     }
 
-    /// Removes the workouts Torque saved for a deleted session.
+    /// Removes the workouts Setform saved for a deleted session.
     func deleteHealthCopies(_ workoutIDs: [UUID]) {
         guard let health, !workoutIDs.isEmpty else { return }
         Task { try? await health.delete(workoutIDs) }

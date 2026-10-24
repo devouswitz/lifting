@@ -12,7 +12,19 @@ struct LivePlanEditor: View {
         DraftEditor(valid: plan.isValid, changed: store.data.activeSession?.exercises.first { $0.id == exerciseID }?.sets.first { $0.id == setID }?.plan != plan, save: {
             store.perform { try $0.replaceSetPlan(exerciseID: exerciseID, setID: setID, plan: plan) }
         }) {
-            PlanEditor(plan: $plan, unit: store.data.settings.unit, suggestedWeight: store.data.activeSession?.exercises.first { $0.id == exerciseID }?.sets.first { $0.id == setID }?.weight, showsSave: false)
+            PlanEditor(plan: $plan, unit: store.data.settings.unit, suggestedWeight: loggedSet?.wrappedValue.weight, ownsDraft: false, loggedSet: loggedSet)
         }
+    }
+    private var loggedSet: Binding<LoggedSet>? {
+        guard let current = store.data.activeSession?.exercises.first(where: { $0.id == exerciseID })?.sets.first(where: { $0.id == setID }) else { return nil }
+        return Binding(get: {
+            store.data.activeSession?.exercises.first(where: { $0.id == exerciseID })?.sets.first(where: { $0.id == setID }) ?? current
+        }, set: { edited in
+            store.editExercise(exerciseID) { exercise in
+                guard let index = exercise.sets.firstIndex(where: { $0.id == setID }) else { return }
+                exercise.sets[index].seconds = edited.seconds
+                exercise.sets[index].meters = edited.meters
+            }
+        })
     }
 }

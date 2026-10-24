@@ -21,6 +21,8 @@ struct RoutineEditor: View {
         ScrollView {
             if let routine {
                 LazyVStack(alignment: .leading, spacing: 12) {
+                    TextField("Day note", text: Binding(get: { self.routine?.notes ?? "" }, set: { value in update { $0.notes = value } }), axis: .vertical)
+                        .lineLimit(1...6).padding(16).card(padding: 0)
                     ForEach(routine.slots) { slot in
                         if let initial = store.data.variant(slot.variantID) {
                             TemplateExerciseCard(
@@ -46,13 +48,11 @@ struct RoutineEditor: View {
                         }
                     }
                     Button { picker = true } label: { Label("Add Exercises", systemImage: "plus") }.buttonStyle(FieldButtonStyle()).accessibilityIdentifier("routine.addExercises")
-                    TextField("Day note", text: Binding(get: { self.routine?.notes ?? "" }, set: { value in update { $0.notes = value } }), axis: .vertical)
-                        .lineLimit(1...6).padding(16).card(padding: 0)
-                    if showsStart { StartDayButton(day: routine) }
+                    if showsStart && !routine.slots.isEmpty { StartDayButton(day: routine) }
                 }.padding(16)
             }
         }
-        .background(palette.background).navigationTitle(routine?.name ?? "Day").inlineTitle().modifier(SaveAndClose())
+        .background(palette.background).navigationTitle(routine?.name ?? "Day").inlineTitle()
         .toolbar {
             if let routine {
                 ToolbarItem(placement: .primaryAction) {
@@ -101,12 +101,14 @@ struct ExercisePicker: View {
     var substitution = false
     var onSelect: (Exercise) -> Void = { _ in }
     var onSubstitute: ((Exercise, Bool) -> Void)? = nil
-    var onAdd: (([Exercise]) -> Void)? = nil
+    var onAdd: (([Exercise]) -> Bool)? = nil
     @State private var selected: [UUID] = []
     @State private var search = ""
     @State private var mode = "All"
     @State private var future = false
     @State private var creating = false
+    @State private var multiple = false
+    @State private var committed = false
     var matches: [Exercise] {
         store.data.exercises.filter { (search.isEmpty || "\($0.name) \($0.muscle) \($0.equipment)".localizedCaseInsensitiveContains(search)) && (mode == "All" || $0.mode.title == mode) }.sorted {
             if similarMuscle != nil, ($0.muscle == similarMuscle) != ($1.muscle == similarMuscle) { return $0.muscle == similarMuscle }
@@ -137,7 +139,7 @@ struct ExercisePicker: View {
                             Image(systemName: exercise.mode.symbol).frame(width: 28)
                             VStack(alignment: .leading, spacing: 4) { Text(exercise.name).foregroundStyle(.primary); Text([exercise.muscle, exercise.equipment].filter { !$0.isEmpty }.joined(separator: " · ")).font(.caption).foregroundStyle(.secondary) }
                             Spacer()
-                            if onAdd != nil {
+                            if onAdd != nil && multiple {
                                 Image(systemName: selected.contains(exercise.id) ? "checkmark.circle.fill" : "circle").foregroundStyle(selected.contains(exercise.id) ? Color.accentColor : .secondary)
                             }
                             if exercise.muscle == similarMuscle { Image(systemName: "arrow.left.arrow.right").foregroundStyle(.secondary) }
@@ -152,9 +154,14 @@ struct ExercisePicker: View {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 if let onAdd {
                     ToolbarItem(placement: .confirmationAction) {
-                        Button("Add (\(selected.count))") {
-                            onAdd(selected.compactMap { store.data.exercise($0) }); dismiss()
-                        }.disabled(selected.isEmpty).accessibilityIdentifier("exercise.addSelected")
+                        if multiple {
+                            Button("Add (\(selected.count))") {
+                                guard !committed, onAdd(selected.compactMap { store.data.exercise($0) }) else { return }
+                                committed = true; dismiss()
+                            }.disabled(selected.isEmpty || committed).accessibilityIdentifier("exercise.addSelected")
+                        } else {
+                            Button("Select Multiple") { multiple = true }.accessibilityIdentifier("exercise.selectMultiple")
+                        }
                     }
                 }
             }
@@ -171,10 +178,14 @@ struct ExercisePicker: View {
 
 private extension ExercisePicker {
     func choose(_ exercise: Exercise) {
-        if onAdd != nil {
+        guard !committed else { return }
+        if let onAdd, !multiple {
+            if onAdd([exercise]) { committed = true; dismiss() }
+        } else if onAdd != nil {
             if let index = selected.firstIndex(of: exercise.id) { selected.remove(at: index) }
             else { selected.append(exercise.id) }
         } else {
+            committed = true
             if substitution { onSubstitute?(exercise, future) } else { onSelect(exercise) }
             dismiss()
         }
@@ -198,7 +209,7 @@ struct ExerciseEditor: View {
         return !name.isEmpty && name.count <= 200
     }
     var body: some View {
-        DraftEditor(valid: valid, changed: exercise != original, save: {
+        DraftEditor(valid: valid, changed: exercise != original, confirmation: isNew ? "Create" : nil, save: {
             var edited = exercise
             edited.name = edited.name.trimmingCharacters(in: .whitespacesAndNewlines)
             return onSave(edited)

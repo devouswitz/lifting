@@ -28,7 +28,7 @@ struct LinkedExerciseEditor: View {
         return (store.data.activeSession?.exercises ?? []).map { Member(id: $0.id, name: $0.name, group: $0.group ?? "", rest: $0.groupRestSeconds, transition: $0.transitionSeconds) }
     }
     var body: some View {
-        DraftEditor(valid: selection.count >= 2 && (0...86400).contains(rest) && (0...86400).contains(transition), changed: loaded && !unlinked && (selection != initialSelection || rest != initialRest || transition != initialTransition || future), saveID: "link.save", save: {
+        DraftEditor(valid: selection.count >= 2 && (0...86400).contains(rest) && (0...86400).contains(transition), changed: loaded && !unlinked && (selection != initialSelection || rest != initialRest || transition != initialTransition || future), saveID: "link.save", confirmation: originalGroup == nil ? "Link" : nil, save: {
             store.perform { data in
                 if let routineID { try data.linkRoutineExercises(routineID: routineID, slots: selection, rest: rest, transition: transition) }
                 else { try data.linkSessionExercises(selection, rest: rest, transition: transition, saveFuture: future) }

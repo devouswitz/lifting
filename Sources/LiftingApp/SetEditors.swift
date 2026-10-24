@@ -1,116 +1,70 @@
 import SwiftUI
 import LiftingCore
 
-struct VariantEditor: View {
-    @EnvironmentObject var store: AppStore
-    @Environment(\.palette) var palette
-    @Environment(\.dismiss) var dismiss
+/// Only exercise-plan configuration lives here; sets are edited in the primary card.
+struct PlanSettingsEditor: View {
+    @EnvironmentObject private var store: AppStore
     @State var variant: Variant
-    @State private var technique: TechniqueKind?
-    @State private var savingWarmups = false
-    var unit: WeightUnit { store.data.settings.unit }
-    var exercise: Exercise? { store.data.exercise(variant.exerciseID) }
+    private var unit: WeightUnit { store.data.settings.unit }
     private var valid: Bool {
         !variant.label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && variant.label.count <= 200
-            && !variant.sets.isEmpty && variant.sets.allSatisfy(\.isValid)
             && variant.rounding.isFinite && variant.rounding >= 0
             && variant.progression.increment.isFinite && variant.progression.increment >= 0
             && (0...100).contains(variant.progression.deloadPercent)
     }
     var body: some View {
-        DraftEditor(valid: valid, changed: store.data.variant(variant.id) != variant, save: { store.saveVariant(variant) }) {
-            let weights = variant.resolvedWeights
+        DraftEditor(valid: valid, changed: store.data.variant(variant.id) != variant, save: {
+            guard var current = store.data.variant(variant.id) else { return false }
+            current.rounding = variant.rounding; current.progression = variant.progression; current.label = variant.label
+            return store.saveVariant(current)
+        }) {
             ThemedForm {
-                Section("Load and rest") {
-                    if exercise?.mode != .cardio {
-                        LabeledContent("Working sets", value: weightSummary(variant.resolvedWeights.enumerated().compactMap { variant.sets[$0.offset].kind == .warmup ? nil : $0.element }, unit: unit))
-                        NumberRow("Round % weights down to (\(unit.rawValue))", value: $variant.rounding, factor: unit.kilograms(1))
-                    }
-                    Stepper("Rest between sets: \(clockText(Double(variant.restSeconds)))", value: $variant.restSeconds, in: 0...3600, step: 15)
-                }
-                Section("Sets") {
-                    ForEach(Array($variant.sets.enumerated()), id: \.element.id) { index, $plan in
-                        NavigationLink { PlanEditor(plan: $plan, unit: unit, suggestedWeight: weights[index]) } label: {
-                            HStack(spacing: 12) {
-                                SetBadge(text: setBadge(variant.sets, index: index, types: store.data.customSetTypes), plan: plan).frame(minWidth: 26)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(prescribedSetSummary(plan, weight: weights[index], unit: unit)).font(.subheadline).monospacedDigit()
-                                    if plan.customTypeID != nil || ![.warmup, .working].contains(plan.kind) { Text(palette.title(plan)).font(.caption).foregroundStyle(palette.color(for: plan)) }
-                                }
-                            }.padding(.vertical, 2)
-                        }
-                        .contextMenu {
-                            Button("Duplicate") { var copy = plan; copy.id = UUID(); if let i = variant.sets.firstIndex(where: { $0.id == plan.id }) { variant.sets.insert(copy, at: i + 1) } }
-                            Button("Delete", role: .destructive) { variant.sets.removeAll { $0.id == plan.id } }
-                        }
-                    }
-                    .onDelete { variant.sets.remove(atOffsets: $0) }
-                    .onMove { variant.sets.move(fromOffsets: $0, toOffset: $1) }
-                    Menu {
-                        Button(exercise?.mode == .cardio ? "Interval" : "Working Set") { addWorkingSet() }
-                        if exercise?.mode != .cardio {
-                            Button("Warm-up Set") { addWarmup() }
-                            Button("Drop Sets") { technique = .drop }
-                            Button("MYO Reps") { technique = .myo }
-                            Button("Failure Set") { addTyped(kind: .failure) }
-                            if !store.data.customSetTypes.isEmpty {
-                                Divider()
-                                ForEach(store.data.customSetTypes) { type in Button(type.name) { addTyped(kind: type.countsAs, customTypeID: type.id) } }
-                            }
-                        }
-                    } label: { Label("Add Sets", systemImage: "plus") }
-                    if exercise?.mode != .cardio { Menu {
-                        ForEach(store.data.warmupPresets) { preset in Button(preset.name) { variant.sets = TrainingData.applyingWarmups(preset.sets, to: variant.sets, replacing: true) } }
-                        Button("50% × 8, 70% × 5, 85% × 2") { variant.sets.removeAll { $0.kind == .warmup }; variant.sets.insert(contentsOf: [(50.0, 8), (70.0, 5), (85.0, 2)].map { SetPlan(kind: .warmup, load: .percent, percent: $0.0, reps: $0.1, repCeiling: nil) }, at: 0) }
-                        Button("Save current warm-ups as preset") { savingWarmups = true }.disabled(!variant.sets.contains { $0.kind == .warmup })
-                        Button("Remove warm-ups", role: .destructive) { variant.sets.removeAll { $0.kind == .warmup } }.disabled(!variant.sets.contains { $0.kind == .warmup })
-                    } label: { Label("Warm-up Presets", systemImage: "flame") } }
-                }
                 Section("Progression") {
                     Picker("Rule", selection: $variant.progression.mode) { ForEach(ProgressionMode.allCases) { Text($0.title).tag($0) } }
                     if variant.progression.mode != .manual {
                         NumberRow("Increase (\(unit.rawValue))", value: $variant.progression.increment, factor: unit.kilograms(1))
                         Stepper(variant.progression.deloadAfter == 0 ? "Never deload" : "Deload after \(counted(variant.progression.deloadAfter, "miss"))", value: $variant.progression.deloadAfter, in: 0...10)
                         if variant.progression.deloadAfter > 0 { NumberRow("Deload by (%)", value: $variant.progression.deloadPercent) }
-                        Text(variant.progression.mode == .double ? "Adds weight next time when every working set reaches the top of its rep range." : "Adds weight next time when every working set reaches its target reps.").font(.footnote).foregroundStyle(.secondary)
                     }
                 }
                 Section {
+                    NumberRow("Round % weights down to (\(unit.rawValue))", value: $variant.rounding, factor: unit.kilograms(1))
                     LabeledContent("Track") { TextField("Track name", text: $variant.label).multilineTextAlignment(.trailing) }
-                } footer: { Text("Progress keeps each track separate.") }
-                Section("Note shown every session") { TextField("Optional", text: $variant.notes, axis: .vertical).lineLimit(3...8) }
-            }.formStyle(.grouped).navigationTitle(exercise?.name ?? "Prescription").inlineTitle()
-            .sheet(item: $technique) { kind in TechniqueEditor(kind: kind, workingWeight: variant.referenceWeight, rounding: variant.rounding) { plans, replace, _ in
-                if replace { variant.sets.removeAll { $0.kind != .warmup } }
-                if kind == .drop, let last = variant.sets.indices.last { variant.sets[last].restSeconds = 0 }
-                variant.sets.append(contentsOf: plans)
-            }.sheetSize() }
-            .sheet(isPresented: $savingWarmups) { WarmupPresetEditor(preset: WarmupPreset(name: variant.label + " warm-up", sets: variant.sets.filter { $0.kind == .warmup })).environmentObject(store).sheetSize() }
+                }
+            }.navigationTitle("Plan Settings").inlineTitle()
         }
     }
 }
 
-extension VariantEditor {
-    /// Copies the last working set so a new set keeps this exercise's targets.
-    func addWorkingSet() {
-        if var copy = variant.sets.last(where: { $0.kind != .warmup }) {
-            copy.id = UUID(); copy.weightOverride = nil; if [.drop, .myoActivation, .myoMini].contains(copy.kind) { copy.kind = .working; copy.load = exercise?.mode == .strength ? .working : .none; copy.restSeconds = nil }
-            variant.sets.append(copy)
-        } else if let exercise {
-            var plan = Variant.standard(for: exercise, label: "").sets[0]; plan.id = UUID(); variant.sets.append(plan)
+/// The same saved-plan card remains available during a workout, with an explicit scope.
+struct SavedExerciseEditor: View {
+    @EnvironmentObject private var store: AppStore
+    @Environment(\.dismiss) private var dismiss
+    let variantID: UUID
+    @State private var expanded = true
+    @State private var dragging: UUID?
+    @State private var linking = false
+    private var day: Routine? { store.data.routines.first { $0.slots.contains { $0.variantID == variantID } } }
+    private var slot: RoutineSlot? { day?.slots.first { $0.variantID == variantID } }
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                if let variant = store.data.variant(variantID) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text(day?.name ?? variant.label).font(.subheadline).foregroundStyle(.secondary)
+                        TemplateExerciseCard(
+                            variant: Binding(get: { store.data.variant(variantID) ?? variant }, set: { store.saveVariant($0) }),
+                            expanded: expanded, toggle: { expanded.toggle() },
+                            link: day == nil ? nil : { linking = true }, move: { _ in },
+                            canMoveUp: false, canMoveDown: false, slotID: slot?.id ?? variantID,
+                            dragging: $dragging, remove: nil
+                        )
+                    }.padding(16)
+                }
+            }.navigationTitle("Saved Plan").inlineTitle()
+                .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Close", systemImage: "xmark") { dismiss() }.labelStyle(.iconOnly) } }
+                .sheet(isPresented: $linking) { LinkedExerciseEditor(routineID: day?.id, exerciseID: slot?.id).sheetSize() }
         }
-    }
-    /// Adds a set of a kind or custom type, copying the last working set's targets.
-    func addTyped(kind: SetKind, customTypeID: UUID? = nil) {
-        if kind == .warmup { addWarmup(); if let i = variant.sets.lastIndex(where: { $0.kind == .warmup }) { variant.sets[i].customTypeID = customTypeID }; return }
-        addWorkingSet()
-        guard let last = variant.sets.indices.last else { return }
-        variant.sets[last].kind = kind; variant.sets[last].customTypeID = customTypeID
-    }
-    /// Adds a warm-up after the existing warm-ups, matching the live workout's Add Warm-up Set.
-    func addWarmup() {
-        let position = (variant.sets.lastIndex { $0.kind == .warmup }).map { $0 + 1 } ?? 0
-        variant.sets.insert(SetPlan(kind: .warmup, load: .percent, reps: 5, repCeiling: nil), at: position)
     }
 }
 
@@ -121,7 +75,8 @@ struct PlanEditor: View {
     let unit: WeightUnit
     var suggestedWeight: Double? = nil
     var warmupOnly = false
-    var showsSave = true
+    var ownsDraft = true
+    var loggedSet: Binding<LoggedSet>? = nil
     @State private var original: SetPlan?
     var body: some View {
         ThemedForm {
@@ -139,10 +94,15 @@ struct PlanEditor: View {
             Section("Rest after this set") {
                 NumberRow("Rest in seconds", value: Binding(get: { plan.restSeconds.map(Double.init) }, set: { plan.restSeconds = $0.map { Int($0) } }), placeholder: "Exercise default", integer: true).accessibilityIdentifier("plan.rest")
             }
+            if let loggedSet {
+                Section("Logged Values") {
+                    NumberRow("Time (minutes)", value: loggedSet.seconds, factor: 60)
+                    NumberRow("Distance (meters)", value: loggedSet.meters)
+                }
+            }
         }.formStyle(.grouped).navigationTitle(palette.title(plan)).inlineTitle()
         .toolbar {
-            if showsSave {
-                ToolbarItem(placement: .confirmationAction) { Button("Save") { dismiss() }.disabled(!plan.isValid) }
+            if ownsDraft {
                 if !plan.isValid {
                     ToolbarItem(placement: .cancellationAction) { Button("Cancel") { if let original { plan = original }; dismiss() } }
                 }
@@ -277,7 +237,7 @@ struct TechniqueEditor: View {
     let workingWeight: Double
     let rounding: Double
     var live = false
-    var onAdd: ([SetPlan], Bool, Bool) -> Void
+    var onAdd: ([SetPlan], Bool, Bool) -> Bool
     @State private var reduction = 20.0
     @State private var dropCount = 1
     @State private var dropTarget = SetPlan(kind: .drop, reps: 10, repCeiling: nil)
@@ -296,8 +256,8 @@ struct TechniqueEditor: View {
         return (try? data.validated()) != nil && plans.allSatisfy { $0.reps != nil || $0.rpe != nil || $0.seconds != nil || $0.meters != nil }
     }
     var body: some View {
-        DraftEditor(valid: validTargets, changed: initialTargets.map { $0 != [dropTarget, activationTarget, miniTarget] } == true || reduction != 20 || dropCount != 1 || miniCount != 4 || rest != 20 || !replace || saveFuture, saveID: "technique.add", save: {
-            onAdd(plans, kind == .myo && replace, saveFuture); return true
+        DraftEditor(valid: validTargets, changed: initialTargets.map { $0 != [dropTarget, activationTarget, miniTarget] } == true || reduction != 20 || dropCount != 1 || miniCount != 4 || rest != 20 || !replace || saveFuture, saveID: "technique.add", confirmation: "Apply", save: {
+            onAdd(plans, kind == .myo && replace, saveFuture)
         }) {
             ThemedForm {
                 if kind == .drop {

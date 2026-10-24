@@ -72,7 +72,6 @@ struct WorkoutView: View {
                         Section("Name") { SavedNameField(name: store.data.activeSession?.name ?? "") { value in store.editActive { $0.name = value } } }
                         Section("Note") { TextField("Workout note", text: Binding(get: { store.data.activeSession?.notes ?? "" }, set: { value in store.editActive { $0.notes = value } }), axis: .vertical).lineLimit(5...12) }
                     }.formStyle(.grouped).navigationTitle("Workout").inlineTitle()
-                    .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Save") { sessionNotes = false } } }
                 }.sheetSize()
             }
         }.tint(palette.action)
@@ -252,7 +251,7 @@ struct WorkoutExerciseCard: View {
                                 .font(.subheadline.weight(.medium)).foregroundStyle(.secondary)
                                 .accessibilityLabel("Working sets, " + weightSummary(item.sets.filter { $0.plan.kind != .warmup }.compactMap(\.weight), unit: store.data.settings.unit))
                         }
-                        Button { restEdit = NumericEdit(title: "Rest (seconds)", context: item.name, value: Double(item.restSeconds), step: 15, maximum: 86400, integer: true) { value in store.editExercise(exerciseID) { $0.restSeconds = Int(value ?? 0) } } } label: { token("Rest", clockText(Double(item.restSeconds)), palette.rest) }
+                        Button { restEdit = NumericEdit(title: "Rest (seconds)", context: item.name, value: Double(item.restSeconds), step: 15, maximum: 86400, integer: true) { value in store.perform { data in guard let index = data.activeSession?.exercises.firstIndex(where: { $0.id == exerciseID }) else { throw TrainingError.invalid("Exercise unavailable.") }; data.activeSession!.exercises[index].restSeconds = Int(value ?? 0) } } } label: { token("Rest", clockText(Double(item.restSeconds)), palette.rest) }
                             .accessibilityLabel("Rest between sets for \(item.name)")
                         if !typeSize.isAccessibilitySize { Spacer(minLength: 0) }
                     }.buttonStyle(.plain)
@@ -288,7 +287,7 @@ struct WorkoutExerciseCard: View {
                     applyTechnique(plans, kind: kind, replace: replace, future: future)
                 }.environmentObject(store).sheetSize()
             }
-            .sheet(item: $editVariant) { VariantEditor(variant: $0).environmentObject(store).sheetSize() }
+            .sheet(item: $editVariant) { SavedExerciseEditor(variantID: $0.id).environmentObject(store).sheetSize() }
             .sheet(isPresented: $plates) { PlateView(initialWeight: store.data.settings.unit.display(item.sets.last?.weight ?? 0)).environmentObject(store).sheetSize() }
             .sheet(item: $restEdit) { NumberEditor(edit: $0) }
             .sheet(isPresented: $linking) { LinkedExerciseEditor(exerciseID: exerciseID).environmentObject(store).sheetSize() }
@@ -380,9 +379,10 @@ struct WorkoutExerciseCard: View {
     func appendSet(_ item: SessionExercise, warmup: Bool = false) {
         store.perform { try $0.addSessionSet(to: exerciseID, warmup: warmup) }
     }
-    func applyTechnique(_ plans: [SetPlan], kind: TechniqueKind, replace: Bool, future: Bool) {
-        store.perform { try $0.applyTechnique(to: exerciseID, plans: plans, isDrop: kind == .drop, replaceRemaining: replace, saveFuture: future) }
-        if kind == .drop { store.cancelRestAlert() }
+    func applyTechnique(_ plans: [SetPlan], kind: TechniqueKind, replace: Bool, future: Bool) -> Bool {
+        let success = store.perform { try $0.applyTechnique(to: exerciseID, plans: plans, isDrop: kind == .drop, replaceRemaining: replace, saveFuture: future) }
+        if success && kind == .drop { store.cancelRestAlert() }
+        return success
     }
 }
 

@@ -19,7 +19,7 @@ struct SettingsView: View {
     @State private var contentType = UTType.json
     @State private var importPreview: TrainingData?
     @State private var confirmingImport = false
-    @State private var exportName = "Torque-backup"
+    @State private var exportName = "Setform-backup"
     @State private var notificationStatus = ""
     @State private var choosingSyncFolder = false
     @State private var choosingMacFolder = false
@@ -70,9 +70,9 @@ struct SettingsView: View {
             folderSyncSection
             Section {
                 Button {
-                    do { document = BackupDocument(bytes: try LocalRepository.encode(store.data)); contentType = .json; exportName = "Torque-\(Date().formatted(.iso8601.year().month().day().dateSeparator(.dash)))"; exporting = true } catch { store.error = error.localizedDescription }
+                    do { document = BackupDocument(bytes: try LocalRepository.encode(store.data)); contentType = .json; exportName = "Setform-\(Date().formatted(.iso8601.year().month().day().dateSeparator(.dash)))"; exporting = true } catch { store.error = error.localizedDescription }
                 } label: { TileLabel(title: "Export Backup", symbol: "square.and.arrow.up.fill", color: palette.completed) }.accessibilityIdentifier("settings.export")
-                Button { document = BackupDocument(bytes: LocalRepository.csv(store.data)); contentType = .commaSeparatedText; exportName = "Torque-sets"; exporting = true } label: { TileLabel(title: "Export Logged Sets as CSV", symbol: "tablecells.fill", color: palette.completed) }
+                Button { document = BackupDocument(bytes: LocalRepository.csv(store.data)); contentType = .commaSeparatedText; exportName = "Setform-sets"; exporting = true } label: { TileLabel(title: "Export Logged Sets as CSV", symbol: "tablecells.fill", color: palette.completed) }
                 Button { importingCSV = true } label: { TileLabel(title: "Import Workout Data", symbol: "square.and.arrow.down.fill", color: palette.action) }.accessibilityIdentifier("settings.importCSV")
                 Button { importing = true } label: { TileLabel(title: "Restore Backup", symbol: "clock.arrow.circlepath", color: palette.warmup) }.accessibilityIdentifier("settings.import")
                 if store.storageBlocked { Text("Your local files were preserved. Restore a valid backup to recover.").foregroundStyle(.red) }
@@ -81,7 +81,7 @@ struct SettingsView: View {
             }
             Section {
                 Link(destination: URL(string: "https://ko-fi.com/devouswitz")!) {
-                    HStack { TileLabel(title: "Support Torque on Ko-fi", symbol: "heart.fill", color: .pink); Spacer(); Image(systemName: "arrow.up.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary) }
+                    HStack { TileLabel(title: "Support Setform on Ko-fi", symbol: "heart.fill", color: .pink); Spacer(); Image(systemName: "arrow.up.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary) }
                 }.accessibilityIdentifier("settings.kofi")
                 LabeledContent("Version", value: "1.0")
             }
@@ -137,7 +137,7 @@ struct SettingsView: View {
             }.disabled(!store.healthSettings.read).accessibilityIdentifier("settings.healthWrite")
             if let status = store.healthStatus { Label(status, systemImage: "exclamationmark.triangle").font(.footnote).foregroundStyle(.secondary) }
         } header: { Text("Apple Health") } footer: {
-            Text("Calories and heart rate come from the Apple Watch or other workout recorded at the same time. Torque never changes those workouts. With saving on, Torque adds a workout only when nothing else recorded that time, and removes it if a watch workout appears later.")
+            Text("Calories and heart rate come from the Apple Watch or other workout recorded at the same time. Setform never changes those workouts. With saving on, Setform adds a workout only when nothing else recorded that time, and removes it if a watch workout appears later.")
         }
     }
     #endif
@@ -192,7 +192,7 @@ struct PlateInventoryView: View {
                     #endif
                     Button("Add") { if let value = Double(newSize.replacingOccurrences(of: ",", with: ".")), value.isFinite, value > 0, !sizes.contains(value) { save(sizes + [value]); newSize = "" } }.disabled(Double(newSize.replacingOccurrences(of: ",", with: ".")) == nil) }
             }
-        }.formStyle(.grouped).navigationTitle("Plate sizes").inlineTitle().modifier(SaveAndClose())
+        }.formStyle(.grouped).navigationTitle("Plate sizes").inlineTitle()
     }
 }
 

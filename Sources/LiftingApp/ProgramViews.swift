@@ -63,7 +63,7 @@ struct ProgramsView: View {
         #endif
         .toolbar {
             #if os(iOS)
-            ToolbarItem(placement: .primaryAction) { if store.data.programs.count > 1 || isEditing { Button(isEditing ? "Save" : "Reorder") { withAnimation { editMode = isEditing ? .inactive : .active } } } }
+            ToolbarItem(placement: .primaryAction) { if store.data.programs.count > 1 || isEditing { Button(isEditing ? "Done" : "Reorder") { withAnimation { editMode = isEditing ? .inactive : .active } } } }
             #endif
         }
         .navigationDestination(item: $detail) { ProgramEditor(programID: $0) }
@@ -129,7 +129,7 @@ struct NewProgramView: View {
     @State private var selected: Set<UUID> = []
     var clean: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
     var body: some View {
-        DraftEditor(valid: !clean.isEmpty && clean.count <= 200, changed: !name.isEmpty || !selected.isEmpty, saveID: "program.create", save: {
+        DraftEditor(valid: !clean.isEmpty && clean.count <= 200, changed: !name.isEmpty || !selected.isEmpty, saveID: "program.create", confirmation: "Create", save: {
             store.perform { data in
                 let id = try data.createProgram(name: clean, templateIDs: data.dayTemplates.filter { selected.contains($0.id) }.map(\.id))
                 try data.loadProgram(id)
@@ -215,7 +215,7 @@ struct ProgramEditor: View {
                 }
                 Section { Button("Delete Program", role: .destructive) { deleting = true } }
             }
-        }.formStyle(.grouped).titleInContent(program?.name ?? "Program").modifier(SaveAndClose())
+        }.formStyle(.grouped).titleInContent(program?.name ?? "Program")
         #if os(iOS)
         .environment(\.editMode, $editMode)
         .toolbar {

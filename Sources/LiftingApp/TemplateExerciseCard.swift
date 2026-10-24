@@ -9,13 +9,13 @@ struct TemplateExerciseCard: View {
     let expanded: Bool
     var groupTitle: String?
     let toggle: () -> Void
-    let link: () -> Void
+    var link: (() -> Void)? = nil
     let move: (Int) -> Void
     let canMoveUp: Bool
     let canMoveDown: Bool
     let slotID: UUID
     @Binding var dragging: UUID?
-    let remove: () -> Void
+    var remove: (() -> Void)? = nil
     @State private var numberEdit: NumericEdit?
     @State private var repEdit: SetPlan?
     @State private var repValues: SetPlan?
@@ -23,6 +23,10 @@ struct TemplateExerciseCard: View {
     @State private var planEdit: SetPlan?
     @State private var settings = false
     @State private var technique: TechniqueKind?
+    @State private var savingWarmups = false
+    @State private var warmups = false
+    @State private var reordering = false
+    @State private var draggingSet: UUID?
     private var unit: WeightUnit { store.data.settings.unit }
     private var exercise: Exercise? { store.data.exercise(variant.exerciseID) }
 
@@ -37,22 +41,25 @@ struct TemplateExerciseCard: View {
                         if !expanded { Text(planSummary(variant, unit: unit)).font(.subheadline).foregroundStyle(.secondary) }
                     }.frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).contentShape(Rectangle())
                 }.buttonStyle(.plain)
-                .modifier(ExerciseDragHandle(id: slotID, enabled: true, dragging: $dragging))
+                .modifier(ExerciseDragHandle(id: slotID, enabled: canMoveUp || canMoveDown, dragging: $dragging))
                 .modifier(ReorderActions(canMoveUp: canMoveUp, canMoveDown: canMoveDown, move: move))
                 .accessibilityLabel("\(expanded ? "Collapse" : "Expand") \(exercise?.name ?? "exercise")")
                 Menu {
-                    Button("Exercise Settings", systemImage: "slider.horizontal.3") { settings = true }
-                    Button("Superset / Circuit", systemImage: "link", action: link)
+                    Button("Plan Settings", systemImage: "slider.horizontal.3") { settings = true }
+                    if let link { Button("Superset / Circuit", systemImage: "link", action: link) }
+                    Button(reordering ? "Finish Reordering" : "Reorder Sets", systemImage: "arrow.up.arrow.down") { reordering.toggle() }
                     if exercise?.mode != .cardio {
-                    Menu("Warm-ups", systemImage: "flame") {
-                        Button("Add Warm-up") { addWarmup() }
-                        ForEach(store.data.warmupPresets) { preset in
-                            Button(preset.name) { variant.sets = TrainingData.applyingWarmups(preset.sets, to: variant.sets, replacing: true) }
+                        Button("Add Warm-up", systemImage: "plus") { addWarmup() }
+                        Button("Apply Warm-up Preset", systemImage: "flame") { warmups = true }
+                        if variant.sets.contains(where: { $0.kind == .warmup }) {
+                            Button("Save Warm-ups as Preset", systemImage: "square.and.arrow.down") { savingWarmups = true }
+                            Button("Remove Warm-ups", systemImage: "minus.circle") { variant.sets.removeAll { $0.kind == .warmup } }
                         }
                     }
+                    if let remove {
+                        Divider()
+                        Button("Remove Exercise", systemImage: "trash", role: .destructive, action: remove)
                     }
-                    Divider()
-                    Button("Remove Exercise", systemImage: "trash", role: .destructive, action: remove)
                 } label: { Image(systemName: "ellipsis").font(.system(size: 18)).frame(width: 32, height: 44) }.compactMenu()
                     .accessibilityLabel("Options for \(exercise?.name ?? "exercise")")
             }
@@ -63,7 +70,7 @@ struct TemplateExerciseCard: View {
                         Text(weightSummary(zip(variant.sets, weights).compactMap { $0.kind == .warmup ? nil : $1 }, unit: unit)).foregroundStyle(.secondary)
                     }
                     Button {
-                        numberEdit = NumericEdit(title: "Rest (seconds)", value: Double(variant.restSeconds), step: 15, maximum: 86400, integer: true) { variant.restSeconds = Int($0 ?? 0) }
+                        numberEdit = NumericEdit(title: "Rest (seconds)", value: Double(variant.restSeconds), step: 15, maximum: 86400, integer: true) { value in var edited = variant; edited.restSeconds = Int(value ?? 0); return store.saveVariant(edited) }
                     } label: { Text("Rest ").foregroundStyle(.secondary) + Text(clockText(Double(variant.restSeconds))).foregroundStyle(palette.rest) }
                 }.font(.subheadline.weight(.medium)).buttonStyle(.plain).frame(minHeight: 36)
                 TextField("Add a note", text: $variant.notes, axis: .vertical).font(.subheadline).lineLimit(1...5)
@@ -73,13 +80,24 @@ struct TemplateExerciseCard: View {
                     Text("Reps").frame(maxWidth: .infinity)
                     Text("RPE").frame(width: 50)
                 }.font(.caption).foregroundStyle(.secondary).accessibilityHidden(true) }
+                if reordering { Button("Finish Reordering") { reordering = false }.font(.subheadline) }
                 ForEach(Array(variant.sets.enumerated()), id: \.element.id) { index, plan in
                     if plan.kind == .warmup && (index == 0 || variant.sets[index - 1].kind != .warmup) {
                         Text("Warm-up").font(.footnote.weight(.semibold)).foregroundStyle(palette.warmup)
                     } else if index > 0 && plan.kind != .warmup && variant.sets[index - 1].kind == .warmup {
                         Text("Working sets").font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
                     }
-                    SwipeToDelete(action: { variant.sets.removeAll { $0.id == plan.id } }) { row(plan, index: index, weight: weights[index]) }
+                    if reordering {
+                        HStack {
+                            Image(systemName: "line.3.horizontal").foregroundStyle(.secondary).frame(width: 44, height: 44)
+                            Text(prescribedSetSummary(plan, weight: weights[index], unit: unit)).font(.subheadline)
+                        }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                            .modifier(ExerciseDragHandle(id: plan.id, enabled: true, dragging: $draggingSet))
+                            .modifier(ExerciseDropTarget(id: plan.id, dragging: $draggingSet, move: moveSet))
+                            .modifier(ReorderActions(canMoveUp: index > 0, canMoveDown: index + 1 < variant.sets.count) { moveSet(plan.id, by: $0) })
+                    } else {
+                        SwipeToDelete(action: { variant.sets.removeAll { $0.id == plan.id } }) { row(plan, index: index, weight: weights[index]) }
+                    }
                 }
                 let actions = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(spacing: 8)) : AnyLayout(HStackLayout(spacing: 8))
                 actions {
@@ -91,19 +109,21 @@ struct TemplateExerciseCard: View {
             }
         }.card(padding: 16)
         .sheet(item: $numberEdit) { NumberEditor(edit: $0) }
-        .sheet(item: $repValues) { plan in RepValuesEditor(plan: plan, save: saveReps) }
-        .sheet(item: $loadEdit) { plan in LoadRuleEditor(plan: plan, unit: unit, suggestedWeight: variant.weight(for: plan)) { edited in update(plan.id) { $0 = edited }; return true } }
-        .sheet(item: $repEdit) { plan in RepTargetEditor(plan: plan) { edited in update(plan.id) { $0.reps = edited.reps; $0.repCeiling = edited.repCeiling; $0.amrap = edited.amrap }; return true } }
+        .sheet(item: $repValues) { plan in RepValuesEditor(plan: plan, save: saveReps, adjacent: adjacentPlan) }
+        .sheet(item: $loadEdit) { plan in LoadRuleEditor(plan: plan, unit: unit, suggestedWeight: variant.weight(for: plan)) { edited in update(plan.id) { $0 = edited } } }
+        .sheet(item: $repEdit) { plan in RepTargetEditor(plan: plan) { edited in update(plan.id) { $0.reps = edited.reps; $0.repCeiling = edited.repCeiling; $0.amrap = edited.amrap } } }
         .sheet(item: $planEdit) { plan in
             TemplatePlanEditor(variant: variant, plan: plan) { edited in store.saveVariant(edited) }.sheetSize()
         }
-        .sheet(isPresented: $settings) { VariantEditor(variant: variant).sheetSize() }
+        .sheet(isPresented: $settings) { PlanSettingsEditor(variant: variant).sheetSize() }
+        .sheet(isPresented: $savingWarmups) { WarmupPresetEditor(preset: WarmupPreset(name: variant.label + " warm-up", sets: variant.sets.filter { $0.kind == .warmup })).sheetSize() }
+        .sheet(isPresented: $warmups) { ApplyWarmupPreset(variantID: variant.id).sheetSize() }
         .sheet(item: $technique) { kind in
             TechniqueEditor(kind: kind, workingWeight: variant.referenceWeight, rounding: variant.rounding) { plans, replace, _ in
                 var edited = variant
                 if replace { edited.sets.removeAll { $0.kind != .warmup } }
                 if kind == .drop, let last = edited.sets.indices.last { edited.sets[last].restSeconds = 0 }
-                edited.sets.append(contentsOf: plans); variant = edited
+                edited.sets.append(contentsOf: plans); return store.saveVariant(edited)
             }.sheetSize()
         }
     }
@@ -111,45 +131,98 @@ struct TemplateExerciseCard: View {
     private func row(_ plan: SetPlan, index: Int, weight: Double?) -> some View {
         let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6)) : AnyLayout(HStackLayout(spacing: 8))
         return layout {
-            SetTypeButton(plan: plan, change: { edited in update(plan.id) { $0 = edited } }, details: { planEdit = plan }) {
-                VStack(spacing: 1) {
+            VStack(spacing: 0) {
+                SetTypeButton(plan: plan, change: { edited in update(plan.id) { $0 = edited } }, details: { planEdit = plan }, duplicate: { duplicate(plan) }) {
                     SetBadge(text: setBadge(variant.sets, index: index, types: store.data.customSetTypes), plan: plan)
-                    if plan.load == .percent { Text("\(number(plan.percent))%").font(.system(size: 10)).foregroundStyle(.secondary) }
+                }.accessibilityLabel("\(palette.title(plan)), set \(index + 1), change set type")
+                if plan.load == .percent {
+                    Button("\(number(plan.percent))%") { numberEdit = numericEdit(plan.id, field: .percent) }
+                        .font(.caption).frame(minWidth: 44, minHeight: 44)
+                        .modifier(WeightSettingsInteraction(enabled: true) { loadEdit = plan })
                 }
-            }.accessibilityLabel("\(palette.title(plan)), set \(index + 1), change set type")
-            field(exercise?.mode == .cardio ? plan.seconds.map(clockText) ?? "Time" : weight.map { number(unit.display($0)) } ?? "–", label: "Set \(index + 1), \(exercise?.mode == .cardio ? "time" : "weight")") {
-                if exercise?.mode == .cardio {
-                    numberEdit = NumericEdit(title: "Time (minutes)", value: plan.seconds.map { $0 / 60 }, step: 1, maximum: 100000, integer: false) { value in update(plan.id) { $0.seconds = value.map { $0 * 60 } } }
-                } else { editWeight(plan) }
             }
-            .contextMenu { Button("Weight Settings") { loadEdit = plan } }
-            .accessibilityAction(named: "Weight settings") { loadEdit = plan }
+            field(exercise?.mode == .cardio ? plan.seconds.map(clockText) ?? "Time" : weight.map { number(unit.display($0)) } ?? "–", label: "Set \(index + 1), \(exercise?.mode == .cardio ? "time" : "weight")") {
+                numberEdit = numericEdit(plan.id, field: exercise?.mode == .cardio ? .time : .weight)
+            }
+            .modifier(WeightSettingsInteraction(enabled: true) { loadEdit = plan })
             field(plan.repTarget ?? "–", label: "Set \(index + 1), rep target") { repValues = plan }
                 .modifier(RepTargetInteraction(enabled: true) { repEdit = plan })
             field(plan.rpe.map { number($0) } ?? "–", label: "Set \(index + 1), RPE") {
-                numberEdit = NumericEdit(title: "RPE", value: plan.rpe, step: 0.5, maximum: 10, integer: false) { value in update(plan.id) { $0.rpe = value } }
+                numberEdit = numericEdit(plan.id, field: .rpe)
             }.frame(maxWidth: typeSize.isAccessibilitySize ? .infinity : 50)
         }
-        .contextMenu { Button("More Targets") { planEdit = plan }; Button("Delete Set", role: .destructive) { variant.sets.removeAll { $0.id == plan.id } } }
+        .accessibilityAction(named: "Duplicate Set") { duplicate(plan) }
     }
 
     private func field(_ value: String, label: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) { VStack(spacing: 3) { if typeSize.isAccessibilitySize { Text(label).font(.caption).foregroundStyle(.secondary) }; Text(value).font(.figure(17)) }.frame(maxWidth: .infinity, minHeight: 44).background(palette.field, in: RoundedRectangle(cornerRadius: 8)) }.buttonStyle(.plain).accessibilityLabel("\(label), \(value)")
+        Button(action: action) { VStack(spacing: 3) { if typeSize.isAccessibilitySize { Text(label).font(.caption).foregroundStyle(.secondary) }; Text(value).font(typeSize.isAccessibilitySize ? .title3.monospacedDigit() : .figure(17)) }.frame(maxWidth: .infinity, minHeight: 44).background(palette.field, in: RoundedRectangle(cornerRadius: 8)) }.buttonStyle(.plain).accessibilityLabel("\(label), \(value)")
     }
-    private func update(_ id: UUID, _ change: (inout SetPlan) -> Void) {
+    @discardableResult private func update(_ id: UUID, _ change: (inout SetPlan) -> Void) -> Bool {
         var edited = variant
-        guard let index = edited.sets.firstIndex(where: { $0.id == id }) else { return }
-        change(&edited.sets[index]); variant = edited
+        guard let index = edited.sets.firstIndex(where: { $0.id == id }) else { return false }
+        change(&edited.sets[index])
+        return store.saveVariant(edited)
     }
-    private func editWeight(_ plan: SetPlan) {
-        numberEdit = NumericEdit(title: "Weight (\(unit.rawValue))", context: exercise?.name, value: variant.weight(for: plan).map(unit.display), step: 2.5, maximum: 100000, integer: false) { value in
-            if let value { variant.setWeight(unit.kilograms(value), for: plan.id) }
-            else { update(plan.id) { $0.load = plan.kind == .warmup ? .none : .working; $0.weightOverride = nil } }
+    private enum Field { case weight, time, rpe, percent }
+    private func numericEdit(_ id: UUID, field: Field) -> NumericEdit? {
+        guard let index = variant.sets.firstIndex(where: { $0.id == id }) else { return nil }
+        let plan = variant.sets[index]
+        let value: Double?, title: String, step: Double, maximum: Double
+        switch field {
+        case .weight: value = variant.weight(for: plan).map(unit.display); title = "Weight (\(unit.rawValue))"; step = 2.5; maximum = 100000
+        case .time: value = plan.seconds.map { $0 / 60 }; title = "Time (minutes)"; step = 1; maximum = 100000
+        case .rpe: value = plan.rpe; title = "RPE"; step = 0.5; maximum = 10
+        case .percent: value = plan.percent; title = "Percent of working set"; step = 5; maximum = 1000
         }
+        return NumericEdit(title: title, context: "\(exercise?.name ?? "Exercise"), set \(setBadge(variant.sets, index: index, types: store.data.customSetTypes))", value: value, step: step, maximum: maximum, integer: false,
+            previous: adjacentNumericID(id, offset: -1, field: field) != nil ? { adjacentNumeric(id, offset: -1, field: field) } : nil,
+            next: adjacentNumericID(id, offset: 1, field: field) != nil ? { adjacentNumeric(id, offset: 1, field: field) } : nil
+        ) { value in
+            if field == .weight, let value {
+                var edited = variant; edited.setWeight(unit.kilograms(value), for: id)
+                return store.saveVariant(edited)
+            }
+            return update(id) { plan in
+                switch field {
+                case .weight: plan.load = plan.kind == .warmup ? .none : .working; plan.weightOverride = nil
+                case .time: plan.seconds = value.map { $0 * 60 }
+                case .rpe: plan.rpe = value
+                case .percent: plan.percent = value ?? 0
+                }
+            }
+        }
+    }
+    private func adjacentPlan(_ id: UUID, offset: Int) -> SetPlan? {
+        guard let index = variant.sets.firstIndex(where: { $0.id == id }), variant.sets.indices.contains(index + offset) else { return nil }
+        return variant.sets[index + offset]
+    }
+    private func adjacentNumeric(_ id: UUID, offset: Int, field: Field) -> NumericEdit? {
+        guard let next = adjacentNumericID(id, offset: offset, field: field) else { return nil }
+        return numericEdit(next, field: field)
+    }
+    private func adjacentNumericID(_ id: UUID, offset: Int, field: Field) -> UUID? {
+        let ids = variant.sets.filter { field != .percent || $0.load == .percent }.map(\.id)
+        guard let index = ids.firstIndex(of: id), ids.indices.contains(index + offset) else { return nil }
+        return ids[index + offset]
     }
     private func saveReps(_ edited: SetPlan) -> Bool {
         update(edited.id) { $0.reps = edited.reps; $0.repCeiling = edited.repCeiling; $0.amrap = edited.amrap }
-        return true
+    }
+    private func duplicate(_ plan: SetPlan) {
+        guard let index = variant.sets.firstIndex(where: { $0.id == plan.id }) else { return }
+        var edited = variant; var copy = plan; copy.id = UUID()
+        edited.sets.insert(copy, at: index + 1); variant = edited
+    }
+    private func moveSet(_ id: UUID, by offset: Int) {
+        guard let index = variant.sets.firstIndex(where: { $0.id == id }), variant.sets.indices.contains(index + offset) else { return }
+        var edited = variant; edited.sets.swapAt(index, index + offset); variant = edited
+    }
+    private func moveSet(_ source: UUID, _ target: UUID, _ after: Bool) {
+        var edited = variant
+        guard let index = edited.sets.firstIndex(where: { $0.id == source }), source != target else { return }
+        let plan = edited.sets.remove(at: index)
+        guard let destination = edited.sets.firstIndex(where: { $0.id == target }) else { return }
+        edited.sets.insert(plan, at: destination + (after ? 1 : 0)); variant = edited
     }
     private func runQuickAdd(_ action: QuickAdd) {
         switch action {

@@ -31,7 +31,7 @@ struct WarmupPresetEditor: View {
     @Environment(\.dismiss) private var dismiss
     @State var preset: WarmupPreset
     var body: some View {
-        DraftEditor(valid: !preset.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && preset.name.count <= 200 && !preset.sets.isEmpty && preset.sets.allSatisfy(\.isValid), changed: store.data.warmupPresets.first { $0.id == preset.id } != preset, saveID: "warmups.save", save: {
+        DraftEditor(valid: !preset.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && preset.name.count <= 200 && !preset.sets.isEmpty && preset.sets.allSatisfy(\.isValid), changed: store.data.warmupPresets.first { $0.id == preset.id } != preset, saveID: "warmups.save", confirmation: store.data.warmupPresets.contains { $0.id == preset.id } ? nil : "Create", save: {
             store.perform { try $0.saveWarmupPreset(preset) }
         }) {
             ThemedForm {
@@ -64,6 +64,9 @@ struct ApplyWarmupPreset: View {
     @Environment(\.dismiss) private var dismiss
     var routineID: UUID?
     var exerciseID: UUID?
+    var variantID: UUID?
+    @State private var standard = WarmupPreset(name: "Standard: 50%, 70%, 85%", sets: [(50.0, 8), (70.0, 5), (85.0, 2)].map { SetPlan(kind: .warmup, load: .percent, percent: $0.0, reps: $0.1, repCeiling: nil) })
+    private var presets: [WarmupPreset] { [standard] + store.data.warmupPresets }
     @State private var selectedPreset: UUID?
     @State private var selectedExercises: Set<UUID> = []
     @State private var replacing = true
@@ -71,6 +74,9 @@ struct ApplyWarmupPreset: View {
     @State private var creating = false
     private struct Item: Identifiable { var id: UUID; var name: String }
     private var items: [Item] {
+        if let variantID, let variant = store.data.variant(variantID) {
+            return [Item(id: variantID, name: store.data.exercise(variant.exerciseID)?.name ?? variant.label)]
+        }
         if let routineID, let day = store.data.routine(routineID) {
             return day.slots.compactMap { slot in
                 guard let v = store.data.variant(slot.variantID), let e = store.data.exercise(v.exerciseID), e.mode != .cardio else { return nil }
@@ -86,11 +92,11 @@ struct ApplyWarmupPreset: View {
                 Section {
                     Picker("Preset", selection: $selectedPreset) {
                         Text("Choose preset").tag(UUID?.none)
-                        ForEach(store.data.warmupPresets) { Text($0.name).tag(Optional($0.id)) }
+                        ForEach(presets) { Text($0.name).tag(Optional($0.id)) }
                     }.accessibilityIdentifier("warmups.preset")
                     Button("New preset", systemImage: "plus") { creating = true }
                     NavigationLink("Manage presets") { WarmupPresetLibrary() }
-                    if let preset = store.data.warmupPresets.first(where: { $0.id == selectedPreset }) {
+                    if let preset = presets.first(where: { $0.id == selectedPreset }) {
                         Text(preset.sets.map { setPlanSummary($0, unit: store.data.settings.unit) }.joined(separator: "\n")).font(.caption).foregroundStyle(.secondary)
                     }
                 }
@@ -98,18 +104,18 @@ struct ApplyWarmupPreset: View {
                     ForEach(items) { item in Toggle(item.name, isOn: Binding(get: { selectedExercises.contains(item.id) }, set: { if $0 { selectedExercises.insert(item.id) } else { selectedExercises.remove(item.id) } })) }
                 }
                 Section {
-                    Toggle(routineID == nil ? "Replace pending warm-ups" : "Replace warm-ups", isOn: $replacing)
-                    if routineID == nil { Toggle("Save to this day", isOn: $future) }
+                    Toggle(routineID == nil && variantID == nil ? "Replace pending warm-ups" : "Replace warm-ups", isOn: $replacing)
+                    if routineID == nil && variantID == nil { Toggle("Save to this day", isOn: $future) }
                 }
             }.formStyle(.grouped).navigationTitle("Apply Warm-up Preset").inlineTitle()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) { Button("Apply") {
-                    guard let selectedPreset else { return }
+                    guard let preset = presets.first(where: { $0.id == selectedPreset }) else { return }
                     if store.perform({ data in
-                        if routineID != nil { try data.applyWarmupPreset(selectedPreset, toVariants: selectedExercises, replacing: replacing) }
+                        if routineID != nil || variantID != nil { try data.applyWarmups(preset.sets, toVariants: selectedExercises, replacing: replacing) }
                         else {
-                            try data.applyWarmupPreset(selectedPreset, toSessionExercises: selectedExercises, replacing: replacing, saveFuture: future)
+                            try data.applyWarmups(preset.sets, toSessionExercises: selectedExercises, replacing: replacing, saveFuture: future)
                             if let first = data.activeSession?.exercises.first(where: { selectedExercises.contains($0.id) }) { data.setExerciseExpanded(first.id, expanded: true, focus: true) }
                         }
                     }) {
@@ -120,7 +126,7 @@ struct ApplyWarmupPreset: View {
                 }.disabled(selectedPreset == nil || selectedExercises.isEmpty).accessibilityIdentifier("warmups.apply") }
             }
             .sheet(isPresented: $creating) { WarmupPresetEditor(preset: WarmupPreset(name: "", sets: [SetPlan(kind: .warmup, load: .percent, reps: 5, repCeiling: nil)])).environmentObject(store).sheetSize() }
-        }.onAppear { selectedPreset = store.data.warmupPresets.first?.id; selectedExercises = exerciseID.map { [$0] } ?? Set(items.map(\.id)) }
+        }.onAppear { selectedPreset = presets.first?.id; selectedExercises = exerciseID.map { [$0] } ?? Set(items.map(\.id)) }
         .onChange(of: store.data.warmupPresets.count) { _, _ in if selectedPreset == nil { selectedPreset = store.data.warmupPresets.last?.id } }
     }
 }

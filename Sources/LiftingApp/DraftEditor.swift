@@ -1,11 +1,13 @@
 import SwiftUI
 
-/// Owns a sheet's draft lifetime. Child navigation does not commit the parent draft.
+/// Existing records commit on dismissal; creation and batch commands require confirmation.
+/// Child navigation never commits the parent draft.
 struct DraftEditor<Content: View>: View {
     @Environment(\.dismiss) private var dismiss
     let valid: Bool
     let changed: Bool
     var saveID = "editor.save"
+    var confirmation: String? = nil
     let save: () -> Bool
     @ViewBuilder let content: () -> Content
     @State private var resolved = false
@@ -15,28 +17,30 @@ struct DraftEditor<Content: View>: View {
             content()
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
-                        Button("Cancel") { resolved = true; dismiss() }.keyboardShortcut(.cancelAction)
+                        if confirmation != nil || (!valid && changed) {
+                            Button("Cancel") { resolved = true; dismiss() }.keyboardShortcut(.cancelAction)
+                        }
                     }
                     ToolbarItem(placement: .confirmationAction) {
-                        Button("Save") {
-                            if save() { resolved = true; dismiss() }
-                        }.disabled(!valid).keyboardShortcut(.defaultAction).accessibilityIdentifier(saveID)
+                        if let confirmation {
+                            Button(confirmation, action: finish).disabled(!valid)
+                                .keyboardShortcut(.defaultAction).accessibilityIdentifier(saveID)
+                        } else {
+                            Button("Close", systemImage: "xmark", action: finish).labelStyle(.iconOnly)
+                                .disabled(!valid).keyboardShortcut(.cancelAction)
+                        }
                     }
                 }
         }
         .interactiveDismissDisabled(!valid && changed)
         .onDisappear {
-            guard !resolved, changed, valid else { return }
+            guard confirmation == nil, !resolved, changed, valid else { return }
             resolved = true
             _ = save()
         }
     }
-}
-
-/// Editors whose bindings already persist each change still provide the same visible completion action.
-struct SaveAndClose: ViewModifier {
-    @Environment(\.dismiss) private var dismiss
-    func body(content: Content) -> some View {
-        content.toolbar { ToolbarItem(placement: .confirmationAction) { Button("Save") { dismiss() } } }
+    private func finish() {
+        guard confirmation != nil || changed else { resolved = true; dismiss(); return }
+        if save() { resolved = true; dismiss() }
     }
 }
