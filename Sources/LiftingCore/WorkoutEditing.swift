@@ -47,14 +47,22 @@ public extension TrainingData {
               let s = activeSession?.exercises[e].sets.firstIndex(where: { $0.id == setID }),
               let variant = variant(activeSession!.exercises[e].variantID) else { throw TrainingError.invalid("Set unavailable.") }
         let item = activeSession!.exercises[e]
+        let previous = item.sets[s]
         activeSession!.exercises[e].sets[s].plan = plan
-        if item.sets[s].completedAt == nil {
-            activeSession!.exercises[e].sets[s].weightIsEdited = false
-            activeSession!.exercises[e].sets[s].weight = plan.resolvedWeight(working: item.workingLoad(fallback: variant.workingWeight), increment: item.roundingIncrement ?? variant.rounding)
-            activeSession!.exercises[e].sets[s].reps = plan.initialReps
-            activeSession!.exercises[e].sets[s].seconds = plan.seconds
-            activeSession!.exercises[e].sets[s].meters = plan.meters
-            activeSession!.exercises[e].sets[s].rpe = plan.rpe
+        if previous.completedAt == nil {
+            let loadChanged = previous.plan.load != plan.load || previous.plan.weightOverride != plan.weightOverride
+                || previous.plan.fixedWeight != plan.fixedWeight || previous.plan.percent != plan.percent
+            if loadChanged {
+                let base = plan.kind == .warmup ? item.workingLoad(fallback: variant.workingWeight)
+                    : item.sets.prefix(s).last(where: { $0.plan.kind != .warmup && $0.plan.load == .working })?.weight ?? item.workingLoad(fallback: variant.workingWeight)
+                let weight = plan.resolvedWeight(working: base, increment: item.roundingIncrement ?? variant.rounding)
+                try setLoggedWeight(weight, exerciseID: exerciseID, setID: setID)
+                activeSession!.exercises[e].sets[s].weightIsEdited = plan.load == .working ? plan.weightOverride != nil : false
+            }
+            if previous.reps == previous.plan.initialReps { activeSession!.exercises[e].sets[s].reps = plan.initialReps }
+            if previous.seconds == previous.plan.seconds { activeSession!.exercises[e].sets[s].seconds = plan.seconds }
+            if previous.meters == previous.plan.meters { activeSession!.exercises[e].sets[s].meters = plan.meters }
+            if previous.rpe == previous.plan.rpe { activeSession!.exercises[e].sets[s].rpe = plan.rpe }
         }
     }
 

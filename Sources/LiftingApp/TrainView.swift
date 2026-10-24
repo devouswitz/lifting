@@ -111,7 +111,7 @@ struct ExerciseTargets: View {
                             details(variant: variant, slot: slot)
                         }.frame(maxWidth: .infinity, alignment: .leading)
                         Text(target(variant)).font(.figure(15, weight: .regular)).foregroundStyle(.secondary)
-                        Text(exercise.mode == .strength ? "\(number(store.data.settings.unit.display(variant.workingWeight))) \(store.data.settings.unit.rawValue)" : "")
+                        Text(exercise.mode == .strength ? weightSummary(zip(variant.sets, variant.resolvedWeights).compactMap { $0.kind == .warmup ? nil : $1 }, unit: store.data.settings.unit) : "")
                             .font(.figure(15)).frame(minWidth: 64, alignment: .trailing)
                     }.padding(.vertical, 9)
                     if index < day.slots.count - 1 { Divider() }
@@ -205,7 +205,6 @@ struct DayMenu: View {
     var includeEdit: Bool
     var onDelete: (() -> Void)? = nil
     var onRename: (() -> Void)? = nil
-    var onLink: (() -> Void)? = nil
     var onWarmups: (() -> Void)? = nil
     @State private var export: CSVExportRequest?
     @State private var deleting = false
@@ -216,8 +215,7 @@ struct DayMenu: View {
     var body: some View {
         Menu {
             if let onRename { Button("Rename Day", systemImage: "pencil", action: onRename) }
-            if let onLink { Button("Superset / Circuit", systemImage: "link", action: onLink).disabled(day.slots.count < 2) }
-            if let onWarmups { Button("Apply Warm-up Preset", systemImage: "flame", action: onWarmups).disabled(day.slots.isEmpty) }
+            if let onWarmups { Button("Warm-ups for Day", systemImage: "flame", action: onWarmups).disabled(day.slots.isEmpty) }
             if includeEdit { NavigationLink { RoutineEditor(routineID: day.id) } label: { Label(program == nil ? "Edit Saved Day" : "Edit Day", systemImage: "pencil") } }
             if let program {
                 if isNext {
@@ -225,8 +223,6 @@ struct DayMenu: View {
                 } else {
                     Button("Make Next Workout", systemImage: "arrow.right.circle") { store.perform { try $0.selectNextDay(day.id, in: program.id); if $0.activeProgramID != program.id { try $0.loadProgram(program.id) } } }
                 }
-                Button("Move Earlier", systemImage: "arrow.up") { store.perform { try $0.moveUpcomingDay(day.id, by: -1, in: program.id) } }.disabled((place ?? 0) == 0)
-                Button("Move Later", systemImage: "arrow.down") { store.perform { try $0.moveUpcomingDay(day.id, by: 1, in: program.id) } }.disabled((place ?? program.dayIDs.count) >= program.dayIDs.count - 1)
                 Divider()
                 Button("Duplicate Day", systemImage: "plus.square.on.square") { store.perform { _ = try $0.addDay(to: program.id, templateID: day.id, name: TrainingData.uniqueName(day.name + " copy", among: store.data.routines.map(\.name))) } }
                 Button("Save Day Copy", systemImage: "square.and.arrow.down.on.square") { store.perform { _ = try $0.saveDayAsTemplate(day.id) } }
@@ -239,7 +235,7 @@ struct DayMenu: View {
             Button("Export CSV", systemImage: "square.and.arrow.up") { do { export = try .day(day.id, in: store.data) } catch { store.error = error.localizedDescription } }
             Divider()
             Button(program == nil ? "Delete Template" : "Delete Day", systemImage: "trash", role: .destructive) { deleting = true }
-        } label: { Image(systemName: "ellipsis").font(.body.weight(.semibold)).frame(width: 32, height: 32).contentShape(Rectangle()) }
+        } label: { Image(systemName: "ellipsis").font(.body.weight(.semibold)).frame(width: 44, height: 44).contentShape(Rectangle()) }
         .compactMenu().fixedSize().foregroundStyle(.secondary).accessibilityLabel("Options for \(day.name)")
         .confirmationDialog(program == nil ? "Delete this template?" : "Delete this day?", isPresented: $deleting, titleVisibility: .visible) {
             Button("Delete", role: .destructive) { if store.perform({ $0.removeDay(day.id) }) { onDelete?() } }

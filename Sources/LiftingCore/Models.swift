@@ -57,6 +57,8 @@ public struct SetPlan: Identifiable, Codable, Equatable, Sendable {
     public var restSeconds: Int?
     /// A user-named set type. `kind` still decides how the set counts.
     public var customTypeID: UUID?
+    /// An explicit working-set entry. Nil inherits the preceding working-set entry.
+    public var weightOverride: Double?
     public init(id: UUID = UUID(), kind: SetKind = .working, load: LoadRule = .working, fixedWeight: Double = 0, percent: Double = 50, reps: Int? = 8, repCeiling: Int? = 12, seconds: Double? = nil, meters: Double? = nil, rpe: Double? = nil, amrap: Bool = false, restSeconds: Int? = nil) {
         self.id = id; self.kind = kind; self.load = load; self.fixedWeight = fixedWeight; self.percent = percent
         self.reps = reps; self.repCeiling = repCeiling; self.seconds = seconds; self.meters = meters; self.rpe = rpe; self.amrap = amrap; self.restSeconds = restSeconds
@@ -73,7 +75,7 @@ public struct SetPlan: Identifiable, Codable, Equatable, Sendable {
     public func resolvedWeight(working: Double, increment: Double) -> Double? {
         switch load {
         case .none: return nil
-        case .working: return working
+        case .working: return weightOverride ?? working
         case .fixed: return fixedWeight
         case .percent:
             let result = working * percent / 100
@@ -146,7 +148,7 @@ public struct LoggedSet: Identifiable, Codable, Equatable, Sendable {
     /// Explicit entries survive later changes to the exercise's suggested load.
     public var weightIsEdited: Bool?
     public init(plan: SetPlan, variant: Variant) {
-        id = UUID(); self.plan = plan; weightIsEdited = false
+        id = UUID(); self.plan = plan; weightIsEdited = plan.load == .working && plan.weightOverride != nil
         weight = plan.resolvedWeight(working: variant.workingWeight, increment: variant.rounding)
         reps = plan.initialReps; seconds = plan.seconds; meters = plan.meters; rpe = plan.rpe
     }
@@ -183,9 +185,16 @@ public struct SessionExercise: Identifiable, Codable, Equatable, Sendable {
         muscle = exercise.muscle; secondaryMuscles = exercise.secondaryMuscles
         notes = ""; restSeconds = variant.restSeconds; progressionEligible = true; timerElapsed = 0
         workingWeight = variant.workingWeight; roundingIncrement = variant.rounding
-        sets = variant.sets.map { LoggedSet(plan: $0, variant: variant) }
+        let weights = variant.resolvedWeights
+        sets = variant.sets.enumerated().map { index, plan in
+            var set = LoggedSet(plan: plan, variant: variant)
+            set.weight = weights[index]
+            return set
+        }
     }
-    public func workingLoad(fallback: Double) -> Double { workingWeight ?? sets.first(where: { $0.plan.load == .working && $0.completedAt == nil })?.weight ?? sets.first(where: { $0.plan.load == .working })?.weight ?? fallback }
+    public func workingLoad(fallback: Double) -> Double {
+        sets.first(where: { $0.plan.kind != .warmup && $0.plan.load != .none })?.weight ?? workingWeight ?? fallback
+    }
 }
 
 public struct Session: Identifiable, Codable, Equatable, Sendable {

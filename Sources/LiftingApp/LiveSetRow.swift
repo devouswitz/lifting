@@ -55,7 +55,7 @@ struct LiveSetRow: View {
                                 .foregroundStyle(done ? palette.on(.completed) : Color.secondary.opacity(0.5))
                                 .frame(width: 32, height: 32)
                                 .background(done ? palette.completed : palette.field, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                                .frame(width: 40, height: 44).contentShape(Rectangle())
+                                .frame(width: 44, height: 44).contentShape(Rectangle())
                         }.buttonStyle(.plain).accessibilityLabel("\(set.completedAt == nil ? "Complete" : "Undo") \(palette.title(set.plan).lowercased()) set \(setLabel(set, item: item))").accessibilityIdentifier("workout.\(exerciseID).\(setID).complete")
                     }
                 }
@@ -69,7 +69,7 @@ struct LiveSetRow: View {
                 if !columns.distance { Button("Log Distance", systemImage: "ruler") { open(.distance) } }
                 setMenu(set)
             }
-            .sheet(item: $edit) { NumericPad(edit: $0) }
+            .sheet(item: $edit) { NumberEditor(edit: $0) }
             .sheet(isPresented: $editingDetails) { LivePlanEditor(exerciseID: exerciseID, setID: setID, initial: set.plan).sheetSize() }
             .sheet(isPresented: $editingReps) {
                 RepTargetEditor(plan: set.plan) { plan in
@@ -103,7 +103,7 @@ struct LiveSetRow: View {
             VStack(spacing: 3) {
                 if labeled { Text(title).font(.caption2).foregroundStyle(.secondary) }
                 Text(value ?? placeholder ?? "–").font(.figure(17)).foregroundStyle(value == nil || (field == .weight && self.set?.weightIsEdited != true && self.set?.completedAt == nil) ? .secondary : .primary).lineLimit(1).minimumScaleFactor(0.7)
-            }.frame(maxWidth: .infinity, minHeight: 36).background(self.set?.completedAt == nil ? palette.field : Color.clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            }.frame(maxWidth: .infinity, minHeight: 44).background(self.set?.completedAt == nil ? palette.field : Color.clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         }.buttonStyle(.plain)
         .modifier(RepTargetInteraction(enabled: field == .reps) { holdExpanded(); editingReps = true })
         .accessibilityLabel("Set \(index + 1), \(title), \(value ?? "not set")\(placeholder.map { ", target \($0)" } ?? "")").accessibilityIdentifier("workout.\(exerciseID).\(setID).\(field.rawValue)")
@@ -189,82 +189,62 @@ struct NumericEdit: Identifiable {
     let onSave: (Double?) -> Void
 }
 
-/// Compact keypad sheet for entering one value without leaving the workout.
-struct NumericPad: View {
-    @Environment(\.dismiss) var dismiss
-    @Environment(\.palette) var palette
-    @Environment(\.dynamicTypeSize) var typeSize
+/// One-value editing uses the same native selection, paste and keyboard as form fields.
+struct NumberEditor: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.palette) private var palette
+    @Environment(\.dynamicTypeSize) private var typeSize
     let edit: NumericEdit
-    @FocusState private var keysFocused: Bool
+    @ScaledMetric(relativeTo: .largeTitle) private var valueHeight: CGFloat = 56
+    @State private var focused = false
     @State private var text: String
     @State private var error: String?
-    @State private var replacing = true
-    init(edit: NumericEdit) { self.edit = edit; _text = State(initialValue: edit.value.map { number($0, decimals: 3) } ?? "") }
+
+    init(edit: NumericEdit) {
+        self.edit = edit
+        _text = State(initialValue: edit.value.map { number($0, decimals: 3) } ?? "")
+    }
     var body: some View {
-        VStack(spacing: 14) {
-            HStack {
-                Button("Cancel") { dismiss() }.foregroundStyle(palette.action)
-                Spacer()
-                VStack(spacing: 1) {
-                    Text(edit.title).font(.headline)
-                    if let context = edit.context { Text(context).font(.caption).foregroundStyle(.secondary) }
+        NavigationStack {
+            VStack(spacing: 16) {
+                if let context = edit.context { Text(context).font(.subheadline).foregroundStyle(.secondary) }
+                NativeNumberInput(text: $text, focused: $focused, title: edit.title, placeholder: "Optional", integer: edit.integer, large: true)
+                    .frame(height: valueHeight).padding(.horizontal, 16).background(palette.field, in: RoundedRectangle(cornerRadius: 12))
+                    .accessibilityIdentifier("number.value")
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: typeSize.isAccessibilitySize ? 2 : 4), spacing: 8) {
+                    ForEach([-2.0, -1, 1, 2], id: \.self) { multiplier in
+                        Button {
+                            let value = Double(text.replacingOccurrences(of: ",", with: ".")) ?? 0
+                            text = number(min(edit.maximum, max(0, value + edit.step * multiplier)), decimals: 3)
+                        } label: {
+                            Text("\(multiplier > 0 ? "+" : "−")\(number(edit.step * abs(multiplier)))")
+                                .font(.subheadline.weight(.semibold).monospacedDigit()).lineLimit(1).minimumScaleFactor(0.8)
+                                .frame(maxWidth: .infinity, minHeight: 44)
+                        }.buttonStyle(.bordered)
+                    }
                 }
-                Spacer()
-                Button("Clear") { text = ""; replacing = false }.foregroundStyle(palette.action)
-            }
-            Text(text.isEmpty ? "–" : text).font(.figure(44, weight: .bold)).foregroundStyle(text.isEmpty ? .secondary : .primary)
-                .frame(maxWidth: .infinity, minHeight: 56).accessibilityIdentifier("number.value").accessibilityLabel("\(edit.title), \(text.isEmpty ? "empty" : text)")
-            HStack(spacing: 8) {
-                ForEach([-2.0, -1, 1, 2], id: \.self) { multiplier in
-                    Button { text = number(min(edit.maximum, max(0, (Double(text) ?? 0) + edit.step * multiplier)), decimals: 3); replacing = false } label: {
-                        Text("\(multiplier > 0 ? "+" : "−")\(number(edit.step * abs(multiplier)))").font(.subheadline.weight(.semibold).monospacedDigit())
-                            .foregroundStyle(palette.action).frame(maxWidth: .infinity, minHeight: 34).background(palette.wash(.action), in: Capsule())
-                    }.buttonStyle(.plain)
+                if let error { Text(error).font(.footnote).foregroundStyle(palette.failure) }
+                Spacer(minLength: 0)
+            }.padding(20).navigationTitle(edit.title).inlineTitle()
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                    ToolbarItem(placement: .confirmationAction) { Button("Done", action: save).accessibilityIdentifier("number.done") }
                 }
-            }
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3), spacing: 8) {
-                ForEach(["1", "2", "3", "4", "5", "6", "7", "8", "9", ".", "0", "⌫"], id: \.self) { key in
-                    Button { press(key) } label: {
-                        Group { if key == "⌫" { Image(systemName: "delete.left") } else { Text(key) } }
-                            .font(.title2.weight(.medium)).foregroundStyle(key == "." && edit.integer ? Color.secondary.opacity(0.3) : Color.primary)
-                            .frame(maxWidth: .infinity, minHeight: 50).background(palette.field, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    }.buttonStyle(.plain).disabled(key == "." && edit.integer).accessibilityLabel(key == "⌫" ? "Delete" : key)
-                }
-            }
-            if let error { Text(error).font(.footnote).foregroundStyle(palette.failure) }
-            Button(action: save) { Text("Done").frame(maxWidth: .infinity) }.buttonStyle(AccentButtonStyle()).keyboardShortcut(.defaultAction).accessibilityIdentifier("number.done")
-        }
-        .padding(.horizontal, 20).padding(.top, 18).padding(.bottom, 12)
-        .frame(idealWidth: 420)
-        // Hardware keyboards (iPad, Mac) type into the pad directly.
-        .focusable().focused($keysFocused).focusEffectDisabled()
-        .onAppear { keysFocused = true }
-        .onKeyPress { key in
-            if key.key == .return { save(); return .handled }
-            if key.key == .delete { press("⌫"); return .handled }
-            if key.key == .escape { dismiss(); return .handled }
-            let character = key.characters == "," ? "." : key.characters
-            if character.count == 1, "0123456789.".contains(character) { press(character); return .handled }
-            return .ignored
-        }
-        .presentationBackground(palette.card)
-        .presentationDetents(typeSize.isAccessibilitySize ? [.large] : [.height(edit.context == nil ? 520 : 540), .large])
+        }.frame(idealWidth: 420, idealHeight: 280)
+        .presentationDetents(typeSize.isAccessibilitySize ? [.large] : [.height(280), .large])
         .presentationDragIndicator(.visible)
+        .onAppear { focused = true }
+        .onChange(of: text) { _, _ in error = nil }
     }
-    /// The first key replaces the shown value, so typing a new weight does not append to the old one.
-    private func press(_ key: String) {
-        error = nil
-        if replacing && key != "⌫" { text = ""; replacing = false }
-        switch key {
-        case "⌫": replacing = false; if !text.isEmpty { text.removeLast() }
-        case ".": if !edit.integer && !text.contains(".") { text += text.isEmpty ? "0." : "." }
-        default: if text.count < 10 { text = text == "0" ? key : text + key }
-        }
-    }
-    func save() {
+    private func save() {
         if text.isEmpty { edit.onSave(nil); dismiss(); return }
-        guard let value = Double(text.replacingOccurrences(of: ",", with: ".")), value.isFinite, value >= 0, value <= edit.maximum, !edit.integer || value.rounded() == value else { error = "Enter a value from 0 to \(number(edit.maximum))."; return }
-        edit.onSave(value); dismiss()
+        guard let value = Double(text.replacingOccurrences(of: ",", with: ".")), value.isFinite,
+              (0...edit.maximum).contains(value), !edit.integer || value.rounded() == value else {
+            error = "Enter a value from 0 to \(number(edit.maximum))."
+            return
+        }
+        edit.onSave(value)
+        dismiss()
     }
 }
 

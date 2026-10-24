@@ -389,7 +389,7 @@ final class TrainingTests: XCTestCase {
         let replacement = data.activeSession!.exercises.last!
         XCTAssertNotEqual(replacement.variantID, foreign.id)
         XCTAssertEqual(replacement.sets[0].weight, 0)
-        try data.setWorkingWeight(10, for: replacement.id, saveFuture: true)
+        try editFirstWorkingWeight(&data, weight: 10, exerciseID: replacement.id, saveFuture: true)
         XCTAssertEqual(data.variant(foreign.id), foreign)
         let storedID = replacement.variantID
         try data.substitute(sessionExerciseID: replacement.id, with: original.exerciseID, future: true)
@@ -442,7 +442,7 @@ final class TrainingTests: XCTestCase {
         try data.addExerciseToSession(exercise.id)
         let added = data.activeSession!.exercises.last!
         XCTAssertNotEqual(added.variantID, foreign.id)
-        try data.setWorkingWeight(12, for: added.id, saveFuture: true)
+        try editFirstWorkingWeight(&data, weight: 12, exerciseID: added.id, saveFuture: true)
         try data.toggleSet(exerciseID: added.id, setID: added.sets[0].id)
         try data.finish()
         try data.start(routineID: lower.id)
@@ -748,16 +748,91 @@ final class TrainingTests: XCTestCase {
         XCTAssertEqual(data.activeSession!.exercises[0].sets[work[1]].weight, 77)
         try data.toggleSet(exerciseID: item.id, setID: item.sets[work[0]].id)
         try data.setLoggedWeight(105, exerciseID: item.id, setID: item.sets[work[0]].id)
-        XCTAssertEqual(data.activeSession!.exercises[0].workingWeight, 100)
-        try data.setWorkingWeight(110, for: item.id, saveFuture: false)
+        XCTAssertEqual(data.activeSession!.exercises[0].workingWeight, 105)
         XCTAssertEqual(data.activeSession!.exercises[0].sets[work[0]].weight, 105)
-        XCTAssertEqual(data.activeSession!.exercises[0].sets[work[1]].weight, 110)
+        XCTAssertEqual(data.activeSession!.exercises[0].sets[work[1]].weight, 77)
     }
 
     func testTemplateLoadResolvesAllLinkedSetsAndKeepsFixedLoads() throws {
         var variant = Variant(exerciseID: UUID(), label: "Day", rounding: 2.5, sets: [SetPlan(kind: .warmup, load: .percent, percent: 50), SetPlan(), SetPlan(), SetPlan(load: .fixed, fixedWeight: 30)])
         variant.setWeight(85, for: variant.sets[1].id)
         XCTAssertEqual(variant.sets.map { $0.resolvedWeight(working: variant.workingWeight, increment: variant.rounding) }, [42.5, 85, 85, 30])
+    }
+
+    private func editFirstWorkingWeight(_ data: inout TrainingData, weight: Double, exerciseID: UUID, saveFuture: Bool) throws {
+        let item = data.activeSession!.exercises.first { $0.id == exerciseID }!
+        let first = item.sets.first { $0.plan.kind != .warmup && $0.plan.load == .working && $0.completedAt == nil }!
+        try data.setLoggedWeight(weight, exerciseID: exerciseID, setID: first.id)
+        if saveFuture { try data.saveSessionWeights(exerciseID) }
+    }
+
+    func testAdvancedTargetEditingKeepsEnteredWeightsAndResults() throws {
+        var data = TrainingData.starter()
+        try data.start(routineID: data.routines[0].id)
+        let item = data.activeSession!.exercises[0]
+        let index = item.sets.firstIndex { $0.plan.load == .working }!
+        let set = item.sets[index]
+        try data.setLoggedWeight(120, exerciseID: item.id, setID: set.id)
+        data.activeSession!.exercises[0].sets[index].reps = 2
+        var plan = set.plan
+        plan.reps = 8; plan.repCeiling = 12; plan.rpe = 9
+        try data.replaceSetPlan(exerciseID: item.id, setID: set.id, plan: plan)
+        let changed = data.activeSession!.exercises[0].sets[index]
+        XCTAssertEqual(changed.weight, 120)
+        XCTAssertEqual(changed.weightIsEdited, true)
+        XCTAssertEqual(changed.reps, 2)
+        XCTAssertEqual(changed.plan.repRange, 8...12)
+        XCTAssertEqual(changed.rpe, 9)
+    }
+
+    func testIndependentWeightChainsMatchTemplatesAndWorkouts() throws {
+        var data = TrainingData.starter()
+        let day = data.routines[0]
+        let index = data.variants.firstIndex { $0.id == day.slots[0].variantID }!
+        var variant = data.variants[index]
+        variant.workingWeight = 0
+        variant.rounding = 2.5
+        variant.sets = [SetPlan(kind: .warmup, load: .percent), SetPlan(), SetPlan(), SetPlan()]
+        let ids = variant.sets.map(\.id)
+        variant.setWeight(100, for: ids[1])
+        XCTAssertEqual(variant.resolvedWeights, [50, 100, 100, 100])
+        variant.setWeight(110, for: ids[2])
+        XCTAssertEqual(variant.resolvedWeights, [50, 100, 110, 110])
+        variant.setWeight(105, for: ids[1])
+        XCTAssertEqual(variant.resolvedWeights, [52.5, 105, 110, 110])
+        data.variants[index] = variant
+        let restored = try LocalRepository.decode(LocalRepository.encode(data))
+        XCTAssertEqual(restored.variants[index].resolvedWeights, variant.resolvedWeights)
+        let imported = try RoutineCSV.decode(RoutineCSV.export(data, dayID: day.id))
+        XCTAssertEqual(imported.content.variant(variant.id)?.resolvedWeights, variant.resolvedWeights)
+        try data.start(routineID: day.id)
+        let item = data.activeSession!.exercises[0]
+        XCTAssertEqual(item.sets.map(\.weight), variant.resolvedWeights)
+        try data.setLoggedWeight(120, exerciseID: item.id, setID: item.sets[1].id)
+        XCTAssertEqual(data.activeSession!.exercises[0].sets.map(\.weight), [60, 120, 110, 110])
+        try data.setLoggedWeight(115, exerciseID: item.id, setID: item.sets[2].id)
+        XCTAssertEqual(data.activeSession!.exercises[0].sets.map(\.weight), [60, 120, 115, 115])
+        try data.saveSessionWeights(item.id)
+        XCTAssertEqual(data.variants[index].resolvedWeights, [60, 120, 115, 115])
+        XCTAssertNil(data.variants[index].sets[3].weightOverride)
+    }
+
+    func testExplicitWeightAnchorsKeepProgressionAndRejectInvalidImports() throws {
+        var data = TrainingData.starter()
+        let day = data.routines[0]
+        let index = data.variants.firstIndex { $0.id == day.slots[0].variantID }!
+        data.variants[index].sets = [SetPlan(reps: 5, repCeiling: nil), SetPlan(reps: 5, repCeiling: nil)]
+        data.variants[index].progression.mode = .linear
+        data.variants[index].progression.increment = 5
+        data.variants[index].setWeight(100, for: data.variants[index].sets[0].id)
+        data.variants[index].workingWeight = 0 // An imported explicit anchor can differ from the legacy base.
+        try data.start(routineID: day.id)
+        let item = data.activeSession!.exercises[0]
+        for set in item.sets { try data.toggleSet(exerciseID: item.id, setID: set.id) }
+        try data.finish()
+        XCTAssertEqual(data.variants[index].resolvedWeights, [105, 105])
+        data.variants[index].sets[0].weightOverride = -.infinity
+        XCTAssertThrowsError(try data.validated())
     }
 
     func testBatchAddingExercisesKeepsOrderAndIndependentTracks() throws {
@@ -888,7 +963,7 @@ final class TrainingTests: XCTestCase {
         var data = TrainingData.starter()
         try data.start(routineID: data.routines[0].id)
         let item = data.activeSession!.exercises[0]
-        try data.setWorkingWeight(100, for: item.id, saveFuture: false)
+        try editFirstWorkingWeight(&data, weight: 100, exerciseID: item.id, saveFuture: false)
         try data.addSessionSet(to: item.id, warmup: true)
         let added = data.activeSession!.exercises[0].sets.last!
         let increment = data.variant(item.variantID)!.rounding
@@ -940,14 +1015,14 @@ final class TrainingTests: XCTestCase {
         let originalWeight = item.sets[0].weight
         try data.toggleSet(exerciseID: item.id, setID: item.sets[0].id)
         let before = data.variant(item.variantID)!
-        try data.setWorkingWeight(100, for: item.id, saveFuture: false)
+        try editFirstWorkingWeight(&data, weight: 100, exerciseID: item.id, saveFuture: false)
         XCTAssertEqual(data.activeSession!.exercises[0].sets[0].weight, originalWeight)
         XCTAssertEqual(data.activeSession!.exercises[0].sets[2].weight, 100)
         XCTAssertEqual(data.activeSession!.exercises[0].sets[1].weight!, floor(75 / before.rounding) * before.rounding, accuracy: 0.00001)
         XCTAssertEqual(data.variant(item.variantID), before)
-        try data.setWorkingWeight(110, for: item.id, saveFuture: true)
+        try editFirstWorkingWeight(&data, weight: 110, exerciseID: item.id, saveFuture: true)
         XCTAssertEqual(data.variant(item.variantID)!.workingWeight, 110)
-        XCTAssertThrowsError(try data.setWorkingWeight(.nan, for: item.id, saveFuture: true))
+        XCTAssertThrowsError(try editFirstWorkingWeight(&data, weight: .nan, exerciseID: item.id, saveFuture: true))
     }
     func testLiveDropUsesActualLoadAndLeavesRoutineAlone() throws {
         var data = TrainingData.starter()

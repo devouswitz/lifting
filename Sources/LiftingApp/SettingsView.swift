@@ -60,15 +60,7 @@ struct SettingsView: View {
                 Toggle(isOn: setting(\.keepAwake)) { TileLabel(title: "Keep Screen On During Workouts", symbol: "sun.max.fill", color: .orange) }
             }
             Section("Plates") {
-                LabeledContent {
-                    HStack(spacing: 4) {
-                        TextField("0", value: Binding(get: { store.data.settings.unit.display(store.data.settings.barWeight) }, set: { value in store.perform { $0.settings.barWeight = $0.settings.unit.kilograms(value) } }), format: .number).labelsHidden().multilineTextAlignment(.trailing).frame(maxWidth: 70)
-                        #if os(iOS)
-                            .keyboardType(.decimalPad)
-                        #endif
-                        Text(store.data.settings.unit.rawValue).foregroundStyle(.secondary)
-                    }
-                } label: { TileLabel(title: "Bar Weight", symbol: "minus", color: .gray) }
+                NumberRow("Bar Weight (\(store.data.settings.unit.rawValue))", value: Binding(get: { store.data.settings.barWeight }, set: { value in store.perform { $0.settings.barWeight = value } }), factor: store.data.settings.unit.kilograms(1))
                 NavigationLink { PlateInventoryView() } label: { TileLabel(title: "Plate Sizes", symbol: "circle.circle.fill", color: .gray) }
                 NavigationLink { PlateCalculatorView() } label: { TileLabel(title: "Plate Calculator", symbol: "plus.forwardslash.minus", color: palette.action) }
             }
@@ -224,7 +216,7 @@ struct PlateCalculatorView: View {
     var body: some View {
         ThemedForm {
             Section {
-                HStack { Text("Target (\(unit.rawValue))"); Spacer(); TextField("0", value: $target, format: .number).labelsHidden().multilineTextAlignment(.trailing).frame(maxWidth: 110) }
+                NumberRow("Target (\(unit.rawValue))", value: $target)
                 LabeledContent("Bar", value: "\(number(unit.display(store.data.settings.barWeight))) \(unit.rawValue)")
             }
             Section("Per side") {

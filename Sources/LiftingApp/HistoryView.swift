@@ -359,11 +359,11 @@ struct LoggedSetEditor: View {
         ThemedForm {
             Picker("Type", selection: $set.plan.kind) { ForEach(SetKind.allCases) { Text($0.title).tag($0) } }
             Toggle("Completed", isOn: Binding(get: { set.completedAt != nil }, set: { set.completedAt = $0 ? .now : nil }))
-            HStack { Text("Weight (\(unit.rawValue))"); OptionalNumberField(title: "Optional", value: $set.weight, factor: unit.kilograms(1)) }
-            HStack { Text("Reps"); OptionalNumberField(title: "Optional", value: Binding(get: { set.reps.map(Double.init) }, set: { set.reps = $0.map(Int.init) }), integer: true) }
-            HStack { Text("Time (minutes)"); OptionalNumberField(title: "Optional", value: $set.seconds, factor: 60) }
-            HStack { Text("Distance (meters)"); OptionalNumberField(title: "Optional", value: $set.meters) }
-            HStack { Text("RPE"); OptionalNumberField(title: "Optional", value: $set.rpe) }
+            NumberRow("Weight (\(unit.rawValue))", value: $set.weight, factor: unit.kilograms(1))
+            NumberRow("Reps", value: Binding(get: { set.reps.map(Double.init) }, set: { set.reps = $0.map(Int.init) }), integer: true)
+            NumberRow("Time (minutes)", value: $set.seconds, factor: 60)
+            NumberRow("Distance (meters)", value: $set.meters)
+            NumberRow("RPE", value: $set.rpe)
         }.formStyle(.grouped).navigationTitle("Edit set").inlineTitle()
     }
 }

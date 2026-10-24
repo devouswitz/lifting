@@ -11,6 +11,10 @@ struct TemplateExerciseCard: View {
     let toggle: () -> Void
     let link: () -> Void
     let move: (Int) -> Void
+    let canMoveUp: Bool
+    let canMoveDown: Bool
+    let slotID: UUID
+    @Binding var dragging: UUID?
     let remove: () -> Void
     @State private var numberEdit: NumericEdit?
     @State private var repEdit: SetPlan?
@@ -21,6 +25,7 @@ struct TemplateExerciseCard: View {
     private var exercise: Exercise? { store.data.exercise(variant.exerciseID) }
 
     var body: some View {
+        let weights = variant.resolvedWeights
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Button(action: toggle) {
@@ -29,19 +34,22 @@ struct TemplateExerciseCard: View {
                         if let groupTitle { Label(groupTitle, systemImage: "link").font(.caption).foregroundStyle(palette.technique) }
                         if !expanded { Text(planSummary(variant, unit: unit)).font(.subheadline).foregroundStyle(.secondary) }
                     }.frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).contentShape(Rectangle())
-                }.buttonStyle(.plain).accessibilityLabel("\(expanded ? "Collapse" : "Expand") \(exercise?.name ?? "exercise")")
+                }.buttonStyle(.plain)
+                .modifier(ExerciseDragHandle(id: slotID, enabled: true, dragging: $dragging))
+                .modifier(ReorderActions(canMoveUp: canMoveUp, canMoveDown: canMoveDown, move: move))
+                .accessibilityLabel("\(expanded ? "Collapse" : "Expand") \(exercise?.name ?? "exercise")")
                 Menu {
                     Button("Exercise Settings", systemImage: "slider.horizontal.3") { settings = true }
                     Button("Superset / Circuit", systemImage: "link", action: link)
-                    Button("Add Warm-up", systemImage: "flame") { addWarmup() }.disabled(exercise?.mode == .cardio)
-                    Menu("Warm-up Preset") {
+                    if exercise?.mode != .cardio {
+                    Menu("Warm-ups", systemImage: "flame") {
+                        Button("Add Warm-up") { addWarmup() }
                         ForEach(store.data.warmupPresets) { preset in
                             Button(preset.name) { variant.sets = TrainingData.applyingWarmups(preset.sets, to: variant.sets, replacing: true) }
                         }
-                    }.disabled(store.data.warmupPresets.isEmpty || exercise?.mode == .cardio)
+                    }
+                    }
                     Divider()
-                    Button("Move Up", systemImage: "arrow.up") { move(-1) }
-                    Button("Move Down", systemImage: "arrow.down") { move(1) }
                     Button("Remove Exercise", systemImage: "trash", role: .destructive, action: remove)
                 } label: { Image(systemName: "ellipsis").font(.system(size: 18)).frame(width: 32, height: 44) }.compactMenu()
                     .accessibilityLabel("Options for \(exercise?.name ?? "exercise")")
@@ -50,7 +58,7 @@ struct TemplateExerciseCard: View {
                 let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8)) : AnyLayout(HStackLayout(spacing: 16))
                 layout {
                     if exercise?.mode != .cardio {
-                        Button { editWorkingWeight() } label: { Text("Working ").foregroundStyle(.secondary) + Text("\(number(unit.display(variant.workingWeight))) \(unit.rawValue)").foregroundStyle(palette.action) }
+                        Text(weightSummary(zip(variant.sets, weights).compactMap { $0.kind == .warmup ? nil : $1 }, unit: unit)).foregroundStyle(.secondary)
                     }
                     Button {
                         numberEdit = NumericEdit(title: "Rest (seconds)", value: Double(variant.restSeconds), step: 15, maximum: 86400, integer: true) { variant.restSeconds = Int($0 ?? 0) }
@@ -69,7 +77,7 @@ struct TemplateExerciseCard: View {
                     } else if index > 0 && plan.kind != .warmup && variant.sets[index - 1].kind == .warmup {
                         Text("Working sets").font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
                     }
-                    SwipeToDelete(action: { variant.sets.removeAll { $0.id == plan.id } }) { row(plan, index: index) }
+                    SwipeToDelete(action: { variant.sets.removeAll { $0.id == plan.id } }) { row(plan, index: index, weight: weights[index]) }
                 }
                 let actions = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(spacing: 8)) : AnyLayout(HStackLayout(spacing: 8))
                 actions {
@@ -81,14 +89,14 @@ struct TemplateExerciseCard: View {
                 }
             }
         }.card(padding: 16)
-        .sheet(item: $numberEdit) { NumericPad(edit: $0) }
+        .sheet(item: $numberEdit) { NumberEditor(edit: $0) }
         .sheet(item: $repEdit) { plan in RepTargetEditor(plan: plan) { edited in update(plan.id) { $0.reps = edited.reps; $0.repCeiling = edited.repCeiling; $0.amrap = edited.amrap }; return true } }
         .sheet(item: $planEdit) { plan in
             TemplatePlanEditor(variant: variant, plan: plan) { edited in store.saveVariant(edited) }.sheetSize()
         }
         .sheet(isPresented: $settings) { VariantEditor(variant: variant).sheetSize() }
         .sheet(item: $technique) { kind in
-            TechniqueEditor(kind: kind, workingWeight: variant.workingWeight, rounding: variant.rounding) { plans, replace, _ in
+            TechniqueEditor(kind: kind, workingWeight: variant.referenceWeight, rounding: variant.rounding) { plans, replace, _ in
                 var edited = variant
                 if replace { edited.sets.removeAll { $0.kind != .warmup } }
                 if kind == .drop, let last = edited.sets.indices.last { edited.sets[last].restSeconds = 0 }
@@ -97,7 +105,7 @@ struct TemplateExerciseCard: View {
         }
     }
 
-    private func row(_ plan: SetPlan, index: Int) -> some View {
+    private func row(_ plan: SetPlan, index: Int, weight: Double?) -> some View {
         let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6)) : AnyLayout(HStackLayout(spacing: 8))
         return layout {
             Menu {
@@ -116,14 +124,14 @@ struct TemplateExerciseCard: View {
                     if plan.load == .percent { Text("\(number(plan.percent))%").font(.system(size: 10)).foregroundStyle(.secondary) }
                 }
             }.compactMenu().frame(width: 36, height: 44)
-            field(exercise?.mode == .cardio ? plan.seconds.map(clockText) ?? "Time" : plan.resolvedWeight(working: variant.workingWeight, increment: variant.rounding).map { number(unit.display($0)) } ?? "–", label: "Set \(index + 1), \(exercise?.mode == .cardio ? "time" : "weight")") {
+            field(exercise?.mode == .cardio ? plan.seconds.map(clockText) ?? "Time" : weight.map { number(unit.display($0)) } ?? "–", label: "Set \(index + 1), \(exercise?.mode == .cardio ? "time" : "weight")") {
                 if exercise?.mode == .cardio {
                     numberEdit = NumericEdit(title: "Time (minutes)", value: plan.seconds.map { $0 / 60 }, step: 1, maximum: 100000, integer: false) { value in update(plan.id) { $0.seconds = value.map { $0 * 60 } } }
                 } else { editWeight(plan) }
             }
             .contextMenu {
-                Button("Use Working Weight") { update(plan.id) { $0.load = .working } }
-                Button("Use Separate Weight") { update(plan.id) { $0.fixedWeight = plan.resolvedWeight(working: variant.workingWeight, increment: variant.rounding) ?? 0; $0.load = .fixed }; editWeight(variant.sets.first { $0.id == plan.id } ?? plan) }
+                Button("Use Suggested Weight") { update(plan.id) { $0.load = .working; $0.weightOverride = nil } }
+                Button("Use Separate Weight") { update(plan.id) { $0.fixedWeight = weight ?? 0; $0.load = .fixed }; editWeight(variant.sets.first { $0.id == plan.id } ?? plan) }
                 if plan.kind == .warmup || plan.kind == .drop { Button("Use Percentage") { update(plan.id) { $0.load = .percent } } }
             }
             field(plan.repTarget ?? "–", label: "Set \(index + 1), rep target") { repEdit = plan }
@@ -142,12 +150,9 @@ struct TemplateExerciseCard: View {
         guard let index = edited.sets.firstIndex(where: { $0.id == id }) else { return }
         change(&edited.sets[index]); variant = edited
     }
-    private func editWorkingWeight() {
-        numberEdit = NumericEdit(title: "Working weight (\(unit.rawValue))", context: exercise?.name, value: unit.display(variant.workingWeight), step: 2.5, maximum: 100000, integer: false) { variant.workingWeight = unit.kilograms($0 ?? 0) }
-    }
     private func editWeight(_ plan: SetPlan) {
         if plan.load == .working {
-            numberEdit = NumericEdit(title: "Working weight (\(unit.rawValue))", context: exercise?.name, value: unit.display(variant.workingWeight), step: 2.5, maximum: 100000, integer: false) { value in
+            numberEdit = NumericEdit(title: "Weight (\(unit.rawValue))", context: exercise?.name, value: unit.display(variant.weight(for: plan) ?? 0), step: 2.5, maximum: 100000, integer: false) { value in
                 variant.setWeight(unit.kilograms(value ?? 0), for: plan.id)
             }
             return
@@ -163,6 +168,6 @@ struct TemplateExerciseCard: View {
     }
     private func addSet() {
         var plan = variant.sets.last(where: { $0.kind == .working }) ?? exercise.flatMap { Variant.standard(for: $0, label: "").sets.first } ?? SetPlan()
-        plan.id = UUID(); variant.sets.append(plan)
+        plan.id = UUID(); plan.weightOverride = nil; variant.sets.append(plan)
     }
 }

@@ -37,7 +37,7 @@ testproduct=add('testproduct','PBXFileReference',explicitFileType='wrapper.cfbun
 products=add('products','PBXGroup',children=arr([appproduct,coreproduct,testproduct]),name='Products',sourceTree=q('<group>'))
 main=add('main','PBXGroup',children=arr(groups+[products]),sourceTree=q('<group>'))
 
-common={'SDKROOT':'iphoneos','IPHONEOS_DEPLOYMENT_TARGET':'17.0','SWIFT_VERSION':'5.0','CLANG_ENABLE_MODULES':'YES','CLANG_ENABLE_OBJC_ARC':'YES','SUPPORTED_PLATFORMS':q('iphoneos iphonesimulator'),'TARGETED_DEVICE_FAMILY':q('1,2'),'CODE_SIGN_STYLE':'Automatic','MARKETING_VERSION':'1.0','CURRENT_PROJECT_VERSION':'3','GENERATE_INFOPLIST_FILE':'YES','ENABLE_USER_SCRIPT_SANDBOXING':'YES','DEAD_CODE_STRIPPING':'YES','COPY_PHASE_STRIP':'YES'}
+common={'SDKROOT':'iphoneos','IPHONEOS_DEPLOYMENT_TARGET':'17.0','SWIFT_VERSION':'5.0','CLANG_ENABLE_MODULES':'YES','CLANG_ENABLE_OBJC_ARC':'YES','SUPPORTED_PLATFORMS':q('iphoneos iphonesimulator'),'TARGETED_DEVICE_FAMILY':q('1,2'),'CODE_SIGN_STYLE':'Automatic','MARKETING_VERSION':'1.0','CURRENT_PROJECT_VERSION':'4','GENERATE_INFOPLIST_FILE':'YES','ENABLE_USER_SCRIPT_SANDBOXING':'YES','DEAD_CODE_STRIPPING':'YES','COPY_PHASE_STRIP':'YES'}
 def configs(name,extras):
     ids=[]
     for mode in ['Debug','Release']:

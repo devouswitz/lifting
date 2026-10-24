@@ -8,7 +8,7 @@ public struct RoutineBundle: Sendable {
 }
 
 public enum RoutineCSV {
-    public static let headers = ["format", "record_type", "program_id", "program", "program_notes", "day_order", "day_id", "day", "day_notes", "exercise_order", "slot_id", "exercise_id", "exercise", "mode", "muscle", "equipment", "variant_id", "variant", "working_weight_kg", "rounding_kg", "rest_seconds", "exercise_notes", "progression", "increment_kg", "deload_after", "deload_percent", "group", "set_order", "set_id", "set_type", "load_rule", "fixed_weight_kg", "percent", "reps_min", "reps_max", "seconds", "meters", "rpe", "amrap", "set_rest_seconds", "group_rest_seconds", "transition_seconds", "secondary_muscles", "set_type_name", "set_type_badge", "set_type_color"]
+    public static let headers = ["format", "record_type", "program_id", "program", "program_notes", "day_order", "day_id", "day", "day_notes", "exercise_order", "slot_id", "exercise_id", "exercise", "mode", "muscle", "equipment", "variant_id", "variant", "working_weight_kg", "rounding_kg", "rest_seconds", "exercise_notes", "progression", "increment_kg", "deload_after", "deload_percent", "group", "set_order", "set_id", "set_type", "load_rule", "fixed_weight_kg", "percent", "reps_min", "reps_max", "seconds", "meters", "rpe", "amrap", "set_rest_seconds", "group_rest_seconds", "transition_seconds", "secondary_muscles", "set_type_name", "set_type_badge", "set_type_color", "weight_override_kg"]
 
     public static func export(_ data: TrainingData, programID: UUID? = nil, dayID: UUID? = nil) throws -> Data {
         let owner = programID.flatMap(data.program)
@@ -35,6 +35,7 @@ public enum RoutineCSV {
                     set["set_order"] = String(setOrder + 1); set["set_id"] = plan.id.uuidString
                     set["set_type"] = plan.kind.rawValue; set["load_rule"] = plan.load.rawValue
                     if let type = data.setType(plan.customTypeID) { set["set_type_name"] = type.name; set["set_type_badge"] = type.badge; set["set_type_color"] = type.color ?? "" }
+                    set["weight_override_kg"] = plan.weightOverride.map { String($0) } ?? ""
                     set["fixed_weight_kg"] = String(plan.fixedWeight); set["percent"] = String(plan.percent)
                     set["reps_min"] = plan.reps.map { String($0) } ?? ""; set["reps_max"] = plan.repCeiling.map { String($0) } ?? ""
                     set["seconds"] = plan.seconds.map { String($0) } ?? ""; set["meters"] = plan.meters.map { String($0) } ?? ""
@@ -118,7 +119,8 @@ public enum RoutineCSV {
             if let existing = slotOrder[dayID]?[exerciseOrder], existing != slot { throw TrainingError.invalid("Conflicting linked exercise settings on row \(r.number).") }
             slotOrder[dayID, default: [:]][exerciseOrder] = slot
             guard let kind = SetKind(rawValue: r.text("set_type", default: "working")), let load = LoadRule(rawValue: r.text("load_rule", default: mode == .strength ? "working" : "none")) else { throw TrainingError.invalid("Invalid set_type or load_rule on row \(r.number).") }
-            let plan = SetPlan(id: try r.uuid("set_id") ?? UUID(), kind: kind, load: load, fixedWeight: try r.double("fixed_weight_kg", default: 0)!, percent: try r.double("percent", default: 50, maximum: 1000)!, reps: try r.int("reps_min"), repCeiling: try r.int("reps_max"), seconds: try r.double("seconds"), meters: try r.double("meters"), rpe: try r.double("rpe", maximum: 10), amrap: try r.bool("amrap"), restSeconds: try r.int("set_rest_seconds"))
+            var plan = SetPlan(id: try r.uuid("set_id") ?? UUID(), kind: kind, load: load, fixedWeight: try r.double("fixed_weight_kg", default: 0)!, percent: try r.double("percent", default: 50, maximum: 1000)!, reps: try r.int("reps_min"), repCeiling: try r.int("reps_max"), seconds: try r.double("seconds"), meters: try r.double("meters"), rpe: try r.double("rpe", maximum: 10), amrap: try r.bool("amrap"), restSeconds: try r.int("set_rest_seconds"))
+            plan.weightOverride = try r.double("weight_override_kg")
             var typed = plan
             typed.customTypeID = data.csvSetType(name: r.text("set_type_name"), badge: r.text("set_type_badge"), color: r.text("set_type_color"), countsAs: kind)
             let position = try r.int("set_order", default: (setOrder[variantID]?.keys.max() ?? 0) + 1)!

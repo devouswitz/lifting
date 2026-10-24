@@ -135,7 +135,9 @@ final class AppStore: ObservableObject {
     }
     func skipRest() { perform { $0.restDeadline = nil }; cancelRestAlert() }
     @discardableResult func saveVariant(_ variant: Variant) -> Bool {
-        perform { d in
+        var variant = variant
+        if let first = variant.sets.first(where: { $0.kind != .warmup && $0.load == .working }), let weight = first.weightOverride { variant.workingWeight = weight }
+        return perform { d in
             if let i = d.variants.firstIndex(where: { $0.id == variant.id }) { d.variants[i] = variant }
             else { d.variants.append(variant) }
         }
@@ -243,7 +245,8 @@ func planSummary(_ variant: Variant, unit: WeightUnit) -> String {
     if let target = first.repTarget { parts.append("\(work.count) × \(target.replacingOccurrences(of: "-", with: "–"))") }
     else if let seconds = first.seconds { parts.append(work.count > 1 ? "\(work.count) × \(clockText(seconds))" : clockText(seconds)) }
     else { parts.append(counted(work.count, "set")) }
-    if first.load != .none { parts.append("\(number(unit.display(variant.workingWeight))) \(unit.rawValue)") }
+    let weights = zip(variant.sets, variant.resolvedWeights).compactMap { $0.kind == .warmup ? nil : $1 }
+    if !weights.isEmpty { parts.append(weightSummary(weights, unit: unit)) }
     if first.repTarget != nil, let seconds = first.seconds { parts.append(clockText(seconds)) }
     if let rpe = first.rpe { parts.append("RPE \(number(rpe))") }
     return parts.joined(separator: " · ")
@@ -283,4 +286,11 @@ func loggedExerciseSummary(_ exercise: SessionExercise, unit: WeightUnit) -> Str
         }
         return parts.joined(separator: " · ")
     }.joined(separator: "\n")
+}
+
+/// A range avoids implying that independent sets share an editable base weight.
+func weightSummary(_ weights: [Double], unit: WeightUnit) -> String {
+    guard let low = weights.min(), let high = weights.max() else { return "–" }
+    let lower = number(unit.display(low))
+    return "\(lower)\(abs(high - low) < 0.00001 ? "" : "–" + number(unit.display(high))) \(unit.rawValue)"
 }

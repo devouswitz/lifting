@@ -160,3 +160,15 @@ The bundle/storage identities are unchanged. Exact reps, ranges, AMRAP, no-count
 Physical phone/Watch checks remain unrun. The native hold-and-drag UI could not be exercised with a sustained touch drag through the automation interface; the reorder mutation is tested, with Move Up/Down retained. TestFlight distribution status is recorded separately in the release deliverables.
 
 Distribution IPA verification checks its signature, original bundle identity, exact build number, and HealthKit entitlements. A negative check rejects an export missing HealthKit. Fractional CSV pause boundaries have a regression test so timestamp precision cannot reject a valid paused workout on import.
+
+## Pass of 2026-10-23 (Torque 1.0 build 4)
+
+86 core test cases pass, retaining prior coverage. Added checks cover independent weight chains across templates, workouts, JSON and CSV; explicit anchors and progression; and advanced target edits preserving manually entered results. The old exercise-wide mutation API was removed after its callers were replaced. Optional per-set overrides retain compatibility with older saves and CSV files.
+
+On the iPhone 17e simulator, the template and live chains were checked through native UI: 100/100/100, then 100/110/110, then 105/110/110. The first working set updates untouched percentage warm-ups. Save Weights to This Day and finishing retained 105/110/110, with explicit anchors only on the first two prescribed sets. Exact reps and ranges remained separate; increasing an exact target now clears its former equal ceiling. Program Duplicate/Delete remain in the row context menu and program details; deletion uses a centered confirmation with Cancel. Reorder is available when multiple programs exist, without competing swipe/edit backgrounds.
+
+Number fields now use shared native controls with select-all on initial focus and full-row form hit areas. The single-value editor retains adjustments and supports decimals, clearing and paste. iPad mini portrait, dark appearance and maximum accessibility text were inspected. A wrapped fractional adjustment was fixed with two columns at accessibility sizes and a scaled value field. The native Mac preview accepted and saved 102.5, including inherited weights and rounded warm-ups.
+
+Day and workout menus contain their own scope; exercise linking and configuration live on exercise menus. Exercise weights are derived, read-only summaries, including mixed-weight ranges. Native exercise drag/drop is shared by days and active workouts. Move Up/Down remains as accessibility actions on headers and was exercised in the simulator. Sustained touch dragging and physical iPhone/Watch behavior remain unverified through this automation interface. No claim of physical gesture verification is made.
+
+The iOS simulator build and device Release archive pass. The exported distribution IPA passes signature, bundle identity, build number and HealthKit capability verification. All test data is isolated; user workout data was not changed. See the build 4 release report for distribution status and measured package sizes.

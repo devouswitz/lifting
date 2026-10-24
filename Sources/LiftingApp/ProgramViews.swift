@@ -5,6 +5,16 @@ import LiftingCore
 struct ProgramsView: View {
     @EnvironmentObject var store: AppStore
     @Environment(\.palette) var palette
+    #if os(iOS)
+    @State private var editMode = EditMode.inactive
+    #endif
+    private var isEditing: Bool {
+        #if os(iOS)
+        editMode == .active
+        #else
+        false
+        #endif
+    }
     @State private var creatingProgram = false
     @State private var importing = false
     @State private var detail: UUID?
@@ -28,14 +38,14 @@ struct ProgramsView: View {
                         }.buttonStyle(.plain)
                         .accessibilityLabel("\(program.name), \(counted(program.dayIDs.count, "day"))").accessibilityAddTraits(program.id == store.data.activeProgramID ? .isSelected : [])
                         Button { detail = program.id } label: { Image(systemName: "info.circle").font(.title3).foregroundStyle(palette.action) }
+                            .frame(width: 44, height: 44).contentShape(Rectangle())
                             .buttonStyle(.borderless).accessibilityLabel("Open \(program.name)").accessibilityIdentifier("programs.info.\(program.id)")
                     }
-                    .swipeActions(edge: .trailing) {
-                        Button("Delete", role: .destructive) { deleting = program }.tint(.red)
-                        Button("Duplicate") { store.perform { _ = try $0.duplicateProgram(program.id) } }.tint(.gray)
+                    .contextMenu {
+                        Button("Duplicate", systemImage: "plus.square.on.square") { store.perform { _ = try $0.duplicateProgram(program.id) } }
+                        Button("Delete", systemImage: "trash", role: .destructive) { deleting = program }
                     }
                 }
-                .onDelete { offsets in deleting = offsets.first.map { store.data.programs[$0] } }
                 .onMove { source, target in store.perform { $0.programs.move(fromOffsets: source, toOffset: target) } }
                 AddRow(title: "New Program") { creatingProgram = true }.accessibilityIdentifier("programs.new")
             }
@@ -48,16 +58,20 @@ struct ProgramsView: View {
             }
         }
         .formStyle(.grouped).navigationTitle("Programs")
+        #if os(iOS)
+        .environment(\.editMode, $editMode)
+        #endif
         .toolbar {
             #if os(iOS)
-            ToolbarItem(placement: .primaryAction) { EditButton() }
+            ToolbarItem(placement: .primaryAction) { if store.data.programs.count > 1 || isEditing { Button(isEditing ? "Done" : "Reorder") { withAnimation { editMode = isEditing ? .inactive : .active } } } }
             #endif
         }
         .navigationDestination(item: $detail) { ProgramEditor(programID: $0) }
         .sheet(isPresented: $creatingProgram) { NewProgramView().environmentObject(store).sheetSize() }
-        .confirmationDialog("Delete \(deleting?.name ?? "program") and its days?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }), titleVisibility: .visible) {
+        .alert("Delete \(deleting?.name ?? "program")?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } })) {
+            Button("Cancel", role: .cancel) { deleting = nil }
             Button("Delete Program", role: .destructive) { if let deleting { store.perform { $0.removeProgram(deleting.id) } }; deleting = nil }
-        } message: { Text("Templates and workout history are kept.") }
+        } message: { Text("Its days will be removed. Saved days and workout history are kept.") }
         .modifier(CSVImportModifier(isPresented: $importing))
     }
 }
@@ -175,6 +189,7 @@ struct ProgramEditor: View {
                                     if program.nextDayID == id { Chip(title: "Next", accent: true) }
                                 }
                             }
+                            .modifier(ReorderActions(canMoveUp: index > 0, canMoveDown: index + 1 < program.dayIDs.count) { move(id, by: $0) })
                             .swipeActions(edge: .leading) {
                                 if program.nextDayID != id { Button("Make Next") { store.perform { try $0.selectNextDay(id, in: programID) } }.tint(palette.action) }
                             }
@@ -211,7 +226,7 @@ struct ProgramEditor: View {
             Button("Add") { let clean = dayName.trimmingCharacters(in: .whitespacesAndNewlines); if !clean.isEmpty { store.perform { newDay = try $0.addDay(to: programID, name: clean) } } }
             Button("Cancel", role: .cancel) {}
         }
-        .confirmationDialog("Delete program and its days?", isPresented: $deleting, titleVisibility: .visible) { Button("Delete Program", role: .destructive) { if store.perform({ $0.removeProgram(programID) }) { dismiss() } } } message: { Text("Templates and workout history are kept.") }
+        .alert("Delete program and its days?", isPresented: $deleting) { Button("Cancel", role: .cancel) {} ; Button("Delete Program", role: .destructive) { if store.perform({ $0.removeProgram(programID) }) { dismiss() } } } message: { Text("Templates and workout history are kept.") }
         .modifier(CSVExportModifier(request: $export))
     }
     func move(_ id: UUID, by offset: Int) {

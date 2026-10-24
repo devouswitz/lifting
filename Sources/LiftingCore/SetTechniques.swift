@@ -49,7 +49,7 @@ public extension TrainingData {
         guard let e = activeSession?.exercises.firstIndex(where: { $0.id == exerciseID }), let variant = variant(activeSession!.exercises[e].variantID) else { throw TrainingError.invalid("Exercise unavailable.") }
         let item = activeSession!.exercises[e]
         var set = item.sets.last ?? LoggedSet(plan: SetPlan(), variant: variant)
-        set.id = UUID(); set.plan.id = UUID(); set.completedAt = nil; set.weightIsEdited = false
+        set.id = UUID(); set.plan.id = UUID(); set.completedAt = nil; set.weightIsEdited = false; set.plan.weightOverride = nil
         if warmup {
             var current = variant; current.workingWeight = item.workingLoad(fallback: variant.workingWeight); current.rounding = item.roundingIncrement ?? variant.rounding
             set = LoggedSet(plan: SetPlan(kind: .warmup, load: .percent, reps: 5, repCeiling: nil), variant: current)

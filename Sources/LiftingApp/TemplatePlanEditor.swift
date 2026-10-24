@@ -10,7 +10,7 @@ struct TemplatePlanEditor: View {
 
     var body: some View {
         NavigationStack {
-            PlanEditor(plan: $plan, unit: store.data.settings.unit, workingWeight: $variant.workingWeight)
+            PlanEditor(plan: $plan, unit: store.data.settings.unit, suggestedWeight: variant.weight(for: plan))
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                     ToolbarItem(placement: .confirmationAction) {

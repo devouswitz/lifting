@@ -8,6 +8,7 @@ struct RoutineEditor: View {
     let routineID: UUID
     var showsStart = false
     @State private var picker = false
+    @State private var dragging: UUID?
     @State private var expanded: UUID?
     @State private var linking = false
     @State private var linkedSlotID: UUID?
@@ -29,8 +30,19 @@ struct RoutineEditor: View {
                                 toggle: { withAnimation(.snappy) { expanded = expanded == slot.id ? nil : slot.id } },
                                 link: { linkedSlotID = slot.id; linking = true },
                                 move: { offset in move(slot.id, by: offset) },
+                                canMoveUp: routine.slots.first?.id != slot.id,
+                                canMoveDown: routine.slots.last?.id != slot.id,
+                                slotID: slot.id, dragging: $dragging,
                                 remove: { update { $0.slots.removeAll { $0.id == slot.id } } }
                             )
+                            .modifier(ExerciseDropTarget(id: slot.id, dragging: $dragging) { source, target, after in
+                                update { day in
+                                    guard let from = day.slots.firstIndex(where: { $0.id == source }) else { return }
+                                    let item = day.slots.remove(at: from)
+                                    guard let to = day.slots.firstIndex(where: { $0.id == target }) else { day.slots.insert(item, at: from); return }
+                                    day.slots.insert(item, at: to + (after ? 1 : 0))
+                                }
+                            })
                         }
                     }
                     Button { picker = true } label: { Label("Add Exercises", systemImage: "plus") }.buttonStyle(FieldButtonStyle()).accessibilityIdentifier("routine.addExercises")
@@ -46,7 +58,7 @@ struct RoutineEditor: View {
                 ToolbarItem(placement: .primaryAction) {
                     DayMenu(day: routine, program: store.data.programForDay(routineID), includeEdit: false,
                             onDelete: { dismiss() }, onRename: { name = routine.name; renaming = true },
-                            onLink: { linkedSlotID = nil; linking = true }, onWarmups: { warmups = true })
+                            onWarmups: { warmups = true })
                 }
             }
         }

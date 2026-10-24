@@ -15,7 +15,6 @@ struct WorkoutView: View {
     @State private var finishing = false
     @State private var discard = false
     @State private var sessionNotes = false
-    @State private var linking = false
     @State private var warmups = false
     var body: some View {
         NavigationStack {
@@ -65,7 +64,6 @@ struct WorkoutView: View {
             }
             #endif
             .sheet(isPresented: $adding) { ExercisePicker(title: "Add Exercises", onAdd: { exercises in store.perform { data in for exercise in exercises { try data.addExerciseToSession(exercise.id) } } }).environmentObject(store).sheetSize() }
-            .sheet(isPresented: $linking) { LinkedExerciseEditor().environmentObject(store).sheetSize() }
             .sheet(isPresented: $warmups) { ApplyWarmupPreset().environmentObject(store).sheetSize() }
             .sheet(isPresented: $finishing) { finishSheet }
             .sheet(isPresented: $sessionNotes) {
@@ -98,8 +96,7 @@ struct WorkoutView: View {
         Menu {
             Button(store.data.activeSession?.pausedAt == nil ? "Pause Workout" : "Resume Workout", systemImage: store.data.activeSession?.pausedAt == nil ? "pause" : "play") { store.pauseWorkout(store.data.activeSession?.pausedAt == nil) }
             Button("Name and Note", systemImage: "note.text") { sessionNotes = true }.accessibilityIdentifier("workout.note")
-            Button("Superset / Circuit", systemImage: "link") { linking = true }.disabled((store.data.activeSession?.exercises.count ?? 0) < 2).accessibilityIdentifier("workout.link")
-            Button("Apply Warm-up Preset", systemImage: "flame") { warmups = true }
+            Button("Warm-ups for Workout", systemImage: "flame") { warmups = true }
             Divider()
             Button("Collapse All", systemImage: "chevron.up") { store.perform { $0.setAllExercisesExpanded(false) } }.accessibilityIdentifier("workout.collapseAll")
             Button("Expand All", systemImage: "chevron.down") { store.perform { $0.setAllExercisesExpanded(true) } }.accessibilityIdentifier("workout.expandAll")
@@ -229,19 +226,21 @@ struct WorkoutExerciseCard: View {
                     Button {
                         withAnimation(.snappy) { _ = store.perform { $0.setExerciseExpanded(exerciseID, expanded: item.collapsed == true, focus: item.collapsed == true) } }
                     } label: { header(item) }
-                    .modifier(ExerciseDragHandle(id: exerciseID, enabled: item.collapsed == true, dragging: $dragging))
+                    .modifier(ExerciseDragHandle(id: exerciseID, enabled: true, dragging: $dragging))
                     .buttonStyle(.plain).accessibilityLabel("\(item.collapsed == true ? "Expand" : "Collapse") \(item.name)").accessibilityIdentifier("workout.\(exerciseID).collapse").accessibilityValue("\(item.collapsed == true ? "Collapsed" : "Expanded"), \(item.sets.filter { $0.completedAt != nil }.count) of \(item.sets.count) sets")
+                    .modifier(ReorderActions(canMoveUp: store.data.activeSession?.exercises.first?.id != exerciseID, canMoveDown: store.data.activeSession?.exercises.last?.id != exerciseID) { offset in
+                        store.perform { $0.moveSessionExercise(exerciseID, offset: offset) }
+                    })
                     Menu {
                         Button("Swap Exercise", systemImage: "arrow.triangle.2.circlepath") { substituting = true }.accessibilityIdentifier("workout.\(item.id).substitute")
                         Button("Superset / Circuit", systemImage: "link") { linking = true }
                         Divider()
                         Button("Add Warm-up Set", systemImage: "plus") { appendSet(item, warmup: true); store.perform { $0.setExerciseExpanded(exerciseID, expanded: true, focus: true) } }.disabled(item.mode == .cardio)
                         Button("Apply Warm-up Preset", systemImage: "flame") { warmups = true }.disabled(item.mode == .cardio)
-                        Button("Edit Prescription", systemImage: "slider.horizontal.3") { editVariant = store.data.variant(item.variantID) }
+                        Button("Edit Saved Prescription", systemImage: "slider.horizontal.3") { editVariant = store.data.variant(item.variantID) }
+                        Button("Save Weights to This Day", systemImage: "square.and.arrow.down") { store.perform { try $0.saveSessionWeights(exerciseID) } }
                         Button("Plate Calculator", systemImage: "circle.grid.2x1") { plates = true }.disabled(item.mode == .cardio)
                         Divider()
-                        Button("Move Up", systemImage: "arrow.up") { store.perform { $0.moveSessionExercise(exerciseID, offset: -1) } }.disabled(store.data.activeSession?.exercises.first?.id == exerciseID)
-                        Button("Move Down", systemImage: "arrow.down") { store.perform { $0.moveSessionExercise(exerciseID, offset: 1) } }.disabled(store.data.activeSession?.exercises.last?.id == exerciseID)
                         Button("Remove from Workout", systemImage: "trash", role: .destructive) { removing = true }
                     } label: { Image(systemName: "ellipsis").font(.system(size: 18, weight: .semibold)).frame(width: 32, height: 44) }.compactMenu().foregroundStyle(.secondary).accessibilityLabel("Options for \(item.name)").accessibilityIdentifier("workout.\(exerciseID).options")
                 }
@@ -249,19 +248,9 @@ struct WorkoutExerciseCard: View {
                     let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8)) : AnyLayout(HStackLayout(spacing: 16))
                     layout {
                         if item.mode == .strength {
-                            Button {
-                                restEdit = NumericEdit(title: "Working weight (\(store.data.settings.unit.rawValue))", context: item.name, value: store.data.settings.unit.display(item.workingLoad(fallback: store.data.variant(item.variantID)?.workingWeight ?? 0)), step: 2.5, maximum: 100000, integer: false) { value in
-                                    store.perform { try $0.setWorkingWeight($0.settings.unit.kilograms(value ?? 0), for: exerciseID, saveFuture: false) }
-                                }
-                            } label: { token("Working", "\(number(store.data.settings.unit.display(item.workingLoad(fallback: store.data.variant(item.variantID)?.workingWeight ?? 0)))) \(store.data.settings.unit.rawValue)", palette.action) }
-                                .contextMenu {
-                                    Button("Save Weight to This Day") {
-                                        guard var variant = store.data.variant(item.variantID) else { return }
-                                        variant.workingWeight = item.workingLoad(fallback: variant.workingWeight)
-                                        store.saveVariant(variant)
-                                    }
-                                }
-                                .accessibilityLabel("Working weight for \(item.name)").accessibilityIdentifier("workout.\(exerciseID).workingWeight")
+                            Text(weightSummary(item.sets.filter { $0.plan.kind != .warmup }.compactMap(\.weight), unit: store.data.settings.unit))
+                                .font(.subheadline.weight(.medium)).foregroundStyle(.secondary)
+                                .accessibilityLabel("Working sets, " + weightSummary(item.sets.filter { $0.plan.kind != .warmup }.compactMap(\.weight), unit: store.data.settings.unit))
                         }
                         Button { restEdit = NumericEdit(title: "Rest (seconds)", context: item.name, value: Double(item.restSeconds), step: 15, maximum: 86400, integer: true) { value in store.editExercise(exerciseID) { $0.restSeconds = Int(value ?? 0) } } } label: { token("Rest", clockText(Double(item.restSeconds)), palette.rest) }
                             .accessibilityLabel("Rest between sets for \(item.name)")
@@ -282,7 +271,9 @@ struct WorkoutExerciseCard: View {
                     }.padding(.top, 2)
                 }
             }.card(padding: 16)
-            .modifier(ExerciseDropTarget(id: exerciseID, dragging: $dragging))
+            .modifier(ExerciseDropTarget(id: exerciseID, dragging: $dragging) { source, target, after in
+                store.perform { $0.moveSessionExercise(source, relativeTo: target, after: after) }
+            })
             .task(id: autoCollapseReady) {
                 guard autoCollapseReady else { return }
                 do { try await Task.sleep(for: .milliseconds(650)) } catch { return }
@@ -299,7 +290,7 @@ struct WorkoutExerciseCard: View {
             }
             .sheet(item: $editVariant) { VariantEditor(variant: $0).environmentObject(store).sheetSize() }
             .sheet(isPresented: $plates) { PlateView(initialWeight: store.data.settings.unit.display(item.sets.last?.weight ?? 0)).environmentObject(store).sheetSize() }
-            .sheet(item: $restEdit) { NumericPad(edit: $0) }
+            .sheet(item: $restEdit) { NumberEditor(edit: $0) }
             .sheet(isPresented: $linking) { LinkedExerciseEditor(exerciseID: exerciseID).environmentObject(store).sheetSize() }
             .sheet(isPresented: $warmups) { ApplyWarmupPreset(exerciseID: exerciseID).environmentObject(store).sheetSize() }
             .confirmationDialog("Remove \(item.name)?", isPresented: $removing) { Button("Remove from workout", role: .destructive) { store.editActive { $0.exercises.removeAll { $0.id == exerciseID } } } } message: { Text("This removes its sets from the current workout.") }

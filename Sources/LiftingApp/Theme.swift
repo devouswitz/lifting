@@ -216,31 +216,6 @@ struct MetricTile: View {
     var body: some View { VStack(alignment: .leading, spacing: 2) { Text(value).font(.figure(24)).lineLimit(1).minimumScaleFactor(0.7); Text(label).font(.caption).foregroundStyle(.secondary) }.frame(maxWidth: .infinity, alignment: .leading).accessibilityElement(children: .combine) }
 }
 
-struct OptionalNumberField: View {
-    let title: String
-    @Binding var value: Double?
-    var factor: Double = 1
-    var integer: Bool = false
-    @State private var text = ""
-    @FocusState private var focused: Bool
-    var body: some View {
-        TextField(title, text: $text)
-            .multilineTextAlignment(.trailing)
-            .focused($focused)
-            .onAppear { sync() }
-            .onChange(of: value) { _, _ in if !focused { sync() } }
-            .onChange(of: text) { _, new in
-                if new.isEmpty { value = nil }
-                else if let parsed = Double(new.replacingOccurrences(of: ",", with: ".")), parsed.isFinite, parsed >= 0, parsed * factor <= 10_000_000, !integer || parsed.rounded() == parsed { value = parsed * factor }
-            }
-            .onChange(of: focused) { _, active in if !active { sync() } }
-            #if os(iOS)
-            .keyboardType(.decimalPad)
-            #endif
-    }
-    func sync() { text = value.map { number($0 / factor, decimals: 3) } ?? "" }
-}
-
 struct AccentButtonStyle: ButtonStyle {
     @Environment(\.palette) var palette
     @Environment(\.isEnabled) var enabled
@@ -301,7 +276,7 @@ struct StoreErrorRow: View {
 extension View {
     @ViewBuilder func compactMenu() -> some View {
         #if os(macOS)
-        self.menuStyle(.borderlessButton).menuIndicator(.hidden)
+        self.menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize(horizontal: true, vertical: false)
         #else
         self.menuIndicator(.hidden)
         #endif

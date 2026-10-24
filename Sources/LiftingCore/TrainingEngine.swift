@@ -46,14 +46,15 @@ public extension TrainingData {
         session.endedAt = max(now, session.startedAt)
         for item in session.exercises where item.progressionEligible {
             guard let v = variants.firstIndex(where: { $0.id == item.variantID }), variants[v].progression.mode != .manual else { continue }
+            let reference = variants[v].referenceWeight
             let sets = item.sets.filter { $0.plan.kind == .working || $0.plan.kind == .failure }
             guard !sets.isEmpty, item.sets.filter({ $0.plan.kind != .warmup }).allSatisfy({ $0.completedAt != nil }),
                   sets.allSatisfy({ $0.reps != nil && $0.weight != nil && $0.plan.load == .working }),
-                  sets.allSatisfy({ abs(($0.weight ?? 0) - variants[v].workingWeight) < 0.001 }) else { continue }
+                  sets.allSatisfy({ abs(($0.weight ?? 0) - reference) < 0.001 }) else { continue }
             let mode = variants[v].progression.mode
             let passed = sets.allSatisfy { ($0.reps ?? 0) >= (mode == .double ? ($0.plan.repCeiling ?? $0.plan.reps ?? 1) : ($0.plan.reps ?? 1)) }
             if passed {
-                variants[v].workingWeight += variants[v].progression.increment
+                variants[v].progressWeight(to: reference + variants[v].progression.increment)
                 variants[v].progression.failures = 0
             } else {
                 // Double progression is successful within its rep range, but does not add weight yet.
@@ -62,9 +63,9 @@ public extension TrainingData {
                 else { variants[v].progression.failures = 0 }
                 let limit = variants[v].progression.deloadAfter
                 if limit > 0 && variants[v].progression.failures >= limit {
-                    let target = variants[v].workingWeight * (1 - variants[v].progression.deloadPercent / 100)
+                    let target = reference * (1 - variants[v].progression.deloadPercent / 100)
                     let step = variants[v].rounding
-                    variants[v].workingWeight = step > 0 ? floor(target / step) * step : target
+                    variants[v].progressWeight(to: step > 0 ? floor(target / step) * step : target)
                     variants[v].progression.failures = 0
                 }
             }
@@ -112,7 +113,7 @@ public extension TrainingData {
         if exercise.mode == old.mode {
             // Preserve today's structure, including edited targets, drop sets, and MYO mini-sets.
             item.sets = pending.map { logged in
-                var plan = logged.plan; plan.id = UUID()
+                var plan = logged.plan; plan.id = UUID(); plan.weightOverride = nil
                 plan.seconds = logged.seconds; plan.meters = logged.meters; plan.rpe = logged.rpe
                 if plan.load == .fixed { plan.fixedWeight = 0 }
                 var replacementSet = LoggedSet(plan: plan, variant: replacement)
@@ -185,7 +186,7 @@ public extension TrainingData {
         guard exercises.allSatisfy({ $0.muscle.count <= 200 && ($0.secondaryMuscles ?? []).count <= 50 && ($0.secondaryMuscles ?? []).allSatisfy { $0.count <= 200 } }),
               routines.flatMap(\.slots).allSatisfy({ group($0.group, rest: $0.groupRestSeconds, transition: $0.transitionSeconds) }) else { throw TrainingError.invalid("Invalid muscle groups or linked exercise settings.") }
         func plan(_ p: SetPlan) -> Bool {
-            number(p.fixedWeight) && number(p.percent, max: 1000) && (p.reps.map { (0...10000).contains($0) } ?? true)
+            number(p.fixedWeight) && (p.weightOverride.map { number($0) } ?? true) && number(p.percent, max: 1000) && (p.reps.map { (0...10000).contains($0) } ?? true)
             && (p.repCeiling.map { $0 >= (p.reps ?? 0) && $0 <= 10000 } ?? true)
             && (p.seconds.map { number($0) } ?? true) && (p.meters.map { number($0) } ?? true) && (p.rpe.map { number($0, max: 10) } ?? true) && (p.restSeconds.map { (0...86400).contains($0) } ?? true)
         }

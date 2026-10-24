@@ -1,74 +1,121 @@
 import Foundation
 
-public extension SessionExercise {
-    /// Legacy saves have no edit marker. Preserve values that differ from their prescription.
-    fileprivate func inheritsWeight(at index: Int, fallback: Double) -> Bool {
-        let set = sets[index]
-        if let edited = set.weightIsEdited { return !edited }
-        let expected = set.plan.resolvedWeight(working: workingLoad(fallback: fallback), increment: roundingIncrement ?? 0)
-        guard let actual = set.weight, let expected else { return set.weight == expected }
-        return abs(actual - expected) < 0.00001
+public extension Variant {
+    /// Warm-ups use the first working set; later working sets inherit the nearest entry.
+    var referenceWeight: Double {
+        sets.first(where: { $0.kind != .warmup && $0.load != .none })?
+            .resolvedWeight(working: workingWeight, increment: rounding) ?? workingWeight
     }
 
-    fileprivate mutating func updateWorkingWeight(_ weight: Double, fallback: Double, after source: Int? = nil, preservingEntries: Bool = true) {
-        let inherited = Set(sets.indices.filter { !preservingEntries || inheritsWeight(at: $0, fallback: fallback) })
-        for index in sets.indices where sets[index].weightIsEdited == nil {
-            sets[index].weightIsEdited = !inherited.contains(index)
+    var resolvedWeights: [Double?] {
+        let firstWeight = referenceWeight
+        var inherited = workingWeight
+        return sets.map { plan in
+            if plan.kind == .warmup {
+                return plan.resolvedWeight(working: firstWeight, increment: rounding)
+            }
+            let weight = plan.resolvedWeight(working: inherited, increment: rounding)
+            if plan.load == .working, let weight { inherited = weight }
+            return weight
         }
-        for index in inherited where sets[index].completedAt == nil {
-            let plan = sets[index].plan
-            guard plan.load == .working || plan.load == .percent else { continue }
-            // Earlier warm-ups still follow the new base; earlier work sets keep their entries.
-            if let source, index <= source, plan.kind != .warmup { continue }
-            sets[index].weight = plan.resolvedWeight(working: weight, increment: roundingIncrement ?? 0)
-            sets[index].weightIsEdited = false
+    }
+
+    func weight(for plan: SetPlan) -> Double? {
+        guard let index = sets.firstIndex(where: { $0.id == plan.id }) else {
+            return plan.resolvedWeight(working: referenceWeight, increment: rounding)
+        }
+        return resolvedWeights[index]
+    }
+
+    mutating func setWeight(_ weight: Double, for setID: UUID) {
+        guard let index = sets.firstIndex(where: { $0.id == setID }) else { return }
+        if sets[index].load == .working {
+            sets[index].weightOverride = weight
+            if index == sets.firstIndex(where: { $0.kind != .warmup && $0.load == .working }) {
+                workingWeight = weight
+            }
+        } else {
+            sets[index].load = .fixed
+            sets[index].fixedWeight = weight
+        }
+    }
+
+    /// Progression changes matching anchors as well as the legacy base.
+    mutating func progressWeight(to weight: Double) {
+        let previous = referenceWeight
+        for index in sets.indices where sets[index].load == .working && sets[index].weightOverride == previous {
+            sets[index].weightOverride = weight
         }
         workingWeight = weight
+    }
+}
+
+public extension SessionExercise {
+    /// Classify older saves before changing their base. Unequal entries stay independent.
+    fileprivate mutating func resolveLegacyWeightEntries(fallback: Double) {
+        let base = workingWeight ?? fallback
+        for index in sets.indices where sets[index].weightIsEdited == nil {
+            let expected = sets[index].plan.resolvedWeight(working: base, increment: roundingIncrement ?? 0)
+            let actual = sets[index].weight
+            sets[index].weightIsEdited = actual.flatMap { a in expected.map { abs(a - $0) > 0.00001 } } ?? (actual != expected)
+        }
+    }
+
+    fileprivate mutating func setWeight(_ weight: Double?, at index: Int, fallback: Double) {
+        resolveLegacyWeightEntries(fallback: fallback)
+        sets[index].weight = weight
+        sets[index].weightIsEdited = true
+        if sets[index].completedAt == nil, sets[index].plan.load == .working, sets[index].plan.kind != .warmup {
+            for next in sets.indices.dropFirst(index + 1) {
+                let set = sets[next]
+                if set.plan.kind == .warmup { continue }
+                // An explicit entry or completed working set starts its own chain.
+                if set.plan.load == .working && (set.weightIsEdited == true || set.completedAt != nil) { break }
+                guard set.completedAt == nil, set.weightIsEdited != true,
+                      set.plan.load == .working || set.plan.load == .percent else { continue }
+                sets[next].weight = weight.flatMap { set.plan.resolvedWeight(working: $0, increment: roundingIncrement ?? 0) }
+            }
+        }
+        workingWeight = workingLoad(fallback: fallback)
+        for warmup in sets.indices where sets[warmup].plan.kind == .warmup && sets[warmup].completedAt == nil && sets[warmup].weightIsEdited != true {
+            sets[warmup].weight = sets[warmup].plan.resolvedWeight(working: workingWeight ?? fallback, increment: roundingIncrement ?? 0)
+        }
     }
 }
 
 public extension TrainingData {
     mutating func setLoggedWeight(_ weight: Double?, exerciseID: UUID, setID: UUID) throws {
         guard weight.map({ $0.isFinite && (0...100_000).contains($0) }) ?? true,
-              var session = activeSession,
-              let exerciseIndex = session.exercises.firstIndex(where: { $0.id == exerciseID }),
-              let setIndex = session.exercises[exerciseIndex].sets.firstIndex(where: { $0.id == setID }),
-              let variant = variant(session.exercises[exerciseIndex].variantID) else {
+              let exerciseIndex = activeSession?.exercises.firstIndex(where: { $0.id == exerciseID }),
+              let setIndex = activeSession?.exercises[exerciseIndex].sets.firstIndex(where: { $0.id == setID }),
+              let variant = variant(activeSession!.exercises[exerciseIndex].variantID) else {
             throw TrainingError.invalid("Enter a valid weight.")
         }
-        var item = session.exercises[exerciseIndex]
-        item.roundingIncrement = item.roundingIncrement ?? variant.rounding
-        let set = item.sets[setIndex]
-        if let weight, set.completedAt == nil, set.plan.load == .working, set.plan.kind != .warmup {
-            item.updateWorkingWeight(weight, fallback: variant.workingWeight, after: setIndex)
-        }
-        item.sets[setIndex].weight = weight
-        item.sets[setIndex].weightIsEdited = true
-        session.exercises[exerciseIndex] = item
-        activeSession = session
+        activeSession!.exercises[exerciseIndex].roundingIncrement = activeSession!.exercises[exerciseIndex].roundingIncrement ?? variant.rounding
+        activeSession!.exercises[exerciseIndex].setWeight(weight, at: setIndex, fallback: variant.workingWeight)
     }
 
-    /// An explicit change to the header replaces the remaining linked loads. Fixed sets stay fixed.
-    mutating func setWorkingWeight(_ weight: Double, for exerciseID: UUID, saveFuture: Bool) throws {
-        guard weight.isFinite, (0...100_000).contains(weight), var session = activeSession,
-              let index = session.exercises.firstIndex(where: { $0.id == exerciseID }),
-              let variantIndex = variants.firstIndex(where: { $0.id == session.exercises[index].variantID }) else {
-            throw TrainingError.invalid("Enter a valid working weight.")
+    /// Save each entered load to its matching prescribed set without changing other days.
+    mutating func saveSessionWeights(_ exerciseID: UUID) throws {
+        guard let item = activeSession?.exercises.first(where: { $0.id == exerciseID }),
+              let index = variants.firstIndex(where: { $0.id == item.variantID }) else {
+            throw TrainingError.invalid("Exercise unavailable.")
         }
-        var item = session.exercises[index]
-        item.roundingIncrement = item.roundingIncrement ?? variants[variantIndex].rounding
-        item.updateWorkingWeight(weight, fallback: variants[variantIndex].workingWeight, preservingEntries: false)
-        session.exercises[index] = item
-        activeSession = session
-        if saveFuture { variants[variantIndex].workingWeight = weight }
-    }
-}
-
-public extension Variant {
-    /// A normal work set edits the shared base. Fixed and percentage sets remain independent.
-    mutating func setWeight(_ weight: Double, for setID: UUID) {
-        guard let index = sets.firstIndex(where: { $0.id == setID }) else { return }
-        if sets[index].load == .working { workingWeight = weight }
-        else { sets[index].load = .fixed; sets[index].fixedWeight = weight }
+        variants[index].workingWeight = item.workingLoad(fallback: variants[index].workingWeight)
+        var ordinals: [SetKind: Int] = [:]
+        for set in item.sets where set.plan.kind != .warmup {
+            let ordinal = ordinals[set.plan.kind, default: 0]
+            ordinals[set.plan.kind] = ordinal + 1
+            let matchingKind = variants[index].sets.indices.filter { variants[index].sets[$0].kind == set.plan.kind }
+            let planIndex = variants[index].sets.firstIndex(where: { $0.id == set.plan.id })
+                ?? (matchingKind.indices.contains(ordinal) ? matchingKind[ordinal] : nil)
+            guard let weight = set.weight, let planIndex else { continue }
+            if variants[index].sets[planIndex].load == .working {
+                variants[index].setWeight(weight, for: variants[index].sets[planIndex].id)
+                if set.weightIsEdited == false { variants[index].sets[planIndex].weightOverride = nil }
+            } else if variants[index].sets[planIndex].load == .fixed {
+                variants[index].sets[planIndex].fixedWeight = weight
+            }
+        }
     }
 }

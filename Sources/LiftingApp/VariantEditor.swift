@@ -13,21 +13,22 @@ struct VariantEditor: View {
     var exercise: Exercise? { store.data.exercise(variant.exerciseID) }
     var body: some View {
         NavigationStack {
+            let weights = variant.resolvedWeights
             ThemedForm {
                 Section("Load and rest") {
                     if exercise?.mode != .cardio {
-                        HStack { Text("Working weight (\(unit.rawValue))"); Spacer(); TextField("0", value: Binding(get: { unit.display(variant.workingWeight) }, set: { variant.workingWeight = unit.kilograms($0) }), format: .number).labelsHidden().multilineTextAlignment(.trailing).frame(maxWidth: 110) }
-                        HStack { Text("Round % weights down to (\(unit.rawValue))"); Spacer(); TextField("0", value: Binding(get: { unit.display(variant.rounding) }, set: { variant.rounding = unit.kilograms($0) }), format: .number).labelsHidden().multilineTextAlignment(.trailing).frame(maxWidth: 80) }
+                        LabeledContent("Working sets", value: weightSummary(variant.resolvedWeights.enumerated().compactMap { variant.sets[$0.offset].kind == .warmup ? nil : $0.element }, unit: unit))
+                        NumberRow("Round % weights down to (\(unit.rawValue))", value: $variant.rounding, factor: unit.kilograms(1))
                     }
                     Stepper("Rest between sets: \(clockText(Double(variant.restSeconds)))", value: $variant.restSeconds, in: 0...3600, step: 15)
                 }
                 Section("Sets") {
                     ForEach(Array($variant.sets.enumerated()), id: \.element.id) { index, $plan in
-                        NavigationLink { PlanEditor(plan: $plan, unit: unit, workingWeight: $variant.workingWeight) } label: {
+                        NavigationLink { PlanEditor(plan: $plan, unit: unit, suggestedWeight: weights[index]) } label: {
                             HStack(spacing: 12) {
                                 SetBadge(text: setBadge(variant.sets, index: index, types: store.data.customSetTypes), plan: plan).frame(minWidth: 26)
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(prescribedSetSummary(plan, variant: variant, unit: unit)).font(.subheadline).monospacedDigit()
+                                    Text(prescribedSetSummary(plan, weight: weights[index], unit: unit)).font(.subheadline).monospacedDigit()
                                     if plan.customTypeID != nil || ![.warmup, .working].contains(plan.kind) { Text(palette.title(plan)).font(.caption).foregroundStyle(palette.color(for: plan)) }
                                 }
                             }.padding(.vertical, 2)
@@ -62,9 +63,9 @@ struct VariantEditor: View {
                 Section("Progression") {
                     Picker("Rule", selection: $variant.progression.mode) { ForEach(ProgressionMode.allCases) { Text($0.title).tag($0) } }
                     if variant.progression.mode != .manual {
-                        HStack { Text("Increase (\(unit.rawValue))"); Spacer(); TextField("0", value: Binding(get: { unit.display(variant.progression.increment) }, set: { variant.progression.increment = unit.kilograms($0) }), format: .number).labelsHidden().multilineTextAlignment(.trailing).frame(maxWidth: 100) }
+                        NumberRow("Increase (\(unit.rawValue))", value: $variant.progression.increment, factor: unit.kilograms(1))
                         Stepper(variant.progression.deloadAfter == 0 ? "Never deload" : "Deload after \(counted(variant.progression.deloadAfter, "miss"))", value: $variant.progression.deloadAfter, in: 0...10)
-                        if variant.progression.deloadAfter > 0 { HStack { Text("Deload by (%)"); Spacer(); TextField("10", value: $variant.progression.deloadPercent, format: .number).labelsHidden().multilineTextAlignment(.trailing).frame(maxWidth: 80) } }
+                        if variant.progression.deloadAfter > 0 { NumberRow("Deload by (%)", value: $variant.progression.deloadPercent) }
                         Text(variant.progression.mode == .double ? "Adds weight next time when every working set reaches the top of its rep range." : "Adds weight next time when every working set reaches its target reps.").font(.footnote).foregroundStyle(.secondary)
                     }
                 }
@@ -83,7 +84,7 @@ struct VariantEditor: View {
                     do { _ = try check.validated(); if store.saveVariant(variant) { dismiss() } } catch { validationError = error.localizedDescription }
                 }.disabled(variant.label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || variant.sets.isEmpty) }
             }
-            .sheet(item: $technique) { kind in TechniqueEditor(kind: kind, workingWeight: variant.workingWeight, rounding: variant.rounding) { plans, replace, _ in
+            .sheet(item: $technique) { kind in TechniqueEditor(kind: kind, workingWeight: variant.referenceWeight, rounding: variant.rounding) { plans, replace, _ in
                 if replace { variant.sets.removeAll { $0.kind != .warmup } }
                 if kind == .drop, let last = variant.sets.indices.last { variant.sets[last].restSeconds = 0 }
                 variant.sets.append(contentsOf: plans)
@@ -97,7 +98,7 @@ extension VariantEditor {
     /// Copies the last working set so a new set keeps this exercise's targets.
     func addWorkingSet() {
         if var copy = variant.sets.last(where: { $0.kind != .warmup }) {
-            copy.id = UUID(); if [.drop, .myoActivation, .myoMini].contains(copy.kind) { copy.kind = .working; copy.load = exercise?.mode == .strength ? .working : .none; copy.restSeconds = nil }
+            copy.id = UUID(); copy.weightOverride = nil; if [.drop, .myoActivation, .myoMini].contains(copy.kind) { copy.kind = .working; copy.load = exercise?.mode == .strength ? .working : .none; copy.restSeconds = nil }
             variant.sets.append(copy)
         } else if let exercise {
             var plan = Variant.standard(for: exercise, label: "").sets[0]; plan.id = UUID(); variant.sets.append(plan)
@@ -121,7 +122,7 @@ struct PlanEditor: View {
     @Environment(\.palette) var palette
     @Binding var plan: SetPlan
     let unit: WeightUnit
-    var workingWeight: Binding<Double>? = nil
+    var suggestedWeight: Double? = nil
     var warmupOnly = false
     var body: some View {
         ThemedForm {
@@ -134,19 +135,17 @@ struct PlanEditor: View {
             } }
             Section(plan.kind == .warmup ? "Warm-up weight" : "Weight") {
                 Picker("Based on", selection: $plan.load) { ForEach(loadRules) { Text($0.title).tag($0) } }
-                if plan.load == .working, let workingWeight {
-                    LabeledContent("Working weight (\(unit.rawValue))") {
-                        TextField("0", value: Binding(get: { unit.display(workingWeight.wrappedValue) }, set: { workingWeight.wrappedValue = unit.kilograms($0) }), format: .number).multilineTextAlignment(.trailing)
-                    }
+                if plan.load == .working {
+                    NumberRow("Weight (\(unit.rawValue))", value: Binding(get: { plan.weightOverride ?? suggestedWeight }, set: { plan.weightOverride = $0 }), placeholder: "Suggested", factor: unit.kilograms(1))
                 }
                 if plan.load == .percent { PercentControl(title: "Percent of working set", value: $plan.percent, range: 0...1000) }
-                if plan.load == .fixed { HStack { Text("Weight (\(unit.rawValue))"); TextField("0", value: Binding(get: { unit.display(plan.fixedWeight) }, set: { plan.fixedWeight = unit.kilograms($0) }), format: .number).multilineTextAlignment(.trailing).labelsHidden() } }
+                if plan.load == .fixed { NumberRow("Weight (\(unit.rawValue))", value: $plan.fixedWeight, factor: unit.kilograms(1)) }
             }
             Section("Targets") {
                 SetTargetFields(plan: $plan)
             }
             Section("Rest after this set") {
-                HStack { Text("Seconds"); OptionalNumberField(title: "Exercise default", value: Binding(get: { plan.restSeconds.map(Double.init) }, set: { plan.restSeconds = $0.map { Int($0) } }), integer: true).labelsHidden().accessibilityLabel("Rest in seconds").accessibilityIdentifier("plan.rest") }
+                NumberRow("Rest in seconds", value: Binding(get: { plan.restSeconds.map(Double.init) }, set: { plan.restSeconds = $0.map { Int($0) } }), placeholder: "Exercise default", integer: true).accessibilityIdentifier("plan.rest")
             }
         }.formStyle(.grouped).navigationTitle(palette.title(plan)).inlineTitle()
         #if os(iOS)
@@ -181,9 +180,12 @@ struct RepTargetFields: View {
         Group {
                 Picker("Rep target", selection: repMode) { ForEach(RepTargetMode.allCases) { Text($0.rawValue).tag($0) } }.accessibilityIdentifier("plan.repMode")
                 if repSelection != .none {
-                    HStack { Text(repSelection == .range ? "Minimum reps" : "Target reps"); TextField("Reps", value: Binding(get: { plan.reps ?? 8 }, set: { plan.reps = $0 }), format: .number).multilineTextAlignment(.trailing).labelsHidden().accessibilityLabel("Target reps").accessibilityIdentifier("plan.reps") }
+                    NumberRow(repSelection == .range ? "Minimum reps" : "Target reps", value: Binding(get: { plan.reps ?? 8 }, set: {
+                        plan.reps = $0
+                        if repSelection == .exact { plan.repCeiling = nil }
+                    })).accessibilityIdentifier("plan.reps")
                     if repSelection == .range {
-                        HStack { Text("Maximum reps"); TextField("Reps", value: Binding(get: { plan.repCeiling ?? 12 }, set: { plan.repCeiling = $0 }), format: .number).multilineTextAlignment(.trailing).labelsHidden().accessibilityLabel("Maximum reps").accessibilityIdentifier("plan.repCeiling") }
+                        NumberRow("Maximum reps", value: Binding(get: { plan.repCeiling ?? 12 }, set: { plan.repCeiling = $0 })).accessibilityIdentifier("plan.repCeiling")
                     }
                     Toggle("AMRAP", isOn: $plan.amrap)
                 }
@@ -207,9 +209,9 @@ struct SetTargetFields: View {
     var body: some View {
         Group {
             RepTargetFields(plan: $plan)
-                HStack { Text("RPE"); OptionalNumberField(title: "Optional", value: $plan.rpe).labelsHidden().accessibilityLabel("RPE").accessibilityIdentifier("plan.rpe") }
-                HStack { Text("Time (minutes)"); OptionalNumberField(title: "Optional", value: $plan.seconds, factor: 60).labelsHidden().accessibilityLabel("Time in minutes").accessibilityIdentifier("plan.seconds") }
-                HStack { Text("Distance (meters)"); OptionalNumberField(title: "Optional", value: $plan.meters).labelsHidden().accessibilityLabel("Distance in meters").accessibilityIdentifier("plan.meters") }
+                NumberRow("RPE", value: $plan.rpe).accessibilityIdentifier("plan.rpe")
+                NumberRow("Time (minutes)", value: $plan.seconds, factor: 60).accessibilityIdentifier("plan.seconds")
+                NumberRow("Distance (meters)", value: $plan.meters).accessibilityIdentifier("plan.meters")
         }
     }
 }
@@ -253,9 +255,9 @@ func setPlanSummary(_ plan: SetPlan, unit: WeightUnit) -> String {
 }
 
 /// Set summary with the load resolved against the variant's working weight, e.g. "47.5 lb (50%) × 5 · RPE 7".
-func prescribedSetSummary(_ plan: SetPlan, variant: Variant, unit: WeightUnit) -> String {
+func prescribedSetSummary(_ plan: SetPlan, weight: Double?, unit: WeightUnit) -> String {
     var load = ""
-    if let weight = plan.resolvedWeight(working: variant.workingWeight, increment: variant.rounding) {
+    if let weight {
         load = "\(number(unit.display(weight))) \(unit.rawValue)"
         if plan.load == .percent { load += " (\(number(plan.percent))%)" }
     }
@@ -335,13 +337,7 @@ struct PercentControl: View {
     var range: ClosedRange<Double>
     var body: some View {
         HStack {
-            Text(title)
-            Spacer()
-            TextField("%", value: $value, format: .number).labelsHidden().multilineTextAlignment(.trailing).frame(maxWidth: 70)
-                .accessibilityLabel(title).accessibilityIdentifier("plan.percent")
-                #if os(iOS)
-                .keyboardType(.decimalPad)
-                #endif
+            NumberRow(title, value: $value)
             Stepper(title, value: $value, in: range, step: 5).labelsHidden().fixedSize()
         }
     }
@@ -354,11 +350,7 @@ struct IntegerControl: View {
     var step = 1
     var body: some View {
         HStack {
-            Text(title); Spacer()
-            TextField("0", value: $value, format: .number).labelsHidden().multilineTextAlignment(.trailing).frame(maxWidth: 70).accessibilityLabel(title)
-                #if os(iOS)
-                .keyboardType(.numberPad)
-                #endif
+            NumberRow(title, value: $value)
             Stepper(title, value: $value, in: range, step: step).labelsHidden().fixedSize()
         }
     }
