@@ -8,7 +8,8 @@ struct RoutineEditor: View {
     let routineID: UUID
     var showsStart = false
     @State private var picker = false
-    @State private var dragging: UUID?
+    @State private var lifted: LiftedRow?
+    @State private var rows = RowFrames()
     @State private var expanded: UUID?
     @State private var linking = false
     @State private var linkedSlotID: UUID?
@@ -34,23 +35,15 @@ struct RoutineEditor: View {
                                 move: { offset in move(slot.id, by: offset) },
                                 canMoveUp: routine.slots.first?.id != slot.id,
                                 canMoveDown: routine.slots.last?.id != slot.id,
-                                slotID: slot.id, dragging: $dragging,
+                                slotID: slot.id, reordering: reordering,
                                 remove: { update { $0.slots.removeAll { $0.id == slot.id } } },
                                 swap: { id in store.perform { try $0.swapSlotExercise(routineID: routineID, slotID: slot.id, to: id) } }
                             )
-                            .modifier(ExerciseDropTarget(id: slot.id, dragging: $dragging) { source, target, after in
-                                update { day in
-                                    guard let from = day.slots.firstIndex(where: { $0.id == source }) else { return }
-                                    let item = day.slots.remove(at: from)
-                                    guard let to = day.slots.firstIndex(where: { $0.id == target }) else { day.slots.insert(item, at: from); return }
-                                    day.slots.insert(item, at: to + (after ? 1 : 0))
-                                }
-                            })
                         }
                     }
                     Button { picker = true } label: { Label("Add Exercises", systemImage: "plus") }.buttonStyle(FieldButtonStyle()).accessibilityIdentifier("routine.addExercises")
                     if showsStart && !routine.slots.isEmpty { StartDayButton(day: routine) }
-                }.padding(16)
+                }.padding(16).reorderingStack("day")
             }
         }
         .background(palette.background).navigationTitle(routine?.name ?? "Day").inlineTitle()
@@ -74,6 +67,16 @@ struct RoutineEditor: View {
         .sheet(isPresented: $warmups) { ApplyWarmupPreset(routineID: routineID).sheetSize() }
     }
 
+    private var reordering: Reordering {
+        Reordering(space: "day", lifted: $lifted, rows: rows) { source, target, after in
+            update { day in
+                guard let from = day.slots.firstIndex(where: { $0.id == source }) else { return }
+                let item = day.slots.remove(at: from)
+                guard let to = day.slots.firstIndex(where: { $0.id == target }) else { day.slots.insert(item, at: from); return }
+                day.slots.insert(item, at: to + (after ? 1 : 0))
+            }
+        }
+    }
     private func groupTitle(_ slot: RoutineSlot, in routine: Routine) -> String? {
         guard !slot.group.isEmpty else { return nil }
         let count = routine.slots.filter { $0.group == slot.group }.count
@@ -108,7 +111,6 @@ struct ExercisePicker: View {
     @State private var mode = "All"
     @State private var future = false
     @State private var creating = false
-    @State private var multiple = false
     @State private var committed = false
     var matches: [Exercise] {
         store.data.exercises.filter { (search.isEmpty || "\($0.name) \($0.muscle) \($0.equipment)".localizedCaseInsensitiveContains(search)) && (mode == "All" || $0.mode.title == mode) }.sorted {
@@ -140,8 +142,11 @@ struct ExercisePicker: View {
                             Image(systemName: exercise.mode.symbol).frame(width: 28)
                             VStack(alignment: .leading, spacing: 4) { Text(exercise.name).foregroundStyle(.primary); Text([exercise.muscle, exercise.equipment].filter { !$0.isEmpty }.joined(separator: " · ")).font(.caption).foregroundStyle(.secondary) }
                             Spacer()
-                            if onAdd != nil && multiple {
-                                Image(systemName: selected.contains(exercise.id) ? "checkmark.circle.fill" : "circle").foregroundStyle(selected.contains(exercise.id) ? Color.accentColor : .secondary)
+                            if onAdd != nil {
+                                if let order = selected.firstIndex(of: exercise.id) {
+                                    Text("\(order + 1)").font(.footnote.weight(.bold)).monospacedDigit().foregroundStyle(.white)
+                                        .frame(width: 24, height: 24).background(Color.accentColor, in: Circle())
+                                } else { Image(systemName: "circle").font(.title3).foregroundStyle(.tertiary) }
                             }
                             if exercise.muscle == similarMuscle { Image(systemName: "arrow.left.arrow.right").foregroundStyle(.secondary) }
                         }.padding(.vertical, 6).contentShape(Rectangle())
@@ -154,15 +159,12 @@ struct ExercisePicker: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 if let onAdd {
+                    // Exercises are added in the order they were ticked.
                     ToolbarItem(placement: .confirmationAction) {
-                        if multiple {
-                            Button("Add (\(selected.count))") {
-                                guard !committed, onAdd(selected.compactMap { store.data.exercise($0) }) else { return }
-                                committed = true; dismiss()
-                            }.disabled(selected.isEmpty || committed).accessibilityIdentifier("exercise.addSelected")
-                        } else {
-                            Button("Select Multiple") { multiple = true }.accessibilityIdentifier("exercise.selectMultiple")
-                        }
+                        Button("Add", systemImage: "checkmark") {
+                            guard !committed, onAdd(selected.compactMap { store.data.exercise($0) }) else { return }
+                            committed = true; dismiss()
+                        }.labelStyle(.iconOnly).disabled(selected.isEmpty || committed).accessibilityIdentifier("exercise.addSelected")
                     }
                 }
             }
@@ -180,9 +182,7 @@ struct ExercisePicker: View {
 private extension ExercisePicker {
     func choose(_ exercise: Exercise) {
         guard !committed else { return }
-        if let onAdd, !multiple {
-            if onAdd([exercise]) { committed = true; dismiss() }
-        } else if onAdd != nil {
+        if onAdd != nil {
             if let index = selected.firstIndex(of: exercise.id) { selected.remove(at: index) }
             else { selected.append(exercise.id) }
         } else {

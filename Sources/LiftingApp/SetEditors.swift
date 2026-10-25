@@ -42,7 +42,6 @@ struct SavedExerciseEditor: View {
     @Environment(\.dismiss) private var dismiss
     let variantID: UUID
     @State private var expanded = true
-    @State private var dragging: UUID?
     @State private var linking = false
     private var day: Routine? { store.data.routines.first { $0.slots.contains { $0.variantID == variantID } } }
     private var slot: RoutineSlot? { day?.slots.first { $0.variantID == variantID } }
@@ -57,7 +56,7 @@ struct SavedExerciseEditor: View {
                             expanded: expanded, toggle: { expanded.toggle() },
                             link: day == nil ? nil : { linking = true }, move: { _ in },
                             canMoveUp: false, canMoveDown: false, slotID: slot?.id ?? variantID,
-                            dragging: $dragging, remove: nil
+                            remove: nil
                         )
                     }.padding(16)
                 }
@@ -180,23 +179,8 @@ struct SetTargetFields: View {
     }
 }
 
-struct RepTargetEditor: View {
-    @Environment(\.dynamicTypeSize) private var typeSize
-    @State var plan: SetPlan
-    let onSave: (SetPlan) -> Bool
-    @State private var original: SetPlan?
-    var body: some View {
-        DraftEditor(valid: plan.isValid, changed: original.map { $0 != plan } ?? false, save: { onSave(plan) }) {
-            ThemedForm { Section { RepTargetFields(plan: $plan) } }
-                .navigationTitle("Rep Target").inlineTitle()
-        }.frame(idealWidth: 440, idealHeight: 420)
-        .presentationDetents(typeSize.isAccessibilitySize ? [.large] : [.height(400), .large])
-        .onAppear { if original == nil { original = plan } }
-    }
-}
-
-private enum RepTargetMode: String, CaseIterable, Identifiable {
-    case none = "No count", exact = "Reps", range = "Rep range", amrap = "AMRAP"
+enum RepTargetMode: String, CaseIterable, Identifiable {
+    case none = "No count", exact = "Reps", range = "Range", amrap = "AMRAP"
     var id: Self { self }
     init(_ plan: SetPlan) { self = plan.amrap ? .amrap : plan.reps == nil ? .none : plan.repRange == nil ? .exact : .range }
 }

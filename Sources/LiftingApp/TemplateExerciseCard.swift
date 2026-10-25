@@ -15,30 +15,31 @@ struct TemplateExerciseCard: View {
     let canMoveUp: Bool
     let canMoveDown: Bool
     let slotID: UUID
-    @Binding var dragging: UUID?
+    var reordering = Reordering.none
     var remove: (() -> Void)? = nil
     /// Points this day's slot at another exercise, such as the same movement on other equipment.
     var swap: ((UUID) -> Void)? = nil
     @State private var sheet: Sheet?
-    @State private var reordering = false
-    @State private var draggingSet: UUID?
+    @State private var reorderingSets = false
+    @State private var liftedSet: LiftedRow?
+    @State private var setRows = RowFrames()
     private var unit: WeightUnit { store.data.settings.unit }
     private var exercise: Exercise? { store.data.exercise(variant.exerciseID) }
     private var mode: ExerciseMode { exercise?.mode ?? .strength }
 
     private enum Sheet: Identifiable {
-        case keypad(NumericEdit), reps(SetPlan), repTarget(SetPlan), load(SetPlan), details(SetPlan), technique(Technique), settings, warmups, saveWarmups
+        case keypad(NumericEdit), reps(SetPlan), load(SetPlan), details(SetPlan), technique(Technique), settings, warmups, saveWarmups, rest
         var id: String {
             switch self {
             case .keypad(let edit): return "keypad.\(edit.id)"
             case .reps(let plan): return "reps.\(plan.id)"
-            case .repTarget(let plan): return "target.\(plan.id)"
             case .load(let plan): return "load.\(plan.id)"
             case .details(let plan): return "details.\(plan.id)"
             case .technique(let technique): return "technique.\(technique.rawValue)"
             case .settings: return "settings"
             case .warmups: return "warmups"
             case .saveWarmups: return "saveWarmups"
+            case .rest: return "rest"
             }
         }
     }
@@ -46,13 +47,18 @@ struct TemplateExerciseCard: View {
     var body: some View {
         let weights = variant.resolvedWeights
         ExerciseCard(name: exercise?.name ?? "Exercise", link: groupTitle, summary: planSummary(variant, unit: unit), expanded: expanded, toggle: toggle,
-                     order: CardOrder(id: slotID, canMoveUp: canMoveUp, canMoveDown: canMoveDown, dragging: $dragging, move: move)) {
+                     order: CardOrder(id: slotID, canMoveUp: canMoveUp, canMoveDown: canMoveDown, reordering: reordering, move: move)) {
             EmptyView()
         } menu: { menuItems } content: {
             ExerciseInfoRow(exerciseID: variant.exerciseID, swap: swap, load: loadSummary(zip(variant.sets, weights).compactMap { $0.kind == .warmup ? nil : $1 }, mode: mode, unit: unit),
-                            rest: variant.restSeconds) {
-                sheet = .keypad(.rest(variant.restSeconds, context: exercise?.name) { seconds in var edited = variant; edited.restSeconds = seconds; return store.saveVariant(edited) })
-            }
+                            rest: variant.restSeconds,
+                            warmupRest: variant.sets.contains { $0.kind == .warmup } ? variant.warmupRestSeconds ?? store.data.settings.warmupRestDefault : nil,
+                            editRest: { sheet = .keypad(.rest(variant.restSeconds, context: exercise?.name) { seconds in var edited = variant; edited.restSeconds = seconds; return store.saveVariant(edited) }) },
+                            editWarmupRest: {
+                                sheet = .keypad(.rest(variant.warmupRestSeconds ?? store.data.settings.warmupRestDefault, title: "Rest After Warm-ups", context: exercise?.name) { seconds in
+                                    var edited = variant; edited.warmupRestSeconds = seconds; return store.saveVariant(edited)
+                                })
+                            }, restSettings: { sheet = .rest })
             TextField("Add a note", text: $variant.notes, axis: .vertical).font(.subheadline).lineLimit(1...5).padding(.bottom, 4)
             if !typeSize.isAccessibilitySize {
                 HStack(spacing: 8) {
@@ -62,25 +68,26 @@ struct TemplateExerciseCard: View {
                     Text("RPE").frame(width: 50)
                 }.font(.caption.weight(.medium)).foregroundStyle(.secondary).accessibilityHidden(true)
             }
-            if reordering { Button("Finish Reordering") { reordering = false }.font(.subheadline) }
-            ForEach(Array(variant.sets.enumerated()), id: \.element.id) { index, plan in
-                if plan.kind == .warmup && (index == 0 || variant.sets[index - 1].kind != .warmup) {
-                    SetGroupLabel(title: "Warm-up", color: palette.warmup)
-                } else if index > 0 && plan.kind != .warmup && variant.sets[index - 1].kind == .warmup {
-                    SetGroupLabel(title: "Working sets", color: .secondary).padding(.top, 6)
+            if reorderingSets { Button("Finish Reordering") { reorderingSets = false }.font(.subheadline) }
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(Array(variant.sets.enumerated()), id: \.element.id) { index, plan in
+                    if plan.kind == .warmup && (index == 0 || variant.sets[index - 1].kind != .warmup) {
+                        SetGroupLabel(title: "Warm-up", color: palette.warmup)
+                    } else if index > 0 && plan.kind != .warmup && variant.sets[index - 1].kind == .warmup {
+                        SetGroupLabel(title: "Working sets", color: .secondary).padding(.top, 6)
+                    }
+                    if reorderingSets {
+                        HStack {
+                            Image(systemName: "line.3.horizontal").foregroundStyle(.secondary).frame(width: 44, height: 44)
+                            Text(prescribedSetSummary(plan, weight: weights[index], unit: unit)).font(.subheadline)
+                        }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                            .reorderHandle(plan.id, setReordering).reorderRow(plan.id, setReordering)
+                            .modifier(ReorderActions(canMoveUp: index > 0, canMoveDown: index + 1 < variant.sets.count) { moveSet(plan.id, by: $0) })
+                    } else {
+                        SwipeToDelete(action: { variant.sets.removeAll { $0.id == plan.id } }) { row(plan, index: index, weight: weights[index]) }
+                    }
                 }
-                if reordering {
-                    HStack {
-                        Image(systemName: "line.3.horizontal").foregroundStyle(.secondary).frame(width: 44, height: 44)
-                        Text(prescribedSetSummary(plan, weight: weights[index], unit: unit)).font(.subheadline)
-                    }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
-                        .modifier(ExerciseDragHandle(id: plan.id, enabled: true, dragging: $draggingSet))
-                        .modifier(ExerciseDropTarget(id: plan.id, dragging: $draggingSet, move: moveSet))
-                        .modifier(ReorderActions(canMoveUp: index > 0, canMoveDown: index + 1 < variant.sets.count) { moveSet(plan.id, by: $0) })
-                } else {
-                    SwipeToDelete(action: { variant.sets.removeAll { $0.id == plan.id } }) { row(plan, index: index, weight: weights[index]) }
-                }
-            }
+            }.reorderingStack("sets.\(slotID)")
             ExerciseActions(addTitle: "Add Set", quickAdds: mode != .cardio, adder: adder, customize: { sheet = .technique($0) })
         }
         .sheet(item: $sheet) { sheetContent($0).environmentObject(store) }
@@ -89,7 +96,7 @@ struct TemplateExerciseCard: View {
     @ViewBuilder private var menuItems: some View {
         Button("Plan Settings", systemImage: "slider.horizontal.3") { sheet = .settings }
         if let link { Button("Superset / Circuit", systemImage: "link", action: link) }
-        Button(reordering ? "Finish Reordering" : "Reorder Sets", systemImage: "arrow.up.arrow.down") { reordering.toggle() }
+        Button(reorderingSets ? "Finish Reordering" : "Reorder Sets", systemImage: "arrow.up.arrow.down") { reorderingSets.toggle() }
         if mode != .cardio {
             Button("Add Warm-up", systemImage: "plus") { addWarmup() }
             Button("Apply Warm-up Preset", systemImage: "flame") { sheet = .warmups }
@@ -108,8 +115,7 @@ struct TemplateExerciseCard: View {
         switch sheet {
         case .keypad(let edit): NumberEditor(edit: edit)
         case .reps(let plan): RepValuesEditor(plan: plan, save: saveReps, adjacent: adjacentPlan)
-        case .repTarget(let plan): RepTargetEditor(plan: plan, onSave: saveReps)
-        case .load(let plan): LoadRuleEditor(plan: plan, unit: unit, suggestedWeight: variant.weight(for: plan)) { edited in update(plan.id) { $0 = edited } }
+        case .load(let plan): LoadRuleEditor(plan: plan, unit: unit, suggestedWeight: variant.weight(for: plan), mode: mode) { edited in update(plan.id) { $0 = edited } }
         case .details(let plan): TemplatePlanEditor(variant: variant, plan: plan) { edited in store.saveVariant(edited) }.sheetSize()
         case .technique(let technique):
             TechniqueEditor(technique: technique, exerciseID: variant.exerciseID) { plans, replace, _ in
@@ -117,6 +123,8 @@ struct TemplateExerciseCard: View {
             }.sheetSize()
         case .settings: PlanSettingsEditor(variant: variant).sheetSize()
         case .warmups: ApplyWarmupPreset(variantID: variant.id).sheetSize()
+        case .rest:
+            RestSettingsEditor(name: exercise?.name ?? "Rest", rest: $variant.restSeconds, warmupRest: $variant.warmupRestSeconds, failRest: $variant.failRestSeconds)
         case .saveWarmups: WarmupPresetEditor(preset: WarmupPreset(name: variant.label + " warm-up", sets: variant.sets.filter { $0.kind == .warmup })).sheetSize()
         }
     }
@@ -143,7 +151,6 @@ struct TemplateExerciseCard: View {
                 .longPress("Weight settings") { sheet = .load(plan) }
                 .accessibilityLabel("Set \(index + 1), \(mode == .cardio ? "time" : "weight"), \(load)")
             SetValueCell(title: "Reps", value: plan.repTarget.map(displayTarget) ?? "–", labeled: labeled) { sheet = .reps(plan) }
-                .longPress("Edit rep target") { sheet = .repTarget(plan) }
                 .accessibilityLabel("Set \(index + 1), rep target, \(plan.repTarget ?? "none")")
             SetValueCell(title: "RPE", value: plan.rpe.map { number($0) } ?? "–", labeled: labeled) { open(plan.id, .rpe) }
                 .frame(maxWidth: labeled ? .infinity : 50)
@@ -204,7 +211,7 @@ struct TemplateExerciseCard: View {
         return ids[index + offset]
     }
     private func saveReps(_ edited: SetPlan) -> Bool {
-        update(edited.id) { $0.reps = edited.reps; $0.repCeiling = edited.repCeiling; $0.amrap = edited.amrap }
+        var changed = variant; changed.setRepTarget(edited); return store.saveVariant(changed)
     }
     private func duplicate(_ plan: SetPlan) {
         guard let index = variant.sets.firstIndex(where: { $0.id == plan.id }) else { return }
@@ -214,6 +221,9 @@ struct TemplateExerciseCard: View {
     private func moveSet(_ id: UUID, by offset: Int) {
         guard let index = variant.sets.firstIndex(where: { $0.id == id }), variant.sets.indices.contains(index + offset) else { return }
         var edited = variant; edited.sets.swapAt(index, index + offset); variant = edited
+    }
+    private var setReordering: Reordering {
+        Reordering(space: "sets.\(slotID)", lifted: $liftedSet, rows: setRows, place: moveSet)
     }
     private func moveSet(_ source: UUID, _ target: UUID, _ after: Bool) {
         var edited = variant

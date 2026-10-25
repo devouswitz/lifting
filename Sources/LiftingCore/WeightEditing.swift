@@ -99,27 +99,28 @@ public extension TrainingData {
         activeSession!.exercises[exerciseIndex].setWeight(weight, at: setIndex, fallback: variant.workingWeight)
     }
 
-    /// Save each entered load to its matching prescribed set without changing other days.
-    mutating func saveSessionWeights(_ exerciseID: UUID) throws {
+    /// Makes today's version of an exercise its saved prescription: its sets, types, targets, entered loads,
+    /// and rest. Inherited weights stay inherited, so later edits to the first set still flow down.
+    mutating func saveSessionPlan(_ exerciseID: UUID) throws {
         guard let item = activeSession?.exercises.first(where: { $0.id == exerciseID }),
               let index = variants.firstIndex(where: { $0.id == item.variantID }) else {
             throw TrainingError.invalid("Exercise unavailable.")
         }
-        variants[index].workingWeight = item.workingLoad(fallback: variants[index].workingWeight)
-        var ordinals: [SetKind: Int] = [:]
-        for set in item.sets where set.plan.kind != .warmup {
-            let ordinal = ordinals[set.plan.kind, default: 0]
-            ordinals[set.plan.kind] = ordinal + 1
-            let matchingKind = variants[index].sets.indices.filter { variants[index].sets[$0].kind == set.plan.kind }
-            let planIndex = variants[index].sets.firstIndex(where: { $0.id == set.plan.id })
-                ?? (matchingKind.indices.contains(ordinal) ? matchingKind[ordinal] : nil)
-            guard let weight = set.weight, let planIndex else { continue }
-            if variants[index].sets[planIndex].load == .working {
-                variants[index].setWeight(weight, for: variants[index].sets[planIndex].id)
-                if set.weightIsEdited == false { variants[index].sets[planIndex].weightOverride = nil }
-            } else if variants[index].sets[planIndex].load == .fixed {
-                variants[index].sets[planIndex].fixedWeight = weight
+        variants[index].sets = item.sets.map { set in
+            var plan = set.plan
+            switch plan.load {
+            case .working: plan.weightOverride = set.weightIsEdited == true ? set.weight : nil
+            case .fixed: plan.fixedWeight = set.weight ?? plan.fixedWeight
+            case .none:
+                if item.mode == .bodyweight, let added = set.weight, added != 0 { plan.load = .fixed; plan.fixedWeight = added }
+            case .percent: break
             }
+            return plan
         }
+        variants[index].workingWeight = item.workingLoad(fallback: variants[index].workingWeight)
+        variants[index].rounding = item.roundingIncrement ?? variants[index].rounding
+        variants[index].restSeconds = item.restSeconds
+        variants[index].warmupRestSeconds = item.warmupRestSeconds
+        variants[index].failRestSeconds = item.failRestSeconds
     }
 }

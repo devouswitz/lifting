@@ -69,7 +69,7 @@ struct HistoryView: View {
         VStack(spacing: 0) {
             ForEach(Array(sessions.enumerated()), id: \.element.id) { index, session in
                 NavigationLink { SessionDetail(sessionID: session.id) } label: {
-                    HistoryWorkoutRow(session: session, title: store.data.title(for: session), unit: store.data.settings.unit)
+                    HistoryWorkoutRow(session: session, title: store.data.title(for: session), settings: store.data.settings)
                 }.buttonStyle(.plain).accessibilityIdentifier("history.workout.\(session.id)")
                 if index < sessions.count - 1 { Divider().padding(.leading, 58) }
             }
@@ -82,46 +82,32 @@ private enum HistoryMode: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+/// One logged workout in the list: date, title, and totals. Exercises and sets are on its own screen.
 private struct HistoryWorkoutRow: View {
     let session: Session
     let title: String
-    let unit: WeightUnit
+    let settings: LiftingCore.Settings
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 13) {
-            HStack(alignment: .top, spacing: 12) {
-                VStack(spacing: 2) {
-                    Text(session.startedAt, format: .dateTime.day()).font(.title3.weight(.semibold)).monospacedDigit()
-                    Text(session.startedAt, format: .dateTime.weekday(.abbreviated)).font(.caption2).foregroundStyle(.secondary)
-                }.frame(width: 30)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(title).font(.headline).foregroundStyle(session.skipped == true ? .secondary : .primary)
-                    if session.skipped == true { Text("Skipped").font(.caption).foregroundStyle(.secondary) }
-                    else {
-                        Text("\(counted(session.completedSets, "set")) · \(clockText(session.duration())) · \(number(unit.display(session.volume), decimals: 0)) \(unit.rawValue)\(session.health?.activeKcal.map { " · \(number($0, decimals: 0)) kcal" } ?? "")")
-                            .font(.caption).foregroundStyle(.secondary).monospacedDigit()
-                    }
+        HStack(alignment: .top, spacing: 12) {
+            VStack(spacing: 2) {
+                Text(session.startedAt, format: .dateTime.day()).font(.title3.weight(.semibold)).monospacedDigit()
+                Text(session.startedAt, format: .dateTime.weekday(.abbreviated)).font(.caption2).foregroundStyle(.secondary)
+            }.frame(width: 30)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title).font(.headline).foregroundStyle(session.skipped == true ? .secondary : .primary)
+                if session.skipped == true { Text("Skipped").font(.caption).foregroundStyle(.secondary) }
+                else {
+                    let volume = volumeText(session, settings: settings)
+                    let exercises = session.exercises.filter { $0.sets.contains { $0.completedAt != nil } }.count
+                    Text([counted(exercises, "exercise"), counted(session.completedSets, "set"), clockText(session.duration()), volume.total, volume.warmup, session.health?.activeKcal.map { "\(number($0, decimals: 0)) kcal" }]
+                        .compactMap { $0 }.joined(separator: " · "))
+                        .font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                    if !session.notes.isEmpty { Label(session.notes, systemImage: "note.text").font(.caption).foregroundStyle(.secondary).lineLimit(1) }
                 }
-                Spacer(minLength: 0)
-                Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary).padding(.top, 5)
             }
-            let logged = session.exercises.filter { $0.sets.contains { $0.completedAt != nil } }
-            if !logged.isEmpty || !session.notes.isEmpty {
-            VStack(alignment: .leading, spacing: 9) {
-                ForEach(logged) { exercise in
-                    HStack(alignment: .firstTextBaseline, spacing: 12) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(exercise.name).font(.subheadline.weight(.medium))
-                            if !exercise.label.isEmpty && exercise.label != session.name && !exercise.label.hasSuffix(" · \(session.name)") { Text(exercise.label).font(.caption2).foregroundStyle(.secondary) }
-                        }.frame(maxWidth: .infinity, alignment: .leading)
-                        Text(loggedExerciseSummary(exercise, unit: unit))
-                            .font(.caption).monospacedDigit().multilineTextAlignment(.trailing)
-                            .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-                if !session.notes.isEmpty { Label(session.notes, systemImage: "note.text").font(.caption).foregroundStyle(.secondary).lineLimit(2) }
-            }.padding(.leading, 42)
-            }
+            Spacer(minLength: 0)
+            Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary).padding(.top, 5)
         }.padding(16).contentShape(Rectangle())
     }
 }
@@ -171,7 +157,8 @@ struct SessionDetail: View {
                         HStack(spacing: 16) {
                             detailMetric("Sets", value: "\(session.completedSets)")
                             detailMetric("Duration", value: clockText(session.duration()))
-                            detailMetric("Volume", value: "\(number(store.data.settings.unit.display(session.volume), decimals: 0)) \(store.data.settings.unit.rawValue)")
+                            let volume = volumeText(session, settings: store.data.settings)
+                            detailMetric(volume.warmup.map { "Volume, \($0)" } ?? "Volume", value: volume.total)
                         }
                         if let health = session.health, health.hasData {
                             VStack(alignment: .leading, spacing: 6) {

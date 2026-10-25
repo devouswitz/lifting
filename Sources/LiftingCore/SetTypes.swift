@@ -82,6 +82,7 @@ public extension TrainingData {
             set.weight = set.plan.resolvedWeight(working: item.workingLoad(fallback: variant.workingWeight), increment: item.roundingIncrement ?? variant.rounding)
         }
         set.plan.restSeconds = nil
+        if resolved == .failure && customTypeID == nil { set.plan.markToFailure() }
         set.reps = set.plan.initialReps
         activeSession!.exercises[e].sets.append(set)
     }

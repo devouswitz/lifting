@@ -38,6 +38,17 @@ struct SettingsView: View {
                 NavigationLink { SetTypesView() } label: { TileLabel(title: "Set Types", symbol: "square.stack.3d.up.fill", color: palette.technique) }.accessibilityIdentifier("settings.settypes")
                 Toggle(isOn: setting(\.autoRest)) { TileLabel(title: "Start Rest Timer Automatically", symbol: "timer", color: palette.rest) }
                 RestStepPicker(tiled: true)
+                Picker(selection: setting(\.warmupRestDefault)) {
+                    ForEach([30, 45, 60, 90, 120, 180], id: \.self) { Text(clockText(Double($0))).tag($0) }
+                } label: { TileLabel(title: "Rest After Warm-ups", symbol: "flame.fill", color: palette.warmup) }
+                Picker(selection: setting(\.failRest)) {
+                    Text("Off").tag(Int?.none)
+                    ForEach([120, 180, 240, 300, 420], id: \.self) { Text(clockText(Double($0))).tag(Int?.some($0)) }
+                } label: { TileLabel(title: "Rest After a Missed Target", symbol: "arrow.uturn.down", color: palette.failure) }
+                Toggle(isOn: setting(\.ordersExercisesAsLogged)) { TileLabel(title: "Order Exercises as You Go", symbol: "arrow.up.arrow.down", color: palette.action) }
+                Toggle(isOn: Binding(get: { store.data.settings.showsWarmupVolume == true }, set: { value in store.perform { $0.settings.showsWarmupVolume = value ? true : nil } })) {
+                    TileLabel(title: "Show Warm-up Volume", symbol: "scalemass", color: palette.warmup)
+                }
                 #if os(iOS)
                 Button {
                     Task {

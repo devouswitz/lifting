@@ -20,17 +20,3 @@ struct SetLoadFields: View {
         }
     }
 }
-
-struct LoadRuleEditor: View {
-    @State var plan: SetPlan
-    let unit: WeightUnit
-    var suggestedWeight: Double?
-    let save: (SetPlan) -> Bool
-    @State private var original: SetPlan?
-    var body: some View {
-        DraftEditor(valid: plan.isValid, changed: original.map { $0 != plan } ?? false, save: { save(plan) }) {
-            ThemedForm { SetLoadFields(plan: $plan, unit: unit, suggestedWeight: suggestedWeight) }
-                .navigationTitle("Weight Settings").inlineTitle()
-        }.onAppear { if original == nil { original = plan } }.sheetSize()
-    }
-}

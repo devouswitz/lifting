@@ -10,7 +10,8 @@ struct WorkoutView: View {
     @Environment(\.palette) var palette
     @Environment(\.accessibilityReduceMotion) var reduceMotion
     @Environment(\.dynamicTypeSize) private var typeSize
-    @State private var draggingExercise: UUID?
+    @State private var lifted: LiftedRow?
+    @State private var rows = RowFrames()
     @State private var adding = false
     @State private var finishing = false
     @State private var discard = false
@@ -26,9 +27,10 @@ struct WorkoutView: View {
                         if session.pausedAt != nil {
                             Button { store.pauseWorkout(false) } label: { Label("Resume Workout", systemImage: "play.fill") }.buttonStyle(AccentButtonStyle()).accessibilityIdentifier("workout.unpause")
                         }
-                        ForEach(session.exercises) { exercise in WorkoutExerciseCard(exerciseID: exercise.id, dragging: $draggingExercise).id(exercise.id) }
+                        ForEach(session.exercises) { exercise in WorkoutExerciseCard(exerciseID: exercise.id, reordering: reordering).id(exercise.id) }
                         Button { adding = true } label: { Label("Add Exercise", systemImage: "plus") }.buttonStyle(FieldButtonStyle()).padding(.top, 4)
                     }.padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 24)
+                    .reorderingStack("workout")
                 }
             }.background(palette.background)
             .scrollDismissesKeyboard(.interactively)
@@ -88,6 +90,11 @@ struct WorkoutView: View {
             #endif
         }
     }
+    private var reordering: Reordering {
+        Reordering(space: "workout", lifted: $lifted, rows: rows) { source, target, after in
+            store.perform { $0.moveSessionExercise(source, relativeTo: target, after: after) }
+        }
+    }
     private var minimizeButton: some View {
         Button { store.workoutPresented = false } label: { Image(systemName: "chevron.down") }.accessibilityLabel("Minimize workout")
     }
@@ -113,7 +120,8 @@ struct WorkoutView: View {
                         layout {
                             MetricTile(value: "\(session.completedSets)", label: "Sets")
                             MetricTile(value: clockText(session.duration()), label: "Duration")
-                            MetricTile(value: "\(number(store.data.settings.unit.display(session.volume), decimals: 0)) \(store.data.settings.unit.rawValue)", label: "Volume")
+                            let volume = volumeText(session, settings: store.data.settings)
+                            MetricTile(value: volume.total, label: volume.warmup.map { "Volume, \($0)" } ?? "Volume")
                         }.padding(.vertical, 4)
                     } footer: {
                         if session.completedSets == 0 { Text("Log at least one set to save this workout.") }
@@ -147,16 +155,18 @@ struct WorkoutSummaryHeader: View {
             let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(spacing: 12)) : AnyLayout(HStackLayout(alignment: .top, spacing: 0))
             layout {
                 TimelineView(.periodic(from: .now, by: 1)) { context in stat("Duration", clockText(session.duration(at: context.date))) }
-                stat("Volume", "\(number(store.data.settings.unit.display(session.volume), decimals: 0)) \(store.data.settings.unit.rawValue)")
+                let volume = volumeText(session, settings: store.data.settings)
+                stat("Volume", volume.total, note: volume.warmup)
                 stat("Sets", "\(session.completedSets) of \(session.totalSets)")
             }
             CapsuleProgress(value: session.totalSets == 0 ? 0 : Double(session.completedSets) / Double(session.totalSets))
         }.padding(.horizontal, 4).padding(.bottom, 4)
     }
-    func stat(_ title: String, _ value: String) -> some View {
+    func stat(_ title: String, _ value: String, note: String? = nil) -> some View {
         VStack(spacing: 1) {
             Text(title).font(.caption).foregroundStyle(.secondary)
             Text(value).font(.figure(17)).lineLimit(1).minimumScaleFactor(0.8)
+            if let note { Text(note).font(.caption2).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.8) }
         }.frame(maxWidth: .infinity).multilineTextAlignment(.center).accessibilityElement(children: .combine)
     }
 }
@@ -166,41 +176,48 @@ struct TightLabelStyle: LabelStyle {
     func makeBody(configuration: Configuration) -> some View { HStack(spacing: 5) { configuration.icon.imageScale(.small); configuration.title } }
 }
 
+/// The rest timer above the bottom edge. When rest runs out it turns solid in the rest color, with one firm
+/// vibration, and stays until skipped or the next set is logged.
 struct RestBar: View {
     @EnvironmentObject var store: AppStore
-    @Environment(\.colorScheme) var scheme
     @Environment(\.palette) var palette
+    @State private var total: Double = 1
+    @State private var done = false
     var body: some View {
         if let deadline = store.data.restDeadline {
             TimelineView(.periodic(from: .now, by: 0.25)) { context in
                 let remaining = deadline.timeIntervalSince(context.date)
+                let over = remaining <= 0
+                let ink = over ? palette.on(.rest) : palette.rest
                 HStack(spacing: 12) {
                     ZStack {
-                        Circle().stroke(palette.rest.opacity(0.25), lineWidth: 4)
-                        Circle().trim(from: 0, to: total > 0 ? max(0, remaining) / total : 0).stroke(palette.rest, style: StrokeStyle(lineWidth: 4, lineCap: .round)).rotationEffect(.degrees(-90))
+                        Circle().stroke(ink.opacity(0.25), lineWidth: 4)
+                        Circle().trim(from: 0, to: over ? 1 : total > 0 ? remaining / total : 0).stroke(ink, style: StrokeStyle(lineWidth: 4, lineCap: .round)).rotationEffect(.degrees(-90))
                     }.frame(width: 30, height: 30).accessibilityHidden(true)
-                    Text(remaining > 0 ? clockText(remaining) : "Rest done").font(.figure(22, weight: .bold)).foregroundStyle(remaining > 0 ? Color.primary : palette.rest)
-                        .frame(maxWidth: .infinity, alignment: .leading).accessibilityLabel(remaining > 0 ? "Rest, \(clockText(remaining)) left" : "Rest complete")
+                    Text(over ? "Rest done" : clockText(remaining)).font(.figure(22, weight: .bold)).foregroundStyle(over ? palette.on(.rest) : Color.primary)
+                        .frame(maxWidth: .infinity, alignment: .leading).accessibilityLabel(over ? "Rest complete" : "Rest, \(clockText(remaining)) left")
                     let step = store.data.settings.restAdjustment
                     Group {
                         Button("−\(stepText(step))") { store.adjustRest(-Double(step)) }.accessibilityLabel("Subtract \(step) seconds")
                         Button("+\(stepText(step))") { store.adjustRest(Double(step)) }.accessibilityLabel("Add \(step) seconds")
-                    }.font(.subheadline.weight(.semibold).monospacedDigit()).foregroundStyle(palette.rest).lineLimit(1).minimumScaleFactor(0.7)
-                    .frame(width: 48, height: 36).background(palette.rest.opacity(palette.dark ? 0.2 : 0.12), in: Capsule()).buttonStyle(.plain)
+                    }.font(.subheadline.weight(.semibold).monospacedDigit()).foregroundStyle(ink).lineLimit(1).minimumScaleFactor(0.7)
+                    .frame(width: 48, height: 36).background(ink.opacity(palette.dark || over ? 0.2 : 0.12), in: Capsule()).buttonStyle(.plain)
                     .contextMenu { RestStepPicker() }
-                    Button("Skip", action: store.skipRest).font(.subheadline.weight(.semibold)).foregroundStyle(palette.on(.rest))
-                        .frame(width: 56, height: 36).background(palette.rest, in: Capsule()).buttonStyle(.plain).accessibilityIdentifier("rest.skip")
+                    Button(over ? "Done" : "Skip", action: store.skipRest).font(.subheadline.weight(.semibold)).foregroundStyle(over ? palette.rest : palette.on(.rest))
+                        .frame(width: 56, height: 36).background(over ? palette.on(.rest) : palette.rest, in: Capsule()).buttonStyle(.plain).accessibilityIdentifier("rest.skip")
                 }
                 .padding(.leading, 14).padding(.trailing, 8).padding(.vertical, 8)
-                .background(palette.card, in: Capsule())
+                .background(over ? palette.rest : palette.card, in: Capsule())
                 .shadow(color: .black.opacity(palette.dark ? 0.5 : 0.12), radius: 16, y: 4)
                 .padding(.horizontal, 12).padding(.bottom, 8)
+                .animation(.snappy, value: over)
+                .onChange(of: over) { _, value in done = value }
             }
+            .sensoryFeedback(.warning, trigger: done) { old, new in !old && new && store.data.settings.haptics }
             .task(id: deadline) { total = max(1, deadline.timeIntervalSince(store.restStartedAt ?? Date())) }
             .transition(.move(edge: .bottom).combined(with: .opacity))
         }
     }
-    @State private var total: Double = 1
     private func stepText(_ seconds: Int) -> String { seconds % 60 == 0 ? "\(seconds / 60)m" : "\(seconds)" }
 }
 
@@ -221,7 +238,7 @@ struct RestStepPicker: View {
 /// Everything a live exercise card can present. One sheet at a time, owned by the card, so auto-collapse
 /// waits while any of them is open and a row leaving the table never takes its keypad with it.
 enum ExerciseSheet: Identifiable {
-    case substitute, technique(Technique), savedPlan(UUID), plates, link, warmups
+    case substitute, technique(Technique), savedPlan(UUID), plates, link, warmups, rest
     case keypad(NumericEdit), load(UUID), details(UUID), reps(UUID)
     var id: String {
         switch self {
@@ -231,6 +248,7 @@ enum ExerciseSheet: Identifiable {
         case .plates: return "plates"
         case .link: return "link"
         case .warmups: return "warmups"
+        case .rest: return "rest"
         case .keypad(let edit): return "keypad.\(edit.id)"
         case .load(let id): return "load.\(id)"
         case .details(let id): return "details.\(id)"
@@ -244,7 +262,7 @@ struct WorkoutExerciseCard: View {
     @Environment(\.palette) private var palette
     @Environment(\.dynamicTypeSize) var typeSize
     let exerciseID: UUID
-    @Binding var dragging: UUID?
+    let reordering: Reordering
     @State private var sheet: ExerciseSheet?
     @State private var removing = false
     @FocusState private var noteFocused: Bool
@@ -255,7 +273,7 @@ struct WorkoutExerciseCard: View {
             let done = item.sets.filter { $0.completedAt != nil }.count
             ExerciseCard(name: item.name, link: linkText, summary: compactSummary(item), expanded: item.collapsed != true,
                          toggle: { withAnimation(.snappy) { _ = store.perform { $0.setExerciseExpanded(exerciseID, expanded: item.collapsed == true, focus: item.collapsed == true) } } },
-                         order: CardOrder(id: exerciseID, canMoveUp: exercises.first?.id != exerciseID, canMoveDown: exercises.last?.id != exerciseID, dragging: $dragging) { offset in
+                         order: CardOrder(id: exerciseID, canMoveUp: exercises.first?.id != exerciseID, canMoveDown: exercises.last?.id != exerciseID, reordering: reordering) { offset in
                              store.perform { $0.moveSessionExercise(exerciseID, offset: offset) }
                          },
                          accessibilityValue: "\(item.collapsed == true ? "Collapsed" : "Expanded"), \(done) of \(item.sets.count) sets",
@@ -264,14 +282,12 @@ struct WorkoutExerciseCard: View {
                 else { Text("\(done) of \(item.sets.count)").font(.figure(13, weight: .medium)).foregroundStyle(.secondary) }
             } menu: { menuItems(item) } content: {
                 ExerciseInfoRow(exerciseID: item.exerciseID, swap: { id in store.perform { try $0.substitute(sessionExerciseID: exerciseID, with: id, future: false) } }, swapDisabled: completed,
-                                load: loadSummary(item.sets.filter { $0.plan.kind != .warmup }.map(\.weight), mode: item.mode, unit: store.data.settings.unit), rest: item.restSeconds) {
-                    sheet = .keypad(.rest(item.restSeconds, context: item.name) { seconds in
-                        store.perform { data in
-                            guard let index = data.activeSession?.exercises.firstIndex(where: { $0.id == exerciseID }) else { throw TrainingError.invalid("Exercise unavailable.") }
-                            data.activeSession!.exercises[index].restSeconds = seconds
-                        }
-                    })
-                }
+                                load: loadSummary(item.sets.filter { $0.plan.kind != .warmup }.map(\.weight), mode: item.mode, unit: store.data.settings.unit), rest: item.restSeconds,
+                                warmupRest: item.sets.contains { $0.plan.kind == .warmup } ? item.warmupRestSeconds ?? store.data.settings.warmupRestDefault : nil,
+                                editRest: { sheet = .keypad(.rest(item.restSeconds, context: item.name) { seconds in editItem { $0.restSeconds = seconds } }) },
+                                editWarmupRest: {
+                                    sheet = .keypad(.rest(item.warmupRestSeconds ?? store.data.settings.warmupRestDefault, title: "Rest After Warm-ups", context: item.name) { seconds in editItem { $0.warmupRestSeconds = seconds } })
+                                }, restSettings: { sheet = .rest })
                 TextField("Add a note", text: Binding(get: { self.item?.notes ?? "" }, set: { value in store.editExercise(exerciseID) { $0.notes = value } }), axis: .vertical)
                     .font(.subheadline).lineLimit(1...5).foregroundStyle(.primary).focused($noteFocused).padding(.bottom, 4).accessibilityIdentifier("workout.\(exerciseID).noteField")
                 if let from = item.substitutedFrom { Label("Instead of \(from)", systemImage: "arrow.triangle.2.circlepath").font(.footnote).foregroundStyle(.secondary) }
@@ -281,9 +297,6 @@ struct WorkoutExerciseCard: View {
                 ExerciseActions(addTitle: item.mode == .cardio ? "Add Interval" : item.sets.last?.plan.kind == .myoMini ? "Add Mini-set" : "Add Set",
                                 quickAdds: item.mode != .cardio, adder: adder(item), customize: { sheet = .technique($0) }, identifier: "workout.\(exerciseID)")
             }
-            .modifier(ExerciseDropTarget(id: exerciseID, dragging: $dragging) { source, target, after in
-                store.perform { $0.moveSessionExercise(source, relativeTo: target, after: after) }
-            })
             .task(id: autoCollapseReady) {
                 guard autoCollapseReady else { return }
                 do { try await Task.sleep(for: .milliseconds(650)) } catch { return }
@@ -291,6 +304,12 @@ struct WorkoutExerciseCard: View {
             }
             .sheet(item: $sheet) { sheetContent($0, item: item).environmentObject(store) }
             .confirmationDialog("Remove \(item.name)?", isPresented: $removing) { Button("Remove from workout", role: .destructive) { store.editActive { $0.exercises.removeAll { $0.id == exerciseID } } } } message: { Text("This removes its sets from the current workout.") }
+        }
+    }
+    private func editItem(_ change: @escaping (inout SessionExercise) -> Void) -> Bool {
+        store.perform { data in
+            guard let index = data.activeSession?.exercises.firstIndex(where: { $0.id == exerciseID }) else { throw TrainingError.invalid("Exercise unavailable.") }
+            change(&data.activeSession!.exercises[index])
         }
     }
     private var linkText: String? {
@@ -302,10 +321,9 @@ struct WorkoutExerciseCard: View {
         Button("Swap Exercise", systemImage: "arrow.triangle.2.circlepath") { sheet = .substitute }.accessibilityIdentifier("workout.\(item.id).substitute")
         Button("Superset / Circuit", systemImage: "link") { sheet = .link }
         Divider()
-        Button("Add Warm-up Set", systemImage: "plus") { addWarmup() }.disabled(item.mode == .cardio)
         Button("Apply Warm-up Preset", systemImage: "flame") { sheet = .warmups }.disabled(item.mode == .cardio)
         Button("Edit Saved Prescription", systemImage: "slider.horizontal.3") { sheet = .savedPlan(item.variantID) }
-        Button("Save Weights to This Day", systemImage: "square.and.arrow.down") { store.perform { try $0.saveSessionWeights(exerciseID) } }
+        Button("Save Changes to Plan", systemImage: "square.and.arrow.down") { store.perform { try $0.saveSessionPlan(exerciseID) } }
         Button("Plate Calculator", systemImage: "circle.grid.2x1") { sheet = .plates }.disabled(item.mode != .strength)
         Divider()
         Button("Remove from Workout", systemImage: "trash", role: .destructive) { removing = true }
@@ -336,16 +354,21 @@ struct WorkoutExerciseCard: View {
         case .plates: PlateView(initialWeight: unit.display(item.sets.last?.weight ?? 0)).sheetSize()
         case .link: LinkedExerciseEditor(exerciseID: exerciseID).sheetSize()
         case .warmups: ApplyWarmupPreset(exerciseID: exerciseID).sheetSize()
+        case .rest:
+            RestSettingsEditor(name: item.name,
+                               rest: Binding(get: { self.item?.restSeconds ?? 0 }, set: { value in _ = editItem { $0.restSeconds = value } }),
+                               warmupRest: Binding(get: { self.item?.warmupRestSeconds }, set: { value in _ = editItem { $0.warmupRestSeconds = value } }),
+                               failRest: Binding(get: { self.item?.failRestSeconds }, set: { value in _ = editItem { $0.failRestSeconds = value } }))
         case .keypad(let edit): NumberEditor(edit: edit)
         case .load(let id):
             if let plan = set(id)?.plan {
-                LoadRuleEditor(plan: plan, unit: unit, suggestedWeight: set(id)?.weight) { plan in store.perform { try $0.replaceSetPlan(exerciseID: exerciseID, setID: id, plan: plan) } }
+                LoadRuleEditor(plan: plan, unit: unit, suggestedWeight: set(id)?.weight, mode: item.mode) { plan in store.perform { try $0.replaceSetPlan(exerciseID: exerciseID, setID: id, plan: plan) } }
             }
         case .details(let id):
             if let plan = set(id)?.plan { LivePlanEditor(exerciseID: exerciseID, setID: id, initial: plan).sheetSize() }
         case .reps(let id):
             if let plan = set(id)?.plan {
-                RepTargetEditor(plan: plan) { plan in store.perform { try $0.setRepTarget(plan, exerciseID: exerciseID, setID: id) } }
+                RepValuesEditor(plan: plan) { plan in store.perform { try $0.setRepTarget(plan, exerciseID: exerciseID, setID: id) } }
             }
         }
     }

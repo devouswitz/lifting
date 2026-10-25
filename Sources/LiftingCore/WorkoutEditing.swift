@@ -1,6 +1,7 @@
 import Foundation
 
 public extension TrainingData {
+    /// Adds an exercise to the workout, collapsed when another exercise is open.
     mutating func addExerciseToSession(_ exerciseID: UUID) throws {
         guard let session = activeSession, let exercise = exercise(exerciseID) else { throw TrainingError.invalid("Workout or exercise unavailable.") }
         let current = session.exercises.first { $0.exerciseID == exerciseID }.flatMap { variant($0.variantID) }
@@ -10,7 +11,9 @@ public extension TrainingData {
         let base = [session.programID.flatMap(program)?.name, session.name].compactMap { $0 }.joined(separator: " · ")
         let selected = current ?? prescribed ?? previous ?? Variant.standard(for: exercise, label: Self.uniqueName(base, among: variants.filter { $0.exerciseID == exerciseID }.map(\.label)))
         if variant(selected.id) == nil { variants.append(selected) }
-        activeSession!.exercises.append(SessionExercise(variant: selected, exercise: exercise))
+        var item = SessionExercise(variant: selected, exercise: exercise)
+        if activeSession!.exercises.contains(where: { $0.collapsed != true }) { item.collapsed = true }
+        activeSession!.exercises.append(item)
     }
 
     mutating func setExerciseExpanded(_ exerciseID: UUID, expanded: Bool, focus: Bool = false) {
@@ -66,12 +69,19 @@ public extension TrainingData {
         }
     }
 
+    /// Changes a set's rep target. Later pending sets of the same kind that shared the old target follow it,
+    /// as later weights follow an entered one; a count nobody has typed follows the new target too.
     mutating func setRepTarget(_ plan: SetPlan, exerciseID: UUID, setID: UUID) throws {
         guard let e = activeSession?.exercises.firstIndex(where: { $0.id == exerciseID }),
               let s = activeSession?.exercises[e].sets.firstIndex(where: { $0.id == setID }) else { throw TrainingError.invalid("Set unavailable.") }
-        activeSession!.exercises[e].sets[s].plan.reps = plan.reps
-        activeSession!.exercises[e].sets[s].plan.repCeiling = plan.repCeiling
-        activeSession!.exercises[e].sets[s].plan.amrap = plan.amrap
+        let sets = activeSession!.exercises[e].sets, old = sets[s].plan
+        for i in sets.indices where i == s || (i > s && sets[i].completedAt == nil && sets[i].plan.kind == old.kind && sets[i].plan.hasSameTarget(as: old)) {
+            var set = sets[i]
+            let untyped = set.completedAt == nil && set.reps == set.plan.initialReps
+            set.plan.takeTarget(from: plan)
+            if untyped { set.reps = set.plan.initialReps }
+            activeSession!.exercises[e].sets[i] = set
+        }
     }
 
     mutating func moveSessionExercise(_ exerciseID: UUID, offset: Int) {
@@ -81,6 +91,13 @@ public extension TrainingData {
 }
 
 public extension Variant {
+    /// The saved-day version of a rep target change; later sets that shared the old target follow it.
+    mutating func setRepTarget(_ plan: SetPlan) {
+        guard let s = sets.firstIndex(where: { $0.id == plan.id }) else { return }
+        let old = sets[s]
+        for i in sets.indices where i == s || (i > s && sets[i].kind == old.kind && sets[i].hasSameTarget(as: old)) { sets[i].takeTarget(from: plan) }
+    }
+
     static func standard(for exercise: Exercise, label: String) -> Variant {
         var variant = Variant(exerciseID: exercise.id, label: label)
         if exercise.mode == .cardio { variant.sets = [SetPlan(load: .none, reps: nil, repCeiling: nil, seconds: 1200, rpe: 6)]; variant.restSeconds = 0 }

@@ -21,6 +21,8 @@ final class AppStore: ObservableObject {
     @Published var restStartedAt: Date?
     /// Bumped when a workout ends, so Train returns to its first screen.
     @Published var trainRevision = 0
+    /// Screens pushed on Train. Cleared when a workout ends.
+    @Published var trainPath = NavigationPath()
     @Published var syncConfiguration = FolderSyncConfiguration()
     @Published var syncStatus = "Off"
     @Published var syncing = false
@@ -99,13 +101,13 @@ final class AppStore: ObservableObject {
 
     func start(_ routine: Routine) { perform { try $0.start(routineID: routine.id) }; if data.activeSession != nil { workoutPresented = true } }
     func emptyWorkout() { perform { d in guard d.activeSession == nil else { return }; d.activeSession = Session(name: "Workout") }; workoutPresented = true }
-    func finish() { perform { try $0.finish() }; if data.activeSession == nil { workoutPresented = false; cancelRestAlert(); trainRevision += 1; scheduleHealthCheck() } }
+    func finish() { perform { try $0.finish() }; if data.activeSession == nil { workoutPresented = false; cancelRestAlert(); trainPath = NavigationPath(); trainRevision += 1; scheduleHealthCheck() } }
     /// Deletes a workout from history, and the copy Lifting saved to Apple Health for it.
     func deleteSession(_ id: UUID) {
         let copies = data.sessions.first { $0.id == id }?.health?.savedWorkoutIDs ?? []
         if perform({ $0.sessions.removeAll { $0.id == id } }) { deleteHealthCopies(copies) }
     }
-    func discard() { perform { $0.activeSession = nil; $0.restDeadline = nil }; workoutPresented = false; cancelRestAlert(); trainRevision += 1 }
+    func discard() { perform { $0.activeSession = nil; $0.restDeadline = nil }; workoutPresented = false; cancelRestAlert(); trainPath = NavigationPath(); trainRevision += 1 }
     func setHiddenFromProgress(_ exerciseID: UUID, _ hidden: Bool) {
         perform { d in if let i = d.exercises.firstIndex(where: { $0.id == exerciseID }) { d.exercises[i].hiddenFromProgress = hidden ? true : nil } }
     }
@@ -126,6 +128,7 @@ final class AppStore: ObservableObject {
     }
     func toggle(_ exerciseID: UUID, _ setID: UUID) {
         let before = data.activeSession?.completedSets ?? 0
+        let place = data.activeSession?.exercises.firstIndex { $0.id == exerciseID }
         let previousDeadline = data.restDeadline
         perform { try $0.toggleSet(exerciseID: exerciseID, setID: setID) }
         if data.restDeadline != previousDeadline { restStartedAt = data.restDeadline == nil ? nil : Date() }
@@ -134,6 +137,9 @@ final class AppStore: ObservableObject {
             // Scroll only when focus moves to another exercise, so rows stay put while logging the same one.
             if data.activeSession?.linkTitle(for: exerciseID) != nil, let target = data.activeSession?.exercises.first(where: { $0.collapsed == false }), target.id != exerciseID {
                 autoFocusedExerciseID = target.id; autoFocusRevision += 1
+            } else if data.activeSession?.exercises.firstIndex(where: { $0.id == exerciseID }) != place {
+                // Ordered as logged: follow the card to its new place.
+                autoFocusedExerciseID = exerciseID; autoFocusRevision += 1
             }
         }
         else { cancelRestAlert() }
@@ -198,21 +204,34 @@ final class AppStore: ObservableObject {
         var nextID: UUID?
         if perform({ nextID = $0.collapseCompletedExercise(id) }), let nextID { autoFocusedExerciseID = nextID; autoFocusRevision += 1 }
     }
-    func scheduleRestAlert() {
+    /// Rest alerts talk to the notification service off the main thread, in order, so logging a set never waits on it.
+    /// Each schedule or cancel starts a new generation; a slow settings check from an older one never adds an alert.
+    private let restAlerts = RestAlerts()
+    func scheduleRestAlert() { restAlerts.schedule(data.restDeadline) }
+    func cancelRestAlert() { restAlerts.schedule(nil) }
+}
+
+final class RestAlerts: @unchecked Sendable {
+    private let queue = DispatchQueue(label: "rest-alerts")
+    private var generation = 0
+    func schedule(_ deadline: Date?) {
         #if os(iOS)
-        cancelRestAlert()
-        guard let deadline = data.restDeadline, deadline.timeIntervalSinceNow > 0 else { return }
-        UNUserNotificationCenter.current().getNotificationSettings { settings in
-            guard settings.authorizationStatus == .authorized else { return }
-            let content = UNMutableNotificationContent(); content.title = "Rest complete"; content.sound = .default
-            let trigger = UNTimeIntervalNotificationTrigger(timeInterval: max(1, deadline.timeIntervalSinceNow), repeats: false)
-            UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "rest", content: content, trigger: trigger))
+        queue.async {
+            self.generation += 1
+            let current = self.generation
+            let center = UNUserNotificationCenter.current()
+            center.removePendingNotificationRequests(withIdentifiers: ["rest"])
+            guard let deadline, deadline.timeIntervalSinceNow > 0 else { return }
+            center.getNotificationSettings { settings in
+                guard settings.authorizationStatus == .authorized else { return }
+                self.queue.async {
+                    guard current == self.generation, deadline.timeIntervalSinceNow > 0 else { return }
+                    let content = UNMutableNotificationContent(); content.title = "Rest complete"; content.sound = .default
+                    let trigger = UNTimeIntervalNotificationTrigger(timeInterval: max(1, deadline.timeIntervalSinceNow), repeats: false)
+                    center.add(UNNotificationRequest(identifier: "rest", content: content, trigger: trigger))
+                }
+            }
         }
-        #endif
-    }
-    func cancelRestAlert() {
-        #if os(iOS)
-        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: ["rest"])
         #endif
     }
 }
@@ -289,6 +308,14 @@ func loggedExerciseSummary(_ exercise: SessionExercise, unit: WeightUnit) -> Str
         }
         return parts.joined(separator: " · ")
     }.joined(separator: "\n")
+}
+
+/// A workout's volume, with its warm-up volume beside it when Settings asks for it: "6240 lb", "+1940 lb warm-up".
+func volumeText(_ session: Session, settings: LiftingCore.Settings) -> (total: String, warmup: String?) {
+    let unit = settings.unit
+    let warmup = session.warmupVolume
+    return ("\(number(unit.display(session.volume), decimals: 0)) \(unit.rawValue)",
+            settings.showsWarmupVolume == true && warmup > 0 ? "+\(number(unit.display(warmup), decimals: 0)) \(unit.rawValue) warm-up" : nil)
 }
 
 /// "8–12" for display; stored targets use a plain hyphen.

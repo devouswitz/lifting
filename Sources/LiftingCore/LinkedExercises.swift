@@ -67,7 +67,7 @@ public extension TrainingData {
         guard let index = members.firstIndex(where: { $0.id == exerciseID }) else { return }
         let pendingWarmups = members.filter { $0.sets.contains { $0.completedAt == nil && $0.plan.kind == .warmup } }
         var target: SessionExercise?
-        var rest = logged.plan.restSeconds ?? current.restSeconds
+        var rest = current.rest(after: logged, settings: settings)
         if !pendingWarmups.isEmpty {
             target = pendingWarmups.first(where: { $0.id == exerciseID }) ?? pendingWarmups.first
         } else if logged.plan.kind == .warmup {
@@ -83,6 +83,7 @@ public extension TrainingData {
                 rest = next <= index ? (current.groupRestSeconds ?? current.restSeconds) : (current.transitionSeconds ?? 0)
             } else { rest = current.groupRestSeconds ?? current.restSeconds }
         }
+        if let fail = current.failRest(after: logged, settings: settings) { rest = max(rest, fail) }
         restDeadline = settings.autoRest && rest > 0 ? now.addingTimeInterval(Double(rest)) : nil
         if let target { setExerciseExpanded(target.id, expanded: true, focus: true) }
     }

@@ -215,3 +215,19 @@ An independent review of the diff found eight issues; all were fixed with regres
 Release: the unsigned archive was signed locally with `Resources/Lifting.entitlements`, exported for App Store Connect with automatic signing on team VFT92SUD4D, passed `scripts/verify-ipa.py --build 7` (signature, identity, HealthKit), and was uploaded to App Store Connect on October 25, 2026.
 
 Not verified: a physical iPhone, VoiceOver, accessibility text sizes, older iOS runtimes, and iPad.
+
+## Build 8 (October 25, 2026)
+
+110 core test cases, zero failures. New cases cover warm-up and missed-target rest (including supersets and the MYO exemption), ordering exercises as logged (never inside a superset), rep targets following down, failure goals that keep their range, Save Changes to Plan, collapsed mid-workout adds, and warm-up volume.
+
+Observed on the iPhone 17 simulator (iOS 27) through real touch paths:
+- Hold-and-drag reorder: three drags in a row moved cards correctly, including after a reorder and for an exercise added mid-workout; a header tap still collapses and expands. The previous system drag and drop failed intermittently in the same session, which matched the reported bug.
+- Exercise picker: two exercises ticked (numbered 1, 2) and added in that order with the checkmark; the second arrived collapsed.
+- Rep target keypad: set 1 changed from 8–12 to 10–15 and sets 2 and 3 followed.
+- Rest: Bench press shows Rest 3:00 and Warm-up 1:00; a warm-up started a 1:00 rest; at zero the bar turned solid with Rest done and Done.
+- Order as logged: checking Bench press's first warm-up moved it up behind Cable curl.
+- Finish from a day page returned to the main Train screen. Day pages now open by a fixed day, and finishing clears the Train path.
+
+Found and fixed during testing: the simulator's notification service stalled, and because rest alerts were scheduled synchronously on the main thread, logging a set froze the app. Rest alerts now run on a background queue with a generation check. An independent review found ten issues in the build 8 changes; all were fixed except one kept by design (Save Changes to Plan keeps a MYO cluster shortened by a miss).
+
+Not verified: a physical iPhone (gestures, haptics, scrolling while a card is lifted near the screen edge), VoiceOver, accessibility text sizes, and iPad.

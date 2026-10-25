@@ -87,6 +87,14 @@ public struct SetPlan: Identifiable, Codable, Equatable, Sendable {
         guard let reps else { return nil }
         return repRange.map { "\($0.lowerBound)-\($0.upperBound)" } ?? String(reps)
     }
+    public func hasSameTarget(as other: SetPlan) -> Bool { reps == other.reps && repCeiling == other.repCeiling && amrap == other.amrap }
+    public mutating func takeTarget(from other: SetPlan) { reps = other.reps; repCeiling = other.repCeiling; amrap = other.amrap }
+    /// A failure set aims past its target: the target's minimum becomes an AMRAP goal, so 8-12 reads "8+".
+    /// The range is kept, so leaving failure restores it.
+    public mutating func markToFailure() {
+        kind = .failure
+        if reps != nil { amrap = true }
+    }
     public func resolvedWeight(working: Double, increment: Double) -> Double? {
         switch load {
         case .none: return nil
@@ -125,6 +133,9 @@ public struct Variant: Identifiable, Codable, Equatable, Sendable {
     public var sets: [SetPlan]
     public var progression: Progression
     public var substitutionSourceID: UUID?
+    /// Rest after warm-ups, and after a set logged below its target. Nil uses the app setting.
+    public var warmupRestSeconds: Int?
+    public var failRestSeconds: Int?
     public init(id: UUID = UUID(), exerciseID: UUID, label: String, workingWeight: Double = 0, rounding: Double = WeightUnit.lb.kilograms(2.5), restSeconds: Int = 90, notes: String = "", sets: [SetPlan] = [SetPlan(), SetPlan(), SetPlan()], progression: Progression = Progression()) {
         self.id = id; self.exerciseID = exerciseID; self.label = label; self.workingWeight = workingWeight; self.rounding = rounding
         self.restSeconds = restSeconds; self.notes = notes; self.sets = sets; self.progression = progression
@@ -160,6 +171,11 @@ public struct LoggedSet: Identifiable, Codable, Equatable, Sendable {
     public var rpe: Double?
     public var completedAt: Date?
     public var sourceFields: [String: String]?
+    /// A logged count below the set's target: its minimum, exact count, or AMRAP goal.
+    public var missedTarget: Bool {
+        guard let reps, let goal = plan.amrap ? plan.reps : plan.repRange?.lowerBound ?? plan.reps else { return false }
+        return reps < goal
+    }
     /// Explicit entries survive later changes to the exercise's suggested load.
     public var weightIsEdited: Bool?
     public init(plan: SetPlan, variant: Variant) {
@@ -185,6 +201,8 @@ public struct SessionExercise: Identifiable, Codable, Equatable, Sendable {
     public var recurringNotes: String
     public var notes: String
     public var restSeconds: Int
+    public var warmupRestSeconds: Int?
+    public var failRestSeconds: Int?
     public var substitutedFrom: String?
     public var progressionEligible: Bool
     public var timerStartedAt: Date?
@@ -199,6 +217,7 @@ public struct SessionExercise: Identifiable, Codable, Equatable, Sendable {
         name = exercise.name; label = variant.label; mode = exercise.mode; recurringNotes = variant.notes
         muscle = exercise.muscle; secondaryMuscles = exercise.secondaryMuscles
         notes = ""; restSeconds = variant.restSeconds; progressionEligible = true; timerElapsed = 0
+        warmupRestSeconds = variant.warmupRestSeconds; failRestSeconds = variant.failRestSeconds
         workingWeight = variant.workingWeight; roundingIncrement = variant.rounding
         let weights = variant.resolvedWeights
         sets = variant.sets.enumerated().map { index, plan in
@@ -210,6 +229,19 @@ public struct SessionExercise: Identifiable, Codable, Equatable, Sendable {
     }
     public func workingLoad(fallback: Double) -> Double {
         sets.first(where: { $0.plan.kind != .warmup && $0.plan.load != .none })?.weight ?? workingWeight ?? fallback
+    }
+    /// Rest after a logged set: its own rest, else warm-up rest, else the longer rest after a missed target
+    /// when one is set, else the exercise's rest.
+    public func rest(after set: LoggedSet, settings: Settings) -> Int {
+        if let own = set.plan.restSeconds { return own }
+        if set.plan.kind == .warmup { return warmupRestSeconds ?? settings.warmupRestDefault }
+        return max(restSeconds, failRest(after: set, settings: settings) ?? 0)
+    }
+    /// The longer rest after a set logged below its target. A MYO mini-set that falls short ends its cluster
+    /// as planned, and drops chain without rest, so neither counts as a miss here.
+    public func failRest(after set: LoggedSet, settings: Settings) -> Int? {
+        guard set.missedTarget, ![.myoMini, .drop].contains(set.plan.kind) else { return nil }
+        return failRestSeconds ?? settings.failRest
     }
     /// The load a set moved: for bodyweight exercises, body weight plus any added (or minus assisted) weight.
     /// Nil when the load is unknown, so it adds no invented volume.
@@ -248,9 +280,11 @@ public struct Session: Identifiable, Codable, Equatable, Sendable {
         let pausedSeconds = (pauses ?? []).reduce(0) { $0 + $1.duration }
         return max(0, (endedAt ?? pausedAt ?? now).timeIntervalSince(startedAt) - pausedSeconds)
     }
-    public var volume: Double {
+    public var volume: Double { volume(warmups: false) }
+    public var warmupVolume: Double { volume(warmups: true) }
+    private func volume(warmups: Bool) -> Double {
         exercises.reduce(0) { total, exercise in
-            exercise.sets.filter { $0.completedAt != nil && $0.plan.kind != .warmup }
+            exercise.sets.filter { $0.completedAt != nil && ($0.plan.kind == .warmup) == warmups }
                 .reduce(total) { $0 + (exercise.load(of: $1, bodyWeight: bodyWeight) ?? 0) * Double($1.reps ?? 0) }
         }
     }
@@ -278,6 +312,16 @@ public struct Settings: Codable, Equatable, Sendable {
     public var restAdjustment: Int { restStep ?? 15 }
     /// App-wide Drop and MYO setup; an exercise can override it.
     public var techniques: TechniqueDefaults?
+    /// Rest after warm-up sets. Exercises can override it.
+    public var warmupRest: Int?
+    public var warmupRestDefault: Int { get { warmupRest ?? 60 } set { warmupRest = newValue } }
+    /// Rest after a set logged below its target. Nil is off; exercises can override it.
+    public var failRest: Int?
+    /// Moves an exercise up to follow the ones already worked on when its first set is logged.
+    public var autoOrder: Bool?
+    public var ordersExercisesAsLogged: Bool { get { autoOrder ?? true } set { autoOrder = newValue } }
+    /// Shows warm-up volume next to total volume. Warm-ups never count toward volume.
+    public var showsWarmupVolume: Bool?
     public var health: HealthSettings?
     public init() {}
 }

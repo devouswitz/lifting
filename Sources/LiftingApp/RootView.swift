@@ -10,7 +10,8 @@ struct RootView: View {
         Group {
             #if os(macOS)
             VStack(spacing: 0) {
-                NavigationStack {
+                // Only Train pushes values onto a path; other tabs get a fresh one.
+                NavigationStack(path: selected == 0 ? $store.trainPath : .constant(NavigationPath())) {
                     switch selected {
                     case 1: HistoryView()
                     case 2: ProgressView()
@@ -44,7 +45,7 @@ struct RootView: View {
     var showResume: Bool { store.data.activeSession != nil && !store.workoutPresented }
     @ViewBuilder var tabs: some View {
         let view = TabView(selection: $selected) {
-            tab(0, "Train", "dumbbell", id: store.trainRevision) { TrainView() }
+            tab(0, "Train", "dumbbell", id: store.trainRevision, path: $store.trainPath) { TrainView() }
             tab(1, "History", "calendar") { HistoryView() }
             tab(2, "Progress", "chart.xyaxis.line") { ProgressView() }
             tab(3, "Settings", "gearshape") { SettingsView() }
@@ -54,8 +55,8 @@ struct RootView: View {
             view.tabViewBottomAccessory(isEnabled: showResume) { ResumeBar(accessory: true) }.tabBarMinimizeBehavior(.onScrollDown)
         } else { view }
     }
-    @ViewBuilder func tab<Content: View>(_ tag: Int, _ title: String, _ symbol: String, id: Int = 0, @ViewBuilder content: () -> Content) -> some View {
-        let stack = NavigationStack { content() }.id(id)
+    @ViewBuilder func tab<Content: View>(_ tag: Int, _ title: String, _ symbol: String, id: Int = 0, path: Binding<NavigationPath> = .constant(NavigationPath()), @ViewBuilder content: () -> Content) -> some View {
+        let stack = NavigationStack(path: path) { content() }.id(id)
         if #available(iOS 26.1, *) { stack.tabItem { Label(title, systemImage: symbol) }.tag(tag) }
         else { stack.safeAreaInset(edge: .bottom, spacing: 0) { ResumeBar(accessory: false) }.tabItem { Label(title, systemImage: symbol) }.tag(tag) }
     }

@@ -43,6 +43,9 @@ struct SetTypeButton<Label: View>: View {
         var edited = plan
         if kind == .warmup && plan.load == .working { edited.load = .percent }
         else if plan.kind == .warmup && kind != .warmup && plan.load == .percent { edited.load = .working }
+        // A failure set aims past its target; leaving failure keeps that goal as a plain target.
+        if kind == .failure && customID == nil { edited.markToFailure() }
+        else if plan.kind == .failure && kind != .failure && plan.amrap { edited.amrap = false }
         edited.kind = kind; edited.customTypeID = customID
         change(edited)
     }

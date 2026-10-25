@@ -1,12 +1,12 @@
 import SwiftUI
 import LiftingCore
 
-/// Where a card sits among its siblings: the header drags to reorder, and Move Up/Down stay available to assistive tech.
+/// Where a card sits among its siblings: hold the header and drag to reorder; Move Up/Down stay available to assistive tech.
 struct CardOrder {
     let id: UUID
     let canMoveUp: Bool
     let canMoveDown: Bool
-    @Binding var dragging: UUID?
+    let reordering: Reordering
     let move: (Int) -> Void
 }
 
@@ -32,9 +32,11 @@ struct ExerciseCard<Status: View, MenuItems: View, Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 4) {
-                Button(action: toggle) { header }
-                    .buttonStyle(.plain)
-                    .modifier(ExerciseDragHandle(id: order.id, enabled: order.canMoveUp || order.canMoveDown, dragging: order.$dragging))
+                // A tap toggles; holding lifts the card to drag. Both live on the header itself, so neither steals the other.
+                header
+                    .onTapGesture(perform: toggle)
+                    .reorderHandle(order.id, order.reordering, enabled: order.canMoveUp || order.canMoveDown)
+                    .accessibilityElement(children: .combine).accessibilityAddTraits(.isButton).accessibilityAction(.default, toggle)
                     .modifier(ReorderActions(canMoveUp: order.canMoveUp, canMoveDown: order.canMoveDown, move: order.move))
                     .accessibilityLabel("\(expanded ? "Collapse" : "Expand") \(name)").accessibilityValue(accessibilityValue)
                     .accessibilityIdentifier(identifier.map { "\($0).collapse" } ?? "")
@@ -44,7 +46,7 @@ struct ExerciseCard<Status: View, MenuItems: View, Content: View>: View {
                     .accessibilityLabel("Options for \(name)").accessibilityIdentifier(identifier.map { "\($0).options" } ?? "")
             }
             if expanded { content() }
-        }.card(padding: 16)
+        }.card(padding: 16).reorderRow(order.id, order.reordering)
     }
 
     private var header: some View {
@@ -71,27 +73,64 @@ struct ExerciseInfoRow: View {
     var swapDisabled = false
     let load: String?
     let rest: Int
+    /// Shown when the exercise has warm-ups.
+    var warmupRest: Int? = nil
     let editRest: () -> Void
+    var editWarmupRest: () -> Void = {}
+    /// Rest between sets, after warm-ups, and after a missed target, together. Opened by holding Rest.
+    var restSettings: () -> Void = {}
     var body: some View {
         let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8)) : AnyLayout(HStackLayout(spacing: 16))
         layout {
             if let swap { EquipmentMenu(exerciseID: exerciseID, choose: swap).disabled(swapDisabled) }
             if let load { Text(load).font(.subheadline.weight(.medium)).foregroundStyle(.secondary).accessibilityLabel("Working sets, " + load) }
-            Button(action: editRest) {
-                HStack(spacing: 4) {
-                    Text("Rest").foregroundStyle(.secondary)
-                    Text(clockText(Double(rest))).foregroundStyle(palette.rest).fontWeight(.semibold).monospacedDigit()
-                }.font(.subheadline).frame(minHeight: 30).contentShape(Rectangle())
-            }.accessibilityLabel("Rest between sets, \(clockText(Double(rest)))")
+            HStack(spacing: 12) {
+                token("Rest", rest, action: editRest).accessibilityLabel("Rest between sets, \(clockText(Double(rest)))")
+                if let warmupRest { token("Warm-up", warmupRest, action: editWarmupRest).accessibilityLabel("Rest after warm-ups, \(clockText(Double(warmupRest)))") }
+            }.longPress("Rest settings", perform: restSettings)
             if !typeSize.isAccessibilitySize { Spacer(minLength: 0) }
         }.buttonStyle(.plain)
     }
 }
 
+private extension ExerciseInfoRow {
+    func token(_ title: String, _ seconds: Int, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Text(title).foregroundStyle(.secondary)
+                Text(clockText(Double(seconds))).foregroundStyle(palette.rest).fontWeight(.semibold).monospacedDigit()
+            }.font(.subheadline).frame(minHeight: 30).contentShape(Rectangle())
+        }
+    }
+}
+
+/// An exercise's three rests. Empty warm-up and missed-target rests use the app settings.
+struct RestSettingsEditor: View {
+    @EnvironmentObject private var store: AppStore
+    @Environment(\.dismiss) private var dismiss
+    let name: String
+    @Binding var rest: Int
+    @Binding var warmupRest: Int?
+    @Binding var failRest: Int?
+    var body: some View {
+        NavigationStack {
+            ThemedForm {
+                StoreErrorRow()
+                Section {
+                    DurationRow("Between sets", seconds: $rest)
+                    DurationRow("After warm-ups", seconds: $warmupRest, placeholder: "\(clockText(Double(store.data.settings.warmupRestDefault))) default")
+                    DurationRow("After a missed target", seconds: $failRest, placeholder: store.data.settings.failRest.map { "\(clockText(Double($0))) default" } ?? "Off")
+                }
+            }.formStyle(.grouped).navigationTitle(name).inlineTitle()
+                .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done", systemImage: "checkmark") { dismiss() }.labelStyle(.iconOnly) } }
+        }.presentationDetents([.medium, .large])
+    }
+}
+
 extension NumericEdit {
     /// Rest between an exercise's sets, on the m:ss keypad.
-    static func rest(_ seconds: Int, context: String?, save: @escaping (Int) -> Bool) -> NumericEdit {
-        NumericEdit(title: "Rest Between Sets", context: context, value: Double(seconds), step: 15, maximum: 86400, format: .duration, presets: restPresets) { save(Int($0 ?? 0)) }
+    static func rest(_ seconds: Int, title: String = "Rest Between Sets", context: String?, save: @escaping (Int) -> Bool) -> NumericEdit {
+        NumericEdit(title: title, context: context, value: Double(seconds), step: 15, maximum: 86400, format: .duration, presets: title == "Rest Between Sets" ? restPresets : [30, 45, 60, 90, 120]) { save(Int($0 ?? 0)) }
     }
 }
 

@@ -159,35 +159,50 @@ extension DurationRow {
     }
 }
 
-/// Ranges retain both bounds. Navigation commits a complete valid target, never a partial range.
+/// A set's rep target on the keypad: No count, Reps, Rep range, or AMRAP with an optional goal.
+/// Ranges keep both bounds, and moving between sets commits only a complete target.
 struct RepValuesEditor: View {
     @State var plan: SetPlan
     let save: (SetPlan) -> Bool
     var adjacent: ((UUID, Int) -> SetPlan?)? = nil
-    @State private var exact: KeypadValue
+    @State private var mode: RepTargetMode
     @State private var lower: KeypadValue
     @State private var upper: KeypadValue
-    private enum Bound { case exact, lower, upper }
-    @State private var selection = Bound.lower
+    @State private var editingUpper = false
     init(plan: SetPlan, save: @escaping (SetPlan) -> Bool, adjacent: ((UUID, Int) -> SetPlan?)? = nil) {
         _plan = State(initialValue: plan); self.save = save; self.adjacent = adjacent
-        _exact = State(initialValue: .integer(nil))
+        _mode = State(initialValue: RepTargetMode(plan))
         _lower = State(initialValue: .integer(plan.reps))
         _upper = State(initialValue: .integer(plan.repCeiling))
     }
-    private var isRange: Bool { plan.repRange != nil }
-    private var usesExact: Bool { isRange && selection == .exact }
-    private var changed: Bool { usesExact ? exact.changed : lower.changed || upper.changed }
-    private var valid: Bool {
-        if usesExact { return exact.isValid && (!exact.changed || exact.value != nil) }
-        return lower.isValid && (!isRange || (upper.isValid && lower.value != nil && upper.value != nil && upper.value! >= lower.value!))
+    private var edited: SetPlan {
+        var target = plan
+        target.amrap = mode == .amrap
+        switch mode {
+        case .none: target.reps = nil; target.repCeiling = nil
+        case .exact, .amrap: target.reps = lower.value.map(Int.init); target.repCeiling = nil
+        case .range: target.reps = lower.value.map(Int.init); target.repCeiling = upper.value.map(Int.init)
+        }
+        return target
     }
-    private var selectedEntry: Binding<KeypadValue> { selection == .exact ? $exact : selection == .upper ? $upper : $lower }
+    private var valid: Bool {
+        switch mode {
+        case .none: return true
+        case .amrap: return lower.isValid
+        case .exact: return lower.isValid && lower.value != nil
+        case .range: return lower.isValid && upper.isValid && (lower.value.flatMap { l in upper.value.map { $0 >= l } } ?? false)
+        }
+    }
     var body: some View {
-        DraftEditor(valid: valid, changed: changed, save: commit) {
+        DraftEditor(valid: valid, changed: !edited.hasSameTarget(as: plan), save: commit) {
             ScrollView {
                 VStack(spacing: 12) {
-                    if isRange { bound("Exact reps", entry: $exact, selection: .exact) }
+                    Picker("Target", selection: $mode) { ForEach(RepTargetMode.allCases) { Text($0.rawValue).tag($0) } }
+                        .pickerStyle(.segmented).labelsHidden().accessibilityIdentifier("reps.mode")
+                        .onChange(of: mode) { _, value in
+                            editingUpper = false; lower.select()
+                            if value == .range, upper.value == nil, let low = lower.value { upper = .integer(Int(low) + 2) }
+                        }
                     if let adjacent {
                         HStack {
                             Button("Previous Set", systemImage: "chevron.left") { advance(-1) }.disabled(adjacent(plan.id, -1) == nil)
@@ -195,60 +210,118 @@ struct RepValuesEditor: View {
                             Button("Next Set", systemImage: "chevron.right") { advance(1) }.disabled(adjacent(plan.id, 1) == nil)
                         }.font(.subheadline).buttonStyle(.plain).frame(minHeight: 44).disabled(!valid)
                     }
-                    if isRange {
+                    switch mode {
+                    case .none: EmptyView()
+                    case .exact: NumericDisplay(entry: $lower, title: "Target reps")
+                    case .amrap: NumericDisplay(entry: $lower, title: "Goal, optional")
+                    case .range:
                         HStack(spacing: 12) {
-                            bound("Minimum", entry: $lower, selection: .lower)
-                            bound("Maximum", entry: $upper, selection: .upper)
+                            bound("Minimum", entry: $lower, upper: false)
+                            bound("Maximum", entry: $upper, upper: true)
                         }
-                    } else { NumericDisplay(entry: $lower, title: plan.amrap ? "AMRAP goal" : "Target reps") }
-                    NumericKeys(entry: selectedEntry, step: 1)
-                    if !valid && !usesExact { Text("Maximum reps must be at least the minimum.").font(.footnote).foregroundStyle(.red) }
+                    }
+                    if mode != .none { NumericKeys(entry: editingUpper && mode == .range ? $upper : $lower, step: 1) }
+                    if mode == .range && !valid { Text("Maximum reps must be at least the minimum.").font(.footnote).foregroundStyle(.red) }
                     StoreErrorRow()
                 }.padding(20)
-            }.navigationTitle(isRange ? "Rep Range" : plan.amrap ? "AMRAP" : "Target Reps").inlineTitle()
-        }.modifier(KeypadPresentation(height: isRange ? 620 : 540))
+            }.navigationTitle("Rep Target").inlineTitle()
+        }.modifier(KeypadPresentation(height: 600))
     }
     private func commit() -> Bool {
         guard valid else { return false }
-        guard changed else { return true }
-        var edited = plan
-        edited.reps = (usesExact ? exact.value : lower.value).map(Int.init)
-        edited.repCeiling = isRange && !usesExact ? upper.value.map(Int.init) : nil
-        guard save(edited) else { return false }
-        load(edited)
+        guard !edited.hasSameTarget(as: plan) else { return true }
+        let target = edited
+        guard save(target) else { return false }
+        load(target)
         return true
     }
     private func load(_ value: SetPlan) {
-        plan = value; selection = .lower
-        exact = .integer(nil); lower = .integer(value.reps); upper = .integer(value.repCeiling)
+        plan = value; mode = RepTargetMode(value); editingUpper = false
+        lower = .integer(value.reps); upper = .integer(value.repCeiling)
     }
     private func advance(_ offset: Int) {
         guard commit(), let next = adjacent?(plan.id, offset) else { return }
         load(next)
     }
-    private func bound(_ title: String, entry: Binding<KeypadValue>, selection bound: Bound) -> some View {
-        let layout = bound == .exact ? AnyLayout(HStackLayout(spacing: 12)) : AnyLayout(VStackLayout(spacing: 6))
-        return Button { selection = bound; entry.wrappedValue.select() } label: {
-            layout {
+    private func bound(_ title: String, entry: Binding<KeypadValue>, upper isUpper: Bool) -> some View {
+        Button { editingUpper = isUpper; entry.wrappedValue.select() } label: {
+            VStack(spacing: 6) {
                 Text(title).font(.subheadline)
-                if bound == .exact { Spacer() }
-                Text(entry.wrappedValue.text.isEmpty ? "–" : entry.wrappedValue.text).font((bound == .exact ? Font.title2 : .largeTitle).monospacedDigit())
-            }.padding(.horizontal, bound == .exact ? 16 : 0).frame(maxWidth: .infinity, minHeight: bound == .exact ? 44 : 80)
+                Text(entry.wrappedValue.text.isEmpty ? "–" : entry.wrappedValue.text).font(.largeTitle.monospacedDigit())
+            }.frame(maxWidth: .infinity, minHeight: 80)
                 .background(.quaternary, in: RoundedRectangle(cornerRadius: 12))
-                .overlay(RoundedRectangle(cornerRadius: 12).stroke(selection == bound ? Color.accentColor : .clear, lineWidth: 2))
-        }.buttonStyle(.plain).accessibilityAddTraits(selection == bound ? .isSelected : [])
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(editingUpper == isUpper ? Color.accentColor : .clear, lineWidth: 2))
+        }.buttonStyle(.plain).accessibilityAddTraits(editingUpper == isUpper ? .isSelected : [])
+    }
+}
+
+/// How a set's weight is set, on the keypad: working weight (with an optional entry), a percentage of it,
+/// a fixed load, or none.
+struct LoadRuleEditor: View {
+    @State var plan: SetPlan
+    let unit: WeightUnit
+    var suggestedWeight: Double?
+    var mode: ExerciseMode = .strength
+    let save: (SetPlan) -> Bool
+    @State private var original: SetPlan?
+    @State private var entry: KeypadValue = .integer(nil)
+    private var edited: SetPlan {
+        var value = plan
+        switch plan.load {
+        case .working: value.weightOverride = entry.value.map(unit.kilograms)
+        case .percent: value.percent = entry.value ?? 0
+        case .fixed: value.fixedWeight = unit.kilograms(entry.value ?? 0)
+        case .none: break
+        }
+        return value
+    }
+    var body: some View {
+        // Changed means a key was pressed or the rule switched; reopening never rewrites a load through display rounding.
+        DraftEditor(valid: entry.isValid && edited.isValid, changed: entry.changed || original.map { $0.load != plan.load } == true, save: { save(edited) }) {
+            ScrollView {
+                VStack(spacing: 12) {
+                    Picker("Based on", selection: Binding(get: { plan.load }, set: { plan.load = $0; reload() })) {
+                        Text("Working").tag(LoadRule.working); Text("Percent").tag(LoadRule.percent)
+                        Text("Fixed").tag(LoadRule.fixed); Text(mode == .bodyweight ? "BW" : "None").tag(LoadRule.none)
+                    }.pickerStyle(.segmented).labelsHidden().accessibilityIdentifier("load.rule")
+                    switch plan.load {
+                    case .working:
+                        // Empty follows the earlier sets; their weight shows dimmed.
+                        NumericDisplay(entry: $entry, title: "Weight (\(unit.rawValue))", placeholder: suggestedWeight.map { number(unit.display($0)) })
+                    case .percent: NumericDisplay(entry: $entry, title: "Percent of working set")
+                    case .fixed: NumericDisplay(entry: $entry, title: "Weight (\(unit.rawValue))")
+                    case .none: EmptyView()
+                    }
+                    if plan.load != .none { NumericKeys(entry: $entry, step: plan.load == .percent ? 5 : 2.5) }
+                    StoreErrorRow()
+                }.padding(20)
+            }.navigationTitle("Weight Settings").inlineTitle()
+        }
+        .modifier(KeypadPresentation(height: 600))
+        .onAppear { if original == nil { original = plan; reload() } }
+    }
+    private func reload() {
+        let signed = mode == .bodyweight
+        switch plan.load {
+        case .working: entry = .number(NumericEntry(value: plan.weightOverride.map(unit.display), maximum: 100000, integer: false, signed: signed))
+        case .percent: entry = .number(NumericEntry(value: plan.percent, maximum: 1000, integer: false))
+        case .fixed: entry = .number(NumericEntry(value: unit.display(plan.fixedWeight), maximum: 100000, integer: false, signed: signed))
+        case .none: entry = .integer(nil)
+        }
     }
 }
 
 private struct NumericDisplay: View {
     @Binding var entry: KeypadValue
     let title: String
+    var placeholder: String? = nil
     var body: some View {
         HStack {
             if entry.allowsSign {
                 Button("±") { entry.press(.sign) }.font(.title2.weight(.medium)).frame(minWidth: 44, minHeight: 44).accessibilityLabel("Change sign")
             }
-            Text(entry.text.isEmpty ? "–" : entry.text).font(.system(size: 44, weight: .semibold, design: .rounded).monospacedDigit())
+            Text(entry.text.isEmpty ? placeholder ?? "–" : entry.text).font(.system(size: 44, weight: .semibold, design: .rounded).monospacedDigit())
+                .foregroundStyle(entry.text.isEmpty && placeholder != nil ? .secondary : .primary)
                 .lineLimit(1).minimumScaleFactor(0.5).frame(maxWidth: .infinity, minHeight: 56)
                 .accessibilityLabel("\(title), \(entry.text.isEmpty ? "not set" : entry.text)").accessibilityIdentifier("number.value")
             Button("Clear") { entry.press(.clear) }.frame(minWidth: 44, minHeight: 44)

@@ -30,9 +30,10 @@ public extension TrainingData {
             activeSession!.exercises[e].sets[s].completedAt = now
             activeSession!.exercises[e].keepExpanded = nil
             endMyoClusterIfMissed(exercise: e, set: s)
-            let rest = activeSession!.exercises[e].sets[s].plan.restSeconds ?? activeSession!.exercises[e].restSeconds
+            let rest = activeSession!.exercises[e].rest(after: activeSession!.exercises[e].sets[s], settings: settings)
             restDeadline = settings.autoRest && rest > 0 ? now.addingTimeInterval(Double(rest)) : nil
             advanceLinkedFlow(after: exerciseID, setID: setID, now: now)
+            if settings.ordersExercisesAsLogged { orderAsLogged(exercise: e) }
         } else {
             activeSession!.exercises[e].sets[s].completedAt = nil
             restDeadline = nil
@@ -57,6 +58,21 @@ public extension TrainingData {
             return set
         }
         activeSession!.exercises[e].sets.insert(contentsOf: added, at: s + 1)
+    }
+
+    /// When an exercise's first set is logged, it moves up to follow the exercises already worked on,
+    /// so the list reads in the order the workout happens. Linked exercises keep their places.
+    private mutating func orderAsLogged(exercise e: Int) {
+        let exercises = activeSession!.exercises
+        guard exercises[e].group == nil, exercises[e].sets.filter({ $0.completedAt != nil }).count == 1 else { return }
+        var target = (exercises.indices.last { $0 != e && exercises[$0].sets.contains { $0.completedAt != nil } } ?? -1) + 1
+        // Never land inside a superset or circuit.
+        if target > 0, let group = exercises[target - 1].group {
+            while target < e, exercises[target].group == group { target += 1 }
+        }
+        guard target < e else { return }
+        let item = activeSession!.exercises.remove(at: e)
+        activeSession!.exercises.insert(item, at: target)
     }
 
     /// MYO mini-sets continue until one misses its target. The miss ends the cluster: the pending
@@ -240,7 +256,9 @@ public extension TrainingData {
               (settings.quickAdd ?? []).count <= 4, (settings.quickAdd ?? []).allSatisfy({ ["drop", "myo", "warmup", "failure", "working", "myoActivation", "myoMini"].contains($0) || ($0.hasPrefix("type:") && UUID(uuidString: String($0.dropFirst(5))) != nil) }) else { throw TrainingError.invalid("Invalid set types.") }
         guard unique(bodyWeights), bodyWeights.count <= 100_000, bodyWeights.allSatisfy(\.isValid),
               settings.techniques?.isValid ?? true, exercises.allSatisfy({ $0.techniques?.isValid ?? true }),
-              settings.restStep.map({ (1...600).contains($0) }) ?? true else { throw TrainingError.invalid("Invalid body weight or workout settings.") }
+              settings.restStep.map({ (1...600).contains($0) }) ?? true,
+              [settings.warmupRest, settings.failRest].allSatisfy({ $0.map { (0...86400).contains($0) } ?? true }),
+              variants.allSatisfy({ [$0.warmupRestSeconds, $0.failRestSeconds].allSatisfy { $0.map { (0...86400).contains($0) } ?? true } }) else { throw TrainingError.invalid("Invalid body weight or workout settings.") }
         guard unique(warmupPresets), warmupPresets.count <= 10000, warmupPresets.allSatisfy({ !$0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && $0.name.count <= 200 && (1...1000).contains($0.sets.count) && unique($0.sets) && $0.sets.allSatisfy { $0.kind == .warmup && $0.isValid } }) else { throw TrainingError.invalid("Invalid warm-up preset.") }
         guard exercises.allSatisfy({ !$0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && $0.name.count <= 200 }),
               variants.allSatisfy({ v in exercise(v.exerciseID) != nil && !v.label.isEmpty && v.label.count <= 200 && number(v.workingWeight) && number(v.rounding) && (0...86400).contains(v.restSeconds) && (0...1000).contains(v.sets.count) && unique(v.sets) && v.sets.allSatisfy(\.isValid) && number(v.progression.increment) && number(v.progression.deloadPercent, max: 100) && (0...100).contains(v.progression.deloadAfter) && (0...1000).contains(v.progression.failures) }),

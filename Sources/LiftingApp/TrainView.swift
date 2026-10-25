@@ -38,6 +38,7 @@ struct TrainView: View {
         }
         .background(palette.background)
         .navigationTitle("Train")
+        .navigationDestination(for: DayRoute.self) { RoutineEditor(routineID: $0.id, showsStart: true) }
     }
 
     private func programRow(_ program: TrainingProgram) -> some View {
@@ -71,6 +72,10 @@ struct TrainView: View {
     }
 }
 
+/// A day opened from Train. A fixed ID, so an open day never turns into another when the next day changes,
+/// and a value the Train path can clear when a workout ends.
+struct DayRoute: Hashable { let id: UUID }
+
 /// The program's next day: its exercises with targets and working weights, and the Start control.
 struct NextDayCard: View {
     @EnvironmentObject var store: AppStore
@@ -80,7 +85,7 @@ struct NextDayCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .firstTextBaseline) {
-                NavigationLink { RoutineEditor(routineID: day.id, showsStart: true) } label: {
+                NavigationLink(value: DayRoute(id: day.id)) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(day.name).font(.title2.weight(.bold)).foregroundStyle(.primary)
                         if let index = program.dayIDs.firstIndex(of: day.id) { Text("Day \(index + 1) of \(program.dayIDs.count)").font(.subheadline).foregroundStyle(.secondary) }
@@ -170,7 +175,7 @@ struct DayList: View {
         VStack(spacing: 0) {
             ForEach(Array(days.enumerated()), id: \.element.id) { index, day in
                 HStack(spacing: 8) {
-                    NavigationLink { RoutineEditor(routineID: day.id, showsStart: true) } label: {
+                    NavigationLink(value: DayRoute(id: day.id)) {
                         HStack(spacing: 12) {
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(day.name).font(.headline).foregroundStyle(.primary)
