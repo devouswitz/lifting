@@ -15,6 +15,7 @@ struct WorkoutView: View {
     @State private var adding = false
     @State private var finishing = false
     @State private var discard = false
+    @State private var cancelling = false
     @State private var sessionNotes = false
     @State private var warmups = false
     var body: some View {
@@ -32,7 +33,7 @@ struct WorkoutView: View {
                     }.padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 24)
                     .reorderingStack("workout")
                 }
-            }.background(palette.background)
+            }.reorderingScroll().background(palette.background)
             .scrollDismissesKeyboard(.interactively)
             .onChange(of: store.autoFocusRevision) { _, _ in
                 guard let id = store.autoFocusedExerciseID else { return }
@@ -68,6 +69,10 @@ struct WorkoutView: View {
             .sheet(isPresented: $adding) { ExercisePicker(title: "Add Exercises", onAdd: { exercises in store.perform { data in for exercise in exercises { try data.addExerciseToSession(exercise.id) } } }).environmentObject(store).sheetSize() }
             .sheet(isPresented: $warmups) { ApplyWarmupPreset().environmentObject(store).sheetSize() }
             .sheet(isPresented: $finishing) { finishSheet }
+            .confirmationDialog("Cancel this workout?", isPresented: $cancelling, titleVisibility: .visible) {
+                Button("Discard Workout", role: .destructive) { store.discard() }
+                Button("Keep Workout", role: .cancel) {}
+            } message: { Text("Logged sets in this workout will not be saved.") }
             .sheet(isPresented: $sessionNotes) {
                 NavigationStack {
                     ThemedForm {
@@ -106,6 +111,8 @@ struct WorkoutView: View {
             Divider()
             Button("Collapse All", systemImage: "chevron.up") { store.perform { $0.setAllExercisesExpanded(false) } }.accessibilityIdentifier("workout.collapseAll")
             Button("Expand All", systemImage: "chevron.down") { store.perform { $0.setAllExercisesExpanded(true) } }.accessibilityIdentifier("workout.expandAll")
+            Divider()
+            Button("Cancel Workout", systemImage: "xmark", role: .destructive) { cancelling = true }.accessibilityIdentifier("workout.cancel")
         } label: { Image(systemName: "ellipsis") }.accessibilityLabel("Workout options").accessibilityIdentifier("workout.options")
     }
     private var finishButton: some View {
@@ -321,6 +328,9 @@ struct WorkoutExerciseCard: View {
         Button("Swap Exercise", systemImage: "arrow.triangle.2.circlepath") { sheet = .substitute }.accessibilityIdentifier("workout.\(item.id).substitute")
         Button("Superset / Circuit", systemImage: "link") { sheet = .link }
         Divider()
+        if let last = store.data.settings.lastWarmups, item.mode != .cardio {
+            Button("Apply \(last.name)", systemImage: "flame.fill") { store.perform { try $0.applyWarmups(last.sets, toSessionExercises: [exerciseID]) } }
+        }
         Button("Apply Warm-up Preset", systemImage: "flame") { sheet = .warmups }.disabled(item.mode == .cardio)
         Button("Edit Saved Prescription", systemImage: "slider.horizontal.3") { sheet = .savedPlan(item.variantID) }
         Button("Save Changes to Plan", systemImage: "square.and.arrow.down") { store.perform { try $0.saveSessionPlan(exerciseID) } }
@@ -378,7 +388,8 @@ struct WorkoutExerciseCard: View {
         let warmups = Array(item.sets.enumerated()).filter { $0.element.plan.kind == .warmup }
         let work = Array(item.sets.enumerated()).filter { $0.element.plan.kind != .warmup }
         let unit = store.data.settings.unit.rawValue
-        return VStack(alignment: .leading, spacing: 2) {
+        // Row spacing matches the day editor's set table.
+        return VStack(alignment: .leading, spacing: 8) {
             if !typeSize.isAccessibilitySize {
                 HStack(spacing: 6) {
                     Text("Set").frame(width: 44)
@@ -389,7 +400,7 @@ struct WorkoutExerciseCard: View {
                     if columns.distance { Text("Meters").frame(maxWidth: .infinity) }
                     Text("RPE").frame(maxWidth: columns.hasMeasurements ? 44 : .infinity)
                     Color.clear.frame(width: 40, height: 1)
-                }.font(.caption.weight(.medium)).foregroundStyle(.secondary).padding(.horizontal, 2).padding(.bottom, 2)
+                }.font(.caption.weight(.medium)).foregroundStyle(.secondary).padding(.horizontal, 2)
             }
             if !warmups.isEmpty {
                 SetGroupLabel(title: "Warm-up", color: palette.warmup)

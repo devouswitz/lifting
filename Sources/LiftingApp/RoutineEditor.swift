@@ -46,7 +46,7 @@ struct RoutineEditor: View {
                 }.padding(16).reorderingStack("day")
             }
         }
-        .background(palette.background).navigationTitle(routine?.name ?? "Day").inlineTitle()
+        .reorderingScroll().background(palette.background).navigationTitle(routine?.name ?? "Day").inlineTitle()
         .toolbar {
             if let routine {
                 ToolbarItem(placement: .primaryAction) {

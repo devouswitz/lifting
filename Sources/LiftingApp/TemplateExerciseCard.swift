@@ -87,6 +87,9 @@ struct TemplateExerciseCard: View {
         Button("Plan Settings", systemImage: "slider.horizontal.3") { sheet = .settings }
         if let link { Button("Superset / Circuit", systemImage: "link", action: link) }
         if mode != .cardio {
+            if let last = store.data.settings.lastWarmups {
+                Button("Apply \(last.name)", systemImage: "flame.fill") { store.perform { try $0.applyWarmups(last.sets, toVariants: [variant.id]) } }
+            }
             Button("Apply Warm-up Preset", systemImage: "flame") { sheet = .warmups }
             if variant.sets.contains(where: { $0.kind == .warmup }) {
                 Button("Save Warm-ups as Preset", systemImage: "square.and.arrow.down") { sheet = .saveWarmups }

@@ -110,7 +110,7 @@ public struct SetPlan: Identifiable, Codable, Equatable, Sendable {
 public enum ProgressionMode: String, Codable, CaseIterable, Identifiable, Sendable {
     case manual, linear, double
     public var id: String { rawValue }
-    public var title: String { self == .manual ? "Manual" : self == .linear ? "Linear" : "Double progression" }
+    public var title: String { self == .manual ? "None" : self == .linear ? "Linear" : "Double progression" }
 }
 
 public struct Progression: Codable, Equatable, Sendable {
@@ -322,6 +322,8 @@ public struct Settings: Codable, Equatable, Sendable {
     public var ordersExercisesAsLogged: Bool { get { autoOrder ?? true } set { autoOrder = newValue } }
     /// Shows warm-up volume next to total volume. Warm-ups never count toward volume.
     public var showsWarmupVolume: Bool?
+    /// The warm-up preset applied most recently, offered again in each exercise's menu.
+    public var lastWarmups: WarmupPreset?
     public var health: HealthSettings?
     public init() {}
 }

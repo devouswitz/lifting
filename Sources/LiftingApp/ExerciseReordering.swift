@@ -33,6 +33,10 @@ struct Reordering {
 }
 
 extension View {
+    /// A scroll view holding reorderable rows. The hold that lifts a row runs alongside scrolling, so a swipe that
+    /// starts on a handle still scrolls; scrolling pauses only while a row is lifted, so the page stays under the finger.
+    func reorderingScroll() -> some View { modifier(ReorderingScroll()) }
+
     /// The stack that owns a reordering.
     func reorderingStack(_ space: String) -> some View { coordinateSpace(.named(space)) }
 
@@ -43,6 +47,19 @@ extension View {
     /// A hold released without moving runs `hold` instead, when one is given.
     func reorderHandle(_ id: UUID, _ reordering: Reordering, enabled: Bool = true, hold: (() -> Void)? = nil) -> some View {
         modifier(ReorderHandle(id: id, reordering: reordering, enabled: enabled, hold: hold))
+    }
+}
+
+/// Whether any row inside is lifted. Rows nest (sets inside exercises), so each one adds to its children's value.
+private struct RowLiftedKey: PreferenceKey {
+    static let defaultValue = false
+    static func reduce(value: inout Bool, nextValue: () -> Bool) { value = value || nextValue() }
+}
+
+private struct ReorderingScroll: ViewModifier {
+    @State private var locked = false
+    func body(content: Content) -> some View {
+        content.scrollDisabled(locked).onPreferenceChange(RowLiftedKey.self) { locked = $0 }
     }
 }
 
@@ -65,6 +82,7 @@ private struct ReorderRow: ViewModifier {
             .shadow(color: .black.opacity(isLifted ? 0.2 : 0), radius: 12, y: 4)
             .zIndex(isLifted ? 1 : 0)
             .animation(.snappy(duration: 0.2), value: isLifted)
+            .transformPreference(RowLiftedKey.self) { $0 = $0 || isLifted }
     }
 }
 
@@ -77,29 +95,81 @@ private struct ReorderHandle: ViewModifier {
     @GestureState private var active = false
     func body(content: Content) -> some View {
         if enabled {
-            content.gesture(
-                LongPressGesture(minimumDuration: 0.3)
-                    .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .named(reordering.space)))
-                    .updating($active) { _, active, _ in active = true }
-                    .onChanged { value in
-                        guard case .second(true, let drag) = value else { return }
-                        reordering.lifted = LiftedRow(id: id, offset: drag?.translation.height ?? 0, location: drag?.location ?? reordering.rows.frames[id].map { CGPoint(x: $0.midX, y: $0.midY) } ?? .zero)
-                    }
-                    .onEnded { value in
-                        guard case .second(true, let drag) = value else { return }
-                        reordering.lifted = nil
-                        if let hold, abs(drag?.translation.height ?? 0) < 6 { hold(); return }
-                        if let drag, let target = reordering.target(for: LiftedRow(id: id, offset: drag.translation.height, location: drag.location)) {
-                            withAnimation(.snappy) { reordering.place(id, target.id, target.after) }
-                        }
-                    }
-            )
-            .onChange(of: active) { _, active in if !active, reordering.lifted?.id == id { reordering.lifted = nil } }
-            .sensoryFeedback(.impact(weight: .medium), trigger: reordering.lifted?.id == id) { _, lifted in lifted }
-            .accessibilityHint("Hold and drag to reorder")
+            holdToDrag(content)
+                .sensoryFeedback(.impact(weight: .medium), trigger: reordering.lifted?.id == id) { _, lifted in lifted }
+                .accessibilityHint("Hold and drag to reorder")
         } else { content }
     }
+
+    @ViewBuilder private func holdToDrag(_ content: Content) -> some View {
+        #if os(iOS)
+        if #available(iOS 18, *) {
+            // UIKit's long press runs alongside the scroll view. SwiftUI's LongPressGesture keeps a swipe that starts on
+            // the handle from scrolling, which made a day of collapsed exercises nearly impossible to scroll.
+            content.gesture(HoldRecognizer(space: reordering.space, moved: move, released: release))
+        } else { swiftUIHold(content) }
+        #else
+        swiftUIHold(content)
+        #endif
+    }
+
+    private func swiftUIHold(_ content: Content) -> some View {
+        content.gesture(
+            LongPressGesture(minimumDuration: 0.3)
+                .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .named(reordering.space)))
+                .updating($active) { _, active, _ in active = true }
+                .onChanged { value in
+                    guard case .second(true, let drag) = value else { return }
+                    move(drag?.location ?? reordering.rows.frames[id].map { CGPoint(x: $0.midX, y: $0.midY) } ?? .zero, drag?.translation.height ?? 0)
+                }
+                .onEnded { value in
+                    guard case .second(true, let drag) = value else { return }
+                    release(drag?.location ?? .zero, drag?.translation.height ?? 0, cancelled: false)
+                }
+        )
+        .onChange(of: active) { _, active in if !active, reordering.lifted?.id == id { reordering.lifted = nil } }
+    }
+
+    private func move(_ location: CGPoint, _ offset: CGFloat) { reordering.lifted = LiftedRow(id: id, offset: offset, location: location) }
+
+    /// A hold released without moving runs `hold`; otherwise the row lands where the finger lifts.
+    private func release(_ location: CGPoint, _ offset: CGFloat, cancelled: Bool) {
+        reordering.lifted = nil
+        guard !cancelled else { return }
+        if let hold, abs(offset) < 6 { hold(); return }
+        if let target = reordering.target(for: LiftedRow(id: id, offset: offset, location: location)) {
+            withAnimation(.snappy) { reordering.place(id, target.id, target.after) }
+        }
+    }
 }
+
+#if os(iOS)
+/// One UIKit long press covers the hold, the drag after it, and the release, reported in the stack's coordinate space.
+@available(iOS 18, *)
+private struct HoldRecognizer: UIGestureRecognizerRepresentable {
+    let space: String
+    let moved: (CGPoint, CGFloat) -> Void
+    let released: (CGPoint, CGFloat, _ cancelled: Bool) -> Void
+    final class Coordinator { var startY: CGFloat = 0 }
+    func makeCoordinator(converter: CoordinateSpaceConverter) -> Coordinator { Coordinator() }
+    func makeUIGestureRecognizer(context: Context) -> UILongPressGestureRecognizer {
+        let recognizer = UILongPressGestureRecognizer()
+        recognizer.minimumPressDuration = 0.3
+        return recognizer
+    }
+    func handleUIGestureRecognizerAction(_ recognizer: UILongPressGestureRecognizer, context: Context) {
+        let location = context.converter.location(in: .named(space))
+        if recognizer.state == .began { context.coordinator.startY = location.y }
+        let offset = location.y - context.coordinator.startY
+        switch recognizer.state {
+        case .began, .changed: moved(location, offset)
+        case .ended: released(location, offset, false)
+        case .cancelled, .failed: released(location, offset, true)
+        default: break
+        }
+    }
+}
+#endif
 
 /// Reordering belongs to the item, including when touch dragging is unavailable.
 struct ReorderActions: ViewModifier {

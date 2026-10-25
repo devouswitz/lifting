@@ -243,3 +243,16 @@ Observed on the iPhone 17 simulator (iOS 27) through real touch paths, in the Pu
 - The exercise menu no longer lists Add Warm-up or Reorder Sets.
 
 Not verified: a physical iPhone, VoiceOver, accessibility text sizes, and iPad.
+
+## Build 10 (October 25, 2026)
+
+110 core test cases, zero failures.
+
+Observed on the iPhone 17 simulator (iOS 27) through real touch paths:
+- Scrolling: in the Push day editor, a swipe that started on a collapsed exercise header did not scroll, while one that started on a set row did. With the header's hold-to-drag turned off, the same swipe scrolled, so the cause was SwiftUI's LongPressGesture inside a scroll view (making it simultaneous, or delaying the drag, did not help). On iOS 18 and later the hold now uses UIKit's long press recognizer, which runs alongside scrolling; scrolling pauses only while a row is lifted. After the change: header swipes scroll, a header hold-and-drag moved Incline dumbbell press below Cable lateral raise and back without the page moving, a header tap still expands, a badge drag moved a warm-up into the working sets and back, and holding a badge without moving opened Set Details with no type menu.
+- Live set rows are spaced 8 pt apart, as in the day editor (were 2 pt).
+- Workout menu: Cancel Workout opens "Cancel this workout?" with Discard Workout and Keep Workout.
+- Warm-ups: after applying Standard to Bench press from Apply Warm-up Preset, Overhead press's menu offered Apply Standard: 50%, 70%, 85%, and one tap took it from 3 sets to 6.
+- Plan Settings names the off state None instead of Manual.
+
+Not verified: a physical iPhone (scrolling and drag feel), VoiceOver, accessibility text sizes, iPad, and the iOS 17 fallback path.

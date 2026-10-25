@@ -113,6 +113,7 @@ struct ApplyWarmupPreset: View {
                 ToolbarItem(placement: .confirmationAction) { Button("Apply") {
                     guard let preset = presets.first(where: { $0.id == selectedPreset }) else { return }
                     if store.perform({ data in
+                        data.settings.lastWarmups = preset
                         if routineID != nil || variantID != nil { try data.applyWarmups(preset.sets, toVariants: selectedExercises, replacing: replacing) }
                         else {
                             try data.applyWarmups(preset.sets, toSessionExercises: selectedExercises, replacing: replacing, saveFuture: future)
