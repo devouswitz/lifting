@@ -116,6 +116,12 @@ final class AppStore: ObservableObject {
     func editSet(_ exerciseID: UUID, _ setID: UUID, _ change: (inout LoggedSet) -> Void) {
         editExercise(exerciseID) { e in if let i = e.sets.firstIndex(where: { $0.id == setID }) { change(&e.sets[i]) } }
     }
+    /// Completes a pending set once it has a rep count, as confirming reps on the keypad does.
+    func completeIfLogged(_ exerciseID: UUID, _ setID: UUID) {
+        guard let set = data.activeSession?.exercises.first(where: { $0.id == exerciseID })?.sets.first(where: { $0.id == setID }),
+              set.completedAt == nil, set.reps != nil else { return }
+        toggle(exerciseID, setID)
+    }
     func toggle(_ exerciseID: UUID, _ setID: UUID) {
         let before = data.activeSession?.completedSets ?? 0
         let previousDeadline = data.restDeadline
@@ -243,7 +249,7 @@ func planSummary(_ variant: Variant, unit: WeightUnit) -> String {
     let work = prescribedWork(variant.sets)
     guard let first = work.first else { return counted(variant.sets.count, "warm-up") }
     var parts: [String] = []
-    if let target = first.repTarget { parts.append("\(work.count) × \(target.replacingOccurrences(of: "-", with: "–"))") }
+    if let target = first.repTarget { parts.append("\(work.count) × \(displayTarget(target))") }
     else if let seconds = first.seconds { parts.append(work.count > 1 ? "\(work.count) × \(clockText(seconds))" : clockText(seconds)) }
     else { parts.append(counted(work.count, "set")) }
     let weights = zip(variant.sets, variant.resolvedWeights).compactMap { $0.kind == .warmup ? nil : $1 }
@@ -287,6 +293,29 @@ func loggedExerciseSummary(_ exercise: SessionExercise, unit: WeightUnit) -> Str
         }
         return parts.joined(separator: " · ")
     }.joined(separator: "\n")
+}
+
+/// "8–12" for display; stored targets use a plain hyphen.
+func displayTarget(_ target: String) -> String { target.replacingOccurrences(of: "-", with: "–") }
+
+/// A set's load as entered. Bodyweight sets show what was added or assisted: "BW", "+25", "−40".
+func loadText(_ kilograms: Double?, mode: ExerciseMode, unit: WeightUnit) -> String? {
+    guard mode == .bodyweight else { return kilograms.map { number(unit.display($0)) } }
+    guard let kilograms, abs(kilograms) > 0.00001 else { return "BW" }
+    return (kilograms > 0 ? "+" : "−") + number(unit.display(abs(kilograms)))
+}
+
+/// The working load line under an exercise: a weight or range, or the added load for bodyweight work.
+func loadSummary(_ weights: [Double?], mode: ExerciseMode, unit: WeightUnit) -> String? {
+    let values = weights.compactMap { $0 }
+    switch mode {
+    case .cardio: return nil
+    case .strength: return values.isEmpty ? nil : weightSummary(values, unit: unit)
+    case .bodyweight:
+        guard let low = values.min(), let high = values.max(), abs(low) > 0.00001 || abs(high) > 0.00001 else { return nil }
+        let lower = loadText(low, mode: mode, unit: unit) ?? ""
+        return "\(lower)\(abs(high - low) < 0.00001 ? "" : " to " + (loadText(high, mode: mode, unit: unit) ?? "")) \(unit.rawValue)"
+    }
 }
 
 /// A range avoids implying that independent sets share an editable base weight.

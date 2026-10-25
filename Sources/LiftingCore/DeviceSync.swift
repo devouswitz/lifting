@@ -31,7 +31,7 @@ public struct DeviceSyncState: Codable, Equatable, Sendable {
         }
         try add(data.exercises, kind: "exercise"); try add(data.variants, kind: "variant")
         try add(data.routines, kind: "routine"); try add(data.programs, kind: "program"); try add(data.withoutHealthData.sessions, kind: "session")
-        try add(data.warmupPresets, kind: "warmup"); try add(data.customSetTypes, kind: "settype")
+        try add(data.warmupPresets, kind: "warmup"); try add(data.customSetTypes, kind: "settype"); try add(data.bodyWeights, kind: "bodyweight")
         for link in data.historyImports { result["import/\(link.sourceVariantID.uuidString)"] = try encoder.encode(link) }
         return result
     }
@@ -66,12 +66,13 @@ public struct DeviceSyncState: Codable, Equatable, Sendable {
                 return value
             }
         }
-        let allowed = ["exercise", "variant", "routine", "program", "session", "import", "warmup", "settype"]
+        let allowed = ["exercise", "variant", "routine", "program", "session", "import", "warmup", "settype", "bodyweight"]
         guard next.records.keys.allSatisfy({ key in let parts = key.split(separator: "/"); return parts.count == 2 && allowed.contains(String(parts[0])) && UUID(uuidString: String(parts[1])) != nil }) else { throw TrainingError.invalid("Unknown sync record.") }
         result.exercises = try values("exercise", as: Exercise.self); result.variants = try values("variant", as: Variant.self)
         result.routines = try values("routine", as: Routine.self); result.programs = try values("program", as: TrainingProgram.self)
         result.warmupPresets = try values("warmup", as: WarmupPreset.self)
         result.customSetTypes = try values("settype", as: CustomSetType.self)
+        result.bodyWeights = try values("bodyweight", as: BodyWeightEntry.self).sorted { $0.date < $1.date }
         // Apple Health values never travel through the shared folder; keep this device's own.
         let health = Dictionary(local.sessions.compactMap { session in session.health.map { (session.id, $0) } }, uniquingKeysWith: { first, _ in first })
         result.sessions = try values("session", as: Session.self).map { session in var value = session; value.health = health[session.id]; return value }.sorted { $0.startedAt < $1.startedAt }

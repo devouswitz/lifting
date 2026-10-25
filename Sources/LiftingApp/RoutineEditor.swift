@@ -35,7 +35,8 @@ struct RoutineEditor: View {
                                 canMoveUp: routine.slots.first?.id != slot.id,
                                 canMoveDown: routine.slots.last?.id != slot.id,
                                 slotID: slot.id, dragging: $dragging,
-                                remove: { update { $0.slots.removeAll { $0.id == slot.id } } }
+                                remove: { update { $0.slots.removeAll { $0.id == slot.id } } },
+                                swap: { id in store.perform { try $0.swapSlotExercise(routineID: routineID, slotID: slot.id, to: id) } }
                             )
                             .modifier(ExerciseDropTarget(id: slot.id, dragging: $dragging) { source, target, after in
                                 update { day in

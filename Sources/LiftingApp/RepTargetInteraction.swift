@@ -1,24 +1,8 @@
 import SwiftUI
 
-struct RepTargetInteraction: ViewModifier {
-    let enabled: Bool
-    let edit: () -> Void
-
-    func body(content: Content) -> some View {
-        if enabled {
-            content.highPriorityGesture(LongPressGesture().onEnded { _ in edit() })
-                .accessibilityAction(named: "Edit rep target", edit)
-        } else { content }
-    }
-}
-
-struct WeightSettingsInteraction: ViewModifier {
-    let enabled: Bool
-    let edit: () -> Void
-    func body(content: Content) -> some View {
-        if enabled {
-            content.highPriorityGesture(LongPressGesture().onEnded { _ in edit() })
-                .accessibilityAction(named: "Weight settings", edit)
-        } else { content }
+extension View {
+    /// A hold that opens a value's extra settings, also offered as a named accessibility action.
+    func longPress(_ label: String, perform action: @escaping () -> Void) -> some View {
+        highPriorityGesture(LongPressGesture().onEnded { _ in action() }).accessibilityAction(named: label, action)
     }
 }

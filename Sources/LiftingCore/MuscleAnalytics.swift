@@ -26,7 +26,7 @@ public extension TrainingData {
                 var entry = result[primary] ?? MuscleSummary(name: primary)
                 entry.directSets += sets.count; entry.sessions.insert(session.id)
                 entry.reps += sets.compactMap(\.reps).reduce(0, +)
-                entry.volume += sets.reduce(0) { $0 + ($1.weight ?? 0) * Double($1.reps ?? 0) }
+                entry.volume += sets.reduce(0) { $0 + (item.load(of: $1, bodyWeight: session.bodyWeight) ?? 0) * Double($1.reps ?? 0) }
                 result[primary] = entry
                 for secondary in Set((item.secondaryMuscles ?? exercise(item.exerciseID)?.secondaryMuscles ?? []).map(name)) where secondary != primary {
                     var other = result[secondary] ?? MuscleSummary(name: secondary)

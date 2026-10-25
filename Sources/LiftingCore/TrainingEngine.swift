@@ -28,6 +28,8 @@ public extension TrainingData {
             if activeSession?.pausedAt != nil { setWorkoutPaused(false, now: now) }
             try Self.validateLoggedSet(activeSession!.exercises[e].sets[s])
             activeSession!.exercises[e].sets[s].completedAt = now
+            activeSession!.exercises[e].keepExpanded = nil
+            endMyoClusterIfMissed(exercise: e, set: s)
             let rest = activeSession!.exercises[e].sets[s].plan.restSeconds ?? activeSession!.exercises[e].restSeconds
             restDeadline = settings.autoRest && rest > 0 ? now.addingTimeInterval(Double(rest)) : nil
             advanceLinkedFlow(after: exerciseID, setID: setID, now: now)
@@ -35,6 +37,19 @@ public extension TrainingData {
             activeSession!.exercises[e].sets[s].completedAt = nil
             restDeadline = nil
         }
+    }
+
+    /// MYO mini-sets continue until one misses its target. The miss ends the cluster: the pending
+    /// mini-sets right after it are removed and the exercise's normal rest follows.
+    private mutating func endMyoClusterIfMissed(exercise e: Int, set s: Int) {
+        let set = activeSession!.exercises[e].sets[s]
+        guard set.plan.kind == .myoMini, let goal = set.plan.reps, let reps = set.reps, reps < goal else { return }
+        var sets = activeSession!.exercises[e].sets
+        var end = s + 1
+        while end < sets.count, sets[end].plan.kind == .myoMini, sets[end].completedAt == nil { end += 1 }
+        sets.removeSubrange((s + 1)..<end)
+        sets[s].plan.restSeconds = nil
+        activeSession!.exercises[e].sets = sets
     }
 
     mutating func finish(now: Date = Date()) throws {
@@ -49,16 +64,18 @@ public extension TrainingData {
             let reference = variants[v].referenceWeight
             let sets = item.sets.filter { $0.plan.kind == .working || $0.plan.kind == .failure }
             guard !sets.isEmpty, item.sets.filter({ $0.plan.kind != .warmup }).allSatisfy({ $0.completedAt != nil }),
-                  sets.allSatisfy({ $0.reps != nil && $0.weight != nil && $0.plan.load == .working }),
+                  sets.allSatisfy({ ($0.reps != nil || $0.plan.amrap) && $0.weight != nil && $0.plan.load == .working }),
                   sets.allSatisfy({ abs(($0.weight ?? 0) - reference) < 0.001 }) else { continue }
             let mode = variants[v].progression.mode
-            let passed = sets.allSatisfy { ($0.reps ?? 0) >= (mode == .double ? ($0.plan.repCeiling ?? $0.plan.reps ?? 1) : ($0.plan.reps ?? 1)) }
+            func target(_ plan: SetPlan) -> Int { mode == .double ? (plan.repCeiling ?? plan.reps ?? 1) : (plan.reps ?? 1) }
+            // AMRAP sets count as done when completed; a logged count only has to reach the goal.
+            let passed = sets.allSatisfy { set in set.plan.amrap ? (set.reps ?? .max) >= (set.plan.reps ?? 0) : (set.reps ?? 0) >= target(set.plan) }
             if passed {
                 variants[v].progressWeight(to: reference + variants[v].progression.increment)
                 variants[v].progression.failures = 0
             } else {
                 // Double progression is successful within its rep range, but does not add weight yet.
-                let failed = sets.contains { ($0.reps ?? 0) < ($0.plan.reps ?? 1) }
+                let failed = sets.contains { !$0.plan.amrap && ($0.reps ?? 0) < ($0.plan.reps ?? 1) }
                 if failed { variants[v].progression.failures += 1 }
                 else { variants[v].progression.failures = 0 }
                 let limit = variants[v].progression.deloadAfter
@@ -70,6 +87,7 @@ public extension TrainingData {
                 }
             }
         }
+        session.bodyWeight = bodyWeight(at: session.endedAt!)
         sessions.append(session)
         if session.advancesProgram == true, let programID = session.programID, let dayID = session.routineID,
            let p = programs.firstIndex(where: { $0.id == programID }), programs[p].nextDayID == dayID, let day = programs[p].dayIDs.firstIndex(of: dayID) {
@@ -85,26 +103,7 @@ public extension TrainingData {
         guard old.exerciseID != exerciseID else { return }
         let pending = old.sets.filter { $0.completedAt == nil }
         guard !pending.isEmpty else { throw TrainingError.invalid("All sets are complete. Add another exercise instead.") }
-        let originID = source.substitutionSourceID ?? source.id
-        var replacement: Variant
-        if let existing = variants.first(where: { $0.exerciseID == exerciseID && ($0.substitutionSourceID ?? $0.id) == originID }) {
-            replacement = existing
-        } else {
-            replacement = Variant(exerciseID: exerciseID, label: Self.uniqueName(source.label, among: variants.filter { $0.exerciseID == exerciseID }.map(\.label)), restSeconds: source.restSeconds)
-            replacement.substitutionSourceID = originID
-            if exercise.mode == old.mode {
-                replacement.sets = source.sets.map { plan in
-                    var copy = plan; copy.id = UUID(); copy.fixedWeight = 0
-                    if exercise.mode == .bodyweight { copy.load = .none }
-                    return copy
-                }
-            } else if exercise.mode == .cardio {
-                replacement.sets = [SetPlan(load: .none, reps: nil, repCeiling: nil, seconds: 1200, rpe: 6)]
-            } else if exercise.mode == .bodyweight {
-                replacement.sets = [SetPlan(load: .none), SetPlan(load: .none), SetPlan(load: .none)]
-            }
-            variants.append(replacement)
-        }
+        let replacement = substitutionVariant(from: source, to: exercise)
         var item = SessionExercise(variant: replacement, exercise: exercise, slotID: old.slotID)
         item.group = old.group; item.groupRestSeconds = old.groupRestSeconds; item.transitionSeconds = old.transitionSeconds
         item.substitutedFrom = old.name
@@ -136,16 +135,45 @@ public extension TrainingData {
         restDeadline = nil
     }
 
+    /// The track an exercise uses when it stands in for another. Returning to an exercise resumes
+    /// its own track, so each substitute keeps one variant per original.
+    mutating func substitutionVariant(from source: Variant, to exercise: Exercise) -> Variant {
+        let originID = source.substitutionSourceID ?? source.id
+        if let existing = variants.first(where: { $0.exerciseID == exercise.id && ($0.substitutionSourceID ?? $0.id) == originID }) { return existing }
+        let sourceMode = self.exercise(source.exerciseID)?.mode
+        var replacement = Variant.standard(for: exercise, label: Self.uniqueName(source.label, among: variants.filter { $0.exerciseID == exercise.id }.map(\.label)))
+        replacement.restSeconds = exercise.mode == .cardio ? 0 : source.restSeconds
+        replacement.substitutionSourceID = originID
+        if exercise.mode == sourceMode {
+            replacement.sets = source.sets.map { plan in
+                var copy = plan; copy.id = UUID(); copy.fixedWeight = 0; copy.weightOverride = nil
+                if exercise.mode == .bodyweight { copy.load = .none }
+                return copy
+            }
+        }
+        variants.append(replacement)
+        return replacement
+    }
+
+    /// Points a day's exercise slot at another exercise, such as the same movement on other equipment.
+    mutating func swapSlotExercise(routineID: UUID, slotID: UUID, to exerciseID: UUID) throws {
+        guard let r = routines.firstIndex(where: { $0.id == routineID }), let s = routines[r].slots.firstIndex(where: { $0.id == slotID }),
+              let source = variant(routines[r].slots[s].variantID), let exercise = exercise(exerciseID) else { throw TrainingError.invalid("Exercise unavailable.") }
+        guard source.exerciseID != exerciseID else { return }
+        routines[r].slots[s].variantID = substitutionVariant(from: source, to: exercise).id
+    }
+
     func points(exerciseID: UUID, variantID: UUID? = nil, metric: Metric, since: Date = .distantPast) -> [ProgressPoint] {
         sessions.filter { $0.startedAt >= since }.sorted { $0.startedAt < $1.startedAt }.compactMap { session in
-            let sets = session.exercises.filter { $0.exerciseID == exerciseID && (variantID == nil || $0.variantID == variantID) }
-                .flatMap(\.sets).filter { $0.completedAt != nil && $0.plan.kind != .warmup }
+            let items = session.exercises.filter { $0.exerciseID == exerciseID && (variantID == nil || $0.variantID == variantID) }
+            let completed = items.flatMap { item in item.sets.filter { $0.completedAt != nil && $0.plan.kind != .warmup }.map { (set: $0, load: item.load(of: $0, bodyWeight: session.bodyWeight)) } }
+            let sets = completed.map(\.set)
             guard !sets.isEmpty else { return nil }
             let values: [Double]
             switch metric {
             case .weight: values = sets.compactMap(\.weight)
-            case .volume: values = sets.compactMap { s in guard let w = s.weight, let reps = s.reps else { return nil }; return w * Double(reps) }
-            case .estimatedMax: values = sets.compactMap { s in guard let w = s.weight, let reps = s.reps, reps > 0, reps <= 12 else { return nil }; return reps == 1 ? w : w * (1 + Double(reps) / 30) }
+            case .volume: values = completed.compactMap { s in guard let w = s.load, let reps = s.set.reps else { return nil }; return w * Double(reps) }
+            case .estimatedMax: values = completed.compactMap { s in guard let w = s.load, let reps = s.set.reps, reps > 0, reps <= 12 else { return nil }; return reps == 1 ? w : w * (1 + Double(reps) / 30) }
             case .reps: values = sets.compactMap { $0.reps.map(Double.init) }
             case .duration: values = sets.compactMap { $0.seconds.map { $0 / 60 } }
             case .distance: values = sets.compactMap { $0.meters.map { $0 / 1000 } }
@@ -159,12 +187,13 @@ public extension TrainingData {
     }
 
     static func validateLoggedSet(_ set: LoggedSet) throws {
-        for value in [set.weight, set.seconds, set.meters].compactMap({ $0 }) {
+        if let weight = set.weight, !weight.isFinite || abs(weight) > 10_000_000 { throw TrainingError.invalid("Enter a valid weight.") }
+        for value in [set.seconds, set.meters].compactMap({ $0 }) {
             guard value.isFinite && value >= 0 && value <= 10_000_000 else { throw TrainingError.invalid("Enter a valid nonnegative value.") }
         }
         if let reps = set.reps, !(0...10000).contains(reps) { throw TrainingError.invalid("Reps must be between 0 and 10,000.") }
         if let rpe = set.rpe, !rpe.isFinite || !(0...10).contains(rpe) { throw TrainingError.invalid("RPE must be between 0 and 10.") }
-        guard set.reps != nil || set.seconds != nil || set.meters != nil || set.rpe != nil || set.weight != nil || set.plan.reps != nil else { throw TrainingError.invalid("Enter reps, time, distance, weight, or RPE.") }
+        guard set.reps != nil || set.seconds != nil || set.meters != nil || set.rpe != nil || set.weight != nil || set.plan.reps != nil || set.plan.amrap else { throw TrainingError.invalid("Enter reps, time, distance, weight, or RPE.") }
     }
 
     func validated() throws -> TrainingData {
@@ -188,6 +217,9 @@ public extension TrainingData {
         guard unique(customSetTypes), customSetTypes.count <= 100, customSetTypes.allSatisfy(\.isValid),
               Set(customSetTypes.map { $0.name.lowercased() }).count == customSetTypes.count,
               (settings.quickAdd ?? []).count <= 4, (settings.quickAdd ?? []).allSatisfy({ ["drop", "myo", "warmup", "failure", "working", "myoActivation", "myoMini"].contains($0) || ($0.hasPrefix("type:") && UUID(uuidString: String($0.dropFirst(5))) != nil) }) else { throw TrainingError.invalid("Invalid set types.") }
+        guard unique(bodyWeights), bodyWeights.count <= 100_000, bodyWeights.allSatisfy(\.isValid),
+              settings.techniques?.isValid ?? true, exercises.allSatisfy({ $0.techniques?.isValid ?? true }),
+              settings.restStep.map({ (1...600).contains($0) }) ?? true else { throw TrainingError.invalid("Invalid body weight or workout settings.") }
         guard unique(warmupPresets), warmupPresets.count <= 10000, warmupPresets.allSatisfy({ !$0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && $0.name.count <= 200 && (1...1000).contains($0.sets.count) && unique($0.sets) && $0.sets.allSatisfy { $0.kind == .warmup && $0.isValid } }) else { throw TrainingError.invalid("Invalid warm-up preset.") }
         guard exercises.allSatisfy({ !$0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && $0.name.count <= 200 }),
               variants.allSatisfy({ v in exercise(v.exerciseID) != nil && !v.label.isEmpty && v.label.count <= 200 && number(v.workingWeight) && number(v.rounding) && (0...86400).contains(v.restSeconds) && (0...1000).contains(v.sets.count) && unique(v.sets) && v.sets.allSatisfy(\.isValid) && number(v.progression.increment) && number(v.progression.deloadPercent, max: 100) && (0...100).contains(v.progression.deloadAfter) && (0...1000).contains(v.progression.failures) }),
@@ -206,7 +238,8 @@ public extension TrainingData {
             }
             guard session.pausedAt.map({ $0 >= previousEnd && session.endedAt == nil }) ?? true,
                   (session.programName?.count ?? 0) <= 200, unique(session.exercises),
-                  session.endedAt.map({ $0 >= session.startedAt }) ?? true, session.health?.isValid ?? true else {
+                  session.endedAt.map({ $0 >= session.startedAt }) ?? true, session.health?.isValid ?? true,
+                  session.bodyWeight.map({ $0.isFinite && (1...1000).contains($0) }) ?? true else {
                 throw TrainingError.invalid("Invalid session records.")
             }
             for item in session.exercises {

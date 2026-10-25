@@ -61,18 +61,22 @@ public extension SessionExercise {
         }
     }
 
+    /// Working-weight sets, and bodyweight sets whose entry is the added or assisted load.
+    private func followsEntries(_ plan: SetPlan) -> Bool { plan.load == .working || (mode == .bodyweight && plan.load == .none) }
+
     fileprivate mutating func setWeight(_ weight: Double?, at index: Int, fallback: Double) {
         resolveLegacyWeightEntries(fallback: fallback)
         sets[index].weight = weight
         sets[index].weightIsEdited = true
-        if sets[index].completedAt == nil, sets[index].plan.load == .working, sets[index].plan.kind != .warmup {
+        if sets[index].completedAt == nil, followsEntries(sets[index].plan), sets[index].plan.kind != .warmup {
             for next in sets.indices.dropFirst(index + 1) {
                 let set = sets[next]
                 if set.plan.kind == .warmup { continue }
                 // An explicit entry or completed working set starts its own chain.
-                if set.plan.load == .working && (set.weightIsEdited == true || set.completedAt != nil) { break }
+                if followsEntries(set.plan) && (set.weightIsEdited == true || set.completedAt != nil) { break }
                 guard set.completedAt == nil, set.weightIsEdited != true,
-                      set.plan.load == .working || set.plan.load == .percent else { continue }
+                      followsEntries(set.plan) || set.plan.load == .percent else { continue }
+                if set.plan.load == .none { sets[next].weight = weight; continue }
                 sets[next].weight = weight.flatMap { set.plan.resolvedWeight(working: $0, increment: roundingIncrement ?? 0) }
             }
         }
@@ -85,8 +89,8 @@ public extension SessionExercise {
 
 public extension TrainingData {
     mutating func setLoggedWeight(_ weight: Double?, exerciseID: UUID, setID: UUID) throws {
-        guard weight.map({ $0.isFinite && (0...100_000).contains($0) }) ?? true,
-              let exerciseIndex = activeSession?.exercises.firstIndex(where: { $0.id == exerciseID }),
+        guard let exerciseIndex = activeSession?.exercises.firstIndex(where: { $0.id == exerciseID }),
+              weight.map({ $0.isFinite && abs($0) <= 100_000 && ($0 >= 0 || activeSession!.exercises[exerciseIndex].mode == .bodyweight) }) ?? true,
               let setIndex = activeSession?.exercises[exerciseIndex].sets.firstIndex(where: { $0.id == setID }),
               let variant = variant(activeSession!.exercises[exerciseIndex].variantID) else {
             throw TrainingError.invalid("Enter a valid weight.")

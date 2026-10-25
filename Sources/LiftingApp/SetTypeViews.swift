@@ -1,9 +1,9 @@
 import SwiftUI
 import LiftingCore
 
-/// One of the quick-add buttons under each live exercise.
+/// What a quick-add button adds.
 enum QuickAdd: Hashable {
-    case drop, myo, warmup, failure, working, myoActivation, myoMini, custom(UUID)
+    case drop, myo, warmup, failure, working, custom(UUID)
     init?(_ raw: String) {
         switch raw {
         case "drop": self = .drop
@@ -11,16 +11,15 @@ enum QuickAdd: Hashable {
         case "warmup": self = .warmup
         case "failure": self = .failure
         case "working": self = .working
-        case "myoActivation": self = .myoActivation
-        case "myoMini": self = .myoMini
         default:
             guard raw.hasPrefix("type:"), let id = UUID(uuidString: String(raw.dropFirst(5))) else { return nil }
             self = .custom(id)
         }
     }
     var raw: String {
-        switch self { case .drop: return "drop"; case .myo: return "myo"; case .warmup: return "warmup"; case .failure: return "failure"; case .working: return "working"; case .myoActivation: return "myoActivation"; case .myoMini: return "myoMini"; case .custom(let id): return "type:\(id.uuidString)" }
+        switch self { case .drop: return "drop"; case .myo: return "myo"; case .warmup: return "warmup"; case .failure: return "failure"; case .working: return "working"; case .custom(let id): return "type:\(id.uuidString)" }
     }
+    var technique: Technique? { self == .drop ? .drop : self == .myo ? .myo : nil }
     static let defaults: [QuickAdd] = [.drop, .myo]
     /// The two buttons in use, falling back to the defaults for a missing or deleted choice.
     static func slots(_ data: TrainingData) -> [QuickAdd] {
@@ -30,14 +29,14 @@ enum QuickAdd: Hashable {
             return value
         }
     }
-    static func options(_ data: TrainingData) -> [QuickAdd] { [.drop, .myo, .warmup, .failure, .working, .myoActivation, .myoMini] + data.customSetTypes.map { .custom($0.id) } }
+    static func options(_ data: TrainingData) -> [QuickAdd] { [.drop, .myo, .warmup, .failure, .working] + data.customSetTypes.map { .custom($0.id) } }
     func isAvailable(in data: TrainingData) -> Bool { if case .custom(let id) = self { return data.setType(id) != nil }; return true }
     func title(_ data: TrainingData) -> String {
-        switch self { case .drop: return "Drop"; case .myo: return "MYO"; case .warmup: return "Warm-up"; case .failure: return "Failure"; case .working: return "Working"; case .myoActivation: return "MYO activation"; case .myoMini: return "MYO mini-set"; case .custom(let id): return data.setType(id)?.name ?? "Set" }
+        switch self { case .drop: return "Drop"; case .myo: return "MYO"; case .warmup: return "Warm-up"; case .failure: return "Failure"; case .working: return "Working"; case .custom(let id): return data.setType(id)?.name ?? "Set" }
     }
     func color(_ palette: Palette) -> Color {
         switch self {
-        case .drop, .myo, .myoActivation, .myoMini: return palette.technique
+        case .drop, .myo: return palette.technique
         case .working: return palette.action
         case .warmup: return palette.warmup
         case .failure: return palette.failure
@@ -55,14 +54,15 @@ struct SetTypesView: View {
     @EnvironmentObject var store: AppStore
     @Environment(\.palette) var palette
     @State private var editing: CustomSetType?
+    @State private var setup: Technique?
     var body: some View {
         ThemedForm {
             StoreErrorRow()
             Section("Built in") {
                 builtIn("W1", SetPlan(kind: .warmup), "Warm-up", "Not counted in volume or progress")
                 builtIn("1", SetPlan(kind: .working), "Working", "Counted")
-                builtIn("D1", SetPlan(kind: .drop), "Drop", "Counted. Lighter sets right after a work set")
-                builtIn("A", SetPlan(kind: .myoActivation), "MYO", "Counted. Activation set, then mini-sets")
+                technique(.drop, badge: "D1", "Drop", "Counted. Lighter sets right after a work set")
+                technique(.myo, badge: "A", "MYO", "Counted. Activation set, then mini-sets")
                 builtIn("F", SetPlan(kind: .failure), "Failure", "Counted. Taken to failure")
             }
             Section {
@@ -91,11 +91,19 @@ struct SetTypesView: View {
         }
         .formStyle(.grouped).navigationTitle("Set Types").inlineTitle()
         .sheet(item: $editing) { SetTypeEditor(type: $0).environmentObject(store).sheetSize() }
+        .sheet(item: $setup) { TechniqueEditor(technique: $0).environmentObject(store).sheetSize() }
+    }
+    /// Drop and MYO open their app-wide setup.
+    private func technique(_ technique: Technique, badge: String, _ name: String, _ detail: String) -> some View {
+        Button { setup = technique } label: {
+            HStack { builtIn(badge, SetPlan(kind: technique == .drop ? .drop : .myoActivation), name, detail); Spacer(); Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary) }
+                .contentShape(Rectangle())
+        }.buttonStyle(.plain)
     }
     private func builtIn(_ badge: String, _ plan: SetPlan, _ name: String, _ detail: String) -> some View {
         HStack(spacing: 12) {
             SetBadge(text: badge, plan: plan).frame(minWidth: 34)
-            VStack(alignment: .leading, spacing: 2) { Text(name); Text(detail).font(.caption).foregroundStyle(.secondary) }
+            VStack(alignment: .leading, spacing: 2) { Text(name).foregroundStyle(Color.primary); Text(detail).font(.caption).foregroundStyle(.secondary) }
         }
     }
     private func slotBinding(_ index: Int) -> Binding<QuickAdd> {

@@ -92,11 +92,11 @@ struct PlanEditor: View {
                 SetTargetFields(plan: $plan)
             }
             Section("Rest after this set") {
-                NumberRow("Rest in seconds", value: Binding(get: { plan.restSeconds.map(Double.init) }, set: { plan.restSeconds = $0.map { Int($0) } }), placeholder: "Exercise default", integer: true).accessibilityIdentifier("plan.rest")
+                DurationRow("Rest", seconds: $plan.restSeconds, placeholder: "Exercise default").accessibilityIdentifier("plan.rest")
             }
             if let loggedSet {
                 Section("Logged Values") {
-                    NumberRow("Time (minutes)", value: loggedSet.seconds, factor: 60)
+                    DurationRow(title: "Time", seconds: loggedSet.seconds)
                     NumberRow("Distance (meters)", value: loggedSet.meters)
                 }
             }
@@ -136,31 +136,33 @@ struct RepTargetFields: View {
     @State private var repSelection: RepTargetMode
     init(plan: Binding<SetPlan>) {
         _plan = plan
-        _repSelection = State(initialValue: plan.wrappedValue.reps == nil ? .none : plan.wrappedValue.repRange == nil ? .exact : .range)
+        _repSelection = State(initialValue: RepTargetMode(plan.wrappedValue))
     }
     var body: some View {
-        Group {
-                Picker("Rep target", selection: repMode) { ForEach(RepTargetMode.allCases) { Text($0.rawValue).tag($0) } }.accessibilityIdentifier("plan.repMode")
-                if repSelection != .none {
-                    NumberRow(repSelection == .range ? "Minimum reps" : "Target reps", value: Binding(get: { plan.reps ?? 8 }, set: {
-                        plan.reps = $0
-                        if repSelection == .exact { plan.repCeiling = nil }
-                    })).accessibilityIdentifier("plan.reps")
-                    if repSelection == .range {
-                        NumberRow("Maximum reps", value: Binding(get: { plan.repCeiling ?? 12 }, set: { plan.repCeiling = $0 })).accessibilityIdentifier("plan.repCeiling")
-                    }
-                    Toggle("AMRAP", isOn: $plan.amrap)
-                }
-
+        Picker("Rep target", selection: repMode) { ForEach(RepTargetMode.allCases) { Text($0.rawValue).tag($0) } }.accessibilityIdentifier("plan.repMode")
+        switch repSelection {
+        case .none: EmptyView()
+        case .exact, .range:
+            NumberRow(repSelection == .range ? "Minimum reps" : "Target reps", value: Binding(get: { plan.reps ?? 8 }, set: {
+                plan.reps = $0
+                if repSelection == .exact { plan.repCeiling = nil }
+            })).accessibilityIdentifier("plan.reps")
+            if repSelection == .range {
+                NumberRow("Maximum reps", value: Binding(get: { plan.repCeiling ?? 12 }, set: { plan.repCeiling = $0 })).accessibilityIdentifier("plan.repCeiling")
+            }
+        case .amrap:
+            NumberRow("Goal reps", value: Binding(get: { plan.reps.map(Double.init) }, set: { plan.reps = $0.map { Int($0) } }), placeholder: "None", integer: true).accessibilityIdentifier("plan.reps")
         }
     }
     private var repMode: Binding<RepTargetMode> {
         Binding(get: { repSelection }, set: { mode in
             repSelection = mode
+            plan.amrap = mode == .amrap
             switch mode {
-            case .none: plan.reps = nil; plan.repCeiling = nil; plan.amrap = false
+            case .none: plan.reps = nil; plan.repCeiling = nil
             case .exact: plan.reps = plan.reps ?? 8; plan.repCeiling = nil
             case .range: plan.reps = plan.reps ?? 8; plan.repCeiling = max((plan.reps ?? 8) + 1, plan.repCeiling ?? 12)
+            case .amrap: plan.repCeiling = nil
             }
         })
     }
@@ -172,7 +174,7 @@ struct SetTargetFields: View {
         Group {
             RepTargetFields(plan: $plan)
                 NumberRow("RPE", value: $plan.rpe).accessibilityIdentifier("plan.rpe")
-                NumberRow("Time (minutes)", value: $plan.seconds, factor: 60).accessibilityIdentifier("plan.seconds")
+                DurationRow(title: "Time", seconds: $plan.seconds).accessibilityIdentifier("plan.seconds")
                 NumberRow("Distance (meters)", value: $plan.meters).accessibilityIdentifier("plan.meters")
         }
     }
@@ -194,15 +196,15 @@ struct RepTargetEditor: View {
 }
 
 private enum RepTargetMode: String, CaseIterable, Identifiable {
-    case none = "No count", exact = "Reps", range = "Rep range"
+    case none = "No count", exact = "Reps", range = "Rep range", amrap = "AMRAP"
     var id: Self { self }
+    init(_ plan: SetPlan) { self = plan.amrap ? .amrap : plan.reps == nil ? .none : plan.repRange == nil ? .exact : .range }
 }
 
 func setPlanSummary(_ plan: SetPlan, unit: WeightUnit) -> String {
     var parts: [String] = []
     switch plan.load { case .percent: parts.append("\(number(plan.percent))% of working set"); case .fixed: parts.append("\(number(unit.display(plan.fixedWeight))) \(unit.rawValue)"); case .working: parts.append("Working weight"); case .none: break }
-    if let reps = plan.reps { parts.append(plan.repCeiling != nil && plan.repCeiling != reps ? "\(reps)-\(plan.repCeiling!) reps" : "\(reps) reps") }
-    if plan.amrap { parts.append("AMRAP") }
+    if let target = plan.repTarget { parts.append(plan.amrap && plan.reps == nil ? target : "\(displayTarget(target)) reps") }
     if let seconds = plan.seconds { parts.append(clockText(seconds)) }
     if let meters = plan.meters { parts.append("\(number(meters)) m") }
     if let rpe = plan.rpe { parts.append("RPE \(number(rpe))") }
@@ -218,9 +220,8 @@ func prescribedSetSummary(_ plan: SetPlan, weight: Double?, unit: WeightUnit) ->
         if plan.load == .percent { load += " (\(number(plan.percent))%)" }
     }
     var parts: [String] = []
-    if let target = plan.repTarget { parts.append(load.isEmpty ? "\(target) reps" : "\(load) × \(target)") }
+    if let target = plan.repTarget.map(displayTarget) { parts.append(load.isEmpty ? (plan.amrap && plan.reps == nil ? target : "\(target) reps") : "\(load) × \(target)") }
     else if !load.isEmpty { parts.append(load) }
-    if plan.amrap { parts.append("AMRAP") }
     if let seconds = plan.seconds { parts.append(clockText(seconds)) }
     if let meters = plan.meters { parts.append("\(number(meters)) m") }
     if let rpe = plan.rpe { parts.append("RPE \(number(rpe))") }
@@ -228,64 +229,82 @@ func prescribedSetSummary(_ plan: SetPlan, weight: Double?, unit: WeightUnit) ->
     return parts.isEmpty ? "No targets" : parts.joined(separator: " · ")
 }
 
-enum TechniqueKind: String, Identifiable { case drop, myo; var id: String { rawValue }; var title: String { self == .drop ? "Drop sets" : "MYO reps" } }
-
+/// Drop and MYO setup. Applying adds the chain; the setup can be kept for this exercise or every exercise.
+/// Without an apply action it edits the app-wide defaults.
 struct TechniqueEditor: View {
     @EnvironmentObject var store: AppStore
-    @Environment(\.dismiss) var dismiss
-    let kind: TechniqueKind
-    let workingWeight: Double
-    let rounding: Double
+    let technique: Technique
+    var exerciseID: UUID? = nil
     var live = false
-    var onAdd: ([SetPlan], Bool, Bool) -> Bool
-    @State private var reduction = 20.0
-    @State private var dropCount = 1
-    @State private var dropTarget = SetPlan(kind: .drop, reps: 10, repCeiling: nil)
-    @State private var activationTarget = SetPlan(kind: .myoActivation, reps: 15, repCeiling: nil, rpe: 9, amrap: true)
-    @State private var miniTarget = SetPlan(kind: .myoMini, reps: 5, repCeiling: nil)
-    @State private var miniCount = 4
-    @State private var rest = 20
-    @State private var replace = true
+    var onAdd: (([SetPlan], Bool, Bool) -> Bool)? = nil
+    @State private var setup = TechniqueDefaults()
+    @State private var initial: TechniqueDefaults?
+    @State private var replace = false
     @State private var saveFuture = false
-    @State private var initialTargets: [SetPlan]?
-    var plans: [SetPlan] { kind == .drop ? SetTechniques.drops(workingWeight: workingWeight, rounding: rounding, reductionPercent: reduction, count: dropCount, reps: dropTarget.reps, repCeiling: dropTarget.repCeiling, rpe: dropTarget.rpe, seconds: dropTarget.seconds, meters: dropTarget.meters, amrap: dropTarget.amrap) : SetTechniques.myo(activation: activationTarget, mini: miniTarget, miniSets: miniCount, rest: rest) }
-    private var validTargets: Bool {
-        guard reduction.isFinite, (0...100).contains(reduction), (1...10).contains(dropCount), (1...20).contains(miniCount), (0...86400).contains(rest) else { return false }
-        var data = TrainingData(); let exercise = Exercise(name: "Validation")
-        data.exercises = [exercise]; data.variants = [Variant(exerciseID: exercise.id, label: "Validation", sets: plans)]
-        return (try? data.validated()) != nil && plans.allSatisfy { $0.reps != nil || $0.rpe != nil || $0.seconds != nil || $0.meters != nil }
-    }
+    @State private var remember = Remember.no
+    private enum Remember: Hashable { case no, exercise, everywhere }
+    private var exercise: Exercise? { exerciseID.flatMap(store.data.exercise) }
     var body: some View {
-        DraftEditor(valid: validTargets, changed: initialTargets.map { $0 != [dropTarget, activationTarget, miniTarget] } == true || reduction != 20 || dropCount != 1 || miniCount != 4 || rest != 20 || !replace || saveFuture, saveID: "technique.add", confirmation: "Apply", save: {
-            onAdd(plans, kind == .myo && replace, saveFuture)
-        }) {
+        DraftEditor(valid: setup.isValid, changed: initial.map { $0 != setup } == true || replace || saveFuture || remember != .no,
+                    saveID: "technique.add", confirmation: onAdd == nil ? nil : "Apply", save: save) {
             ThemedForm {
-                if kind == .drop {
+                if technique == .drop {
                     Section {
-                        IntegerControl(title: "Drops", value: $dropCount, range: 1...10)
-                        PercentControl(title: "Reduce each drop (%)", value: $reduction, range: 0...100)
+                        IntegerControl(title: "Drops", value: $setup.dropCount, range: 1...10)
+                        PercentControl(title: "Reduce each drop (%)", value: $setup.dropPercent, range: 0...100)
                     }
-                    Section("Drop targets") {
-                        SetTargetFields(plan: $dropTarget)
+                    Section("Drop targets") { SetTargetFields(plan: $setup.drop) }
+                } else {
+                    Section("Activation") { SetTargetFields(plan: $setup.activation) }
+                    Section("Mini-sets") {
+                        IntegerControl(title: "Mini-sets", value: $setup.miniCount, range: 1...20)
+                        DurationRow("Rest between", seconds: $setup.myoRest, presets: [10, 15, 20, 30])
+                        SetTargetFields(plan: $setup.mini)
+                    }
+                }
+                if onAdd != nil {
+                    Section {
+                        if technique == .myo { Toggle(live ? "Replace remaining work sets" : "Replace working sets", isOn: $replace) }
+                        if live { Toggle("Save to this day", isOn: $saveFuture) }
+                        Picker("Keep this setup", selection: $remember) {
+                            Text("This time only").tag(Remember.no)
+                            if let exercise { Text("For \(exercise.name)").tag(Remember.exercise) }
+                            Text("For all exercises").tag(Remember.everywhere)
+                        }
+                        if exercise?.techniques != nil {
+                            Button("Use App Defaults") {
+                                if store.perform({ d in if let i = d.exercises.firstIndex(where: { $0.id == exerciseID }) { d.exercises[i].techniques = nil } }) {
+                                    setup = store.data.techniqueDefaults(for: exerciseID); initial = setup
+                                }
+                            }
+                        }
+                    }
+                    Section("Preview") {
+                        ForEach(setup.plans(technique)) { plan in
+                            VStack(alignment: .leading, spacing: 5) { Text(plan.kind.title).font(.headline); Text(setPlanSummary(plan, unit: store.data.settings.unit)).font(.subheadline).foregroundStyle(.secondary) }
+                        }
                     }
                 } else {
-                    Section("Activation") { SetTargetFields(plan: $activationTarget) }
-                    Section("Mini-sets") {
-                        IntegerControl(title: "Mini-sets", value: $miniCount, range: 1...20)
-                        SetTargetFields(plan: $miniTarget)
-                        IntegerControl(title: "Rest (seconds)", value: $rest, range: 0...86400, step: 5)
-                    }
-                    Toggle(live ? "Replace remaining work sets" : "Replace working sets", isOn: $replace)
+                    Section { Button("Restore Standard Setup") { setup = TechniqueDefaults() }.disabled(setup == TechniqueDefaults()) }
                 }
-                if live { Section { Toggle("Save to this day", isOn: $saveFuture) } }
-                Section("Preview") {
-                    ForEach(plans) { plan in VStack(alignment: .leading, spacing: 5) { Text(plan.kind.title).font(.headline); Text(setPlanSummary(plan, unit: store.data.settings.unit)).font(.subheadline).foregroundStyle(.secondary) } }
-                }
-            }.formStyle(.grouped).navigationTitle(kind.title).inlineTitle()
-        }.onAppear { if initialTargets == nil { initialTargets = [dropTarget, activationTarget, miniTarget] } }
+            }.formStyle(.grouped).navigationTitle(technique.title).inlineTitle()
+        }.onAppear {
+            guard initial == nil else { return }
+            setup = onAdd == nil ? store.data.settings.techniques ?? TechniqueDefaults() : store.data.techniqueDefaults(for: exerciseID)
+            initial = setup
+        }
+    }
+    private func save() -> Bool {
+        guard let onAdd else { return store.perform { $0.settings.techniques = setup } }
+        guard onAdd(setup.plans(technique), replace, saveFuture) else { return false }
+        guard remember != .no else { return true }
+        return store.perform { data in
+            let index = data.exercises.firstIndex { $0.id == exerciseID }
+            if remember == .everywhere { data.settings.techniques = setup }
+            if let index { data.exercises[index].techniques = remember == .exercise ? setup : nil }
+        }
     }
 }
-
 
 struct PercentControl: View {
     let title: String

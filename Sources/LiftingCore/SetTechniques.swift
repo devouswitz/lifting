@@ -24,7 +24,90 @@ public enum SetTechniques {
     }
 }
 
+public enum Technique: String, Identifiable, Sendable {
+    case drop, myo
+    public var id: String { rawValue }
+    public var title: String { self == .drop ? "Drop sets" : "MYO reps" }
+}
+
+/// How a lifter runs drop sets and MYO reps. Set app-wide, and optionally per exercise.
+public struct TechniqueDefaults: Codable, Equatable, Sendable {
+    /// Targets are templates; sets made from them get their own IDs. A fixed ID keeps equal setups equal.
+    private static let target = UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
+    public var dropPercent: Double = 20
+    public var dropCount: Int = 1
+    /// Rep, RPE, time, and distance targets for each drop.
+    public var drop = SetPlan(id: target, kind: .drop, reps: 10, repCeiling: nil)
+    public var activation = SetPlan(id: target, kind: .myoActivation, reps: 15, repCeiling: nil, rpe: 9, amrap: true)
+    public var mini = SetPlan(id: target, kind: .myoMini, reps: 5, repCeiling: nil)
+    public var miniCount: Int = 4
+    public var myoRest: Int = 20
+    public init() {}
+
+    public var isValid: Bool {
+        dropPercent.isFinite && (0...100).contains(dropPercent) && (1...10).contains(dropCount)
+            && (1...20).contains(miniCount) && (0...86400).contains(myoRest)
+            && [drop, activation, mini].allSatisfy { $0.isValid && ($0.reps != nil || $0.amrap || $0.rpe != nil || $0.seconds != nil || $0.meters != nil) }
+    }
+
+    public func plans(_ technique: Technique) -> [SetPlan] {
+        switch technique {
+        case .drop:
+            return SetTechniques.drops(workingWeight: 0, rounding: 0, reductionPercent: dropPercent, count: dropCount, reps: drop.reps, repCeiling: drop.repCeiling,
+                                       rpe: drop.rpe, seconds: drop.seconds, meters: drop.meters, amrap: drop.amrap)
+        case .myo:
+            return SetTechniques.myo(activation: activation, mini: mini, miniSets: miniCount, rest: myoRest)
+        }
+    }
+
+    /// Turns one set into a drop set or a MYO activation set, keeping its identity and load.
+    /// Returns the converted set and any MYO mini-sets that should follow it.
+    func convert(_ plan: SetPlan, to technique: Technique, followedByMini: Bool) -> (set: SetPlan, following: [SetPlan]) {
+        var set = plan
+        set.customTypeID = nil
+        let target = technique == .drop ? drop : activation
+        set.reps = target.reps; set.repCeiling = target.repCeiling; set.amrap = target.amrap; set.rpe = target.rpe
+        if technique == .drop {
+            set.kind = .drop
+            if set.load != .none { set.load = .percent; set.percent = 100 - dropPercent; set.weightOverride = nil }
+            set.restSeconds = nil
+            return (set, [])
+        }
+        set.kind = .myoActivation
+        if set.load == .percent { set.load = .working }
+        set.restSeconds = myoRest
+        guard !followedByMini else { return (set, []) }
+        return (set, Array(plans(.myo).dropFirst()))
+    }
+}
+
 public extension TrainingData {
+    /// Drop and MYO setup for an exercise: its own, else the app-wide defaults.
+    func techniqueDefaults(for exerciseID: UUID?) -> TechniqueDefaults {
+        exerciseID.flatMap(exercise)?.techniques ?? settings.techniques ?? TechniqueDefaults()
+    }
+
+    /// Converts a live set in place. Drops follow the previous set without rest; MYO adds its mini-sets.
+    mutating func convertSessionSet(exerciseID: UUID, setID: UUID, to technique: Technique) throws {
+        guard let e = activeSession?.exercises.firstIndex(where: { $0.id == exerciseID }),
+              let s = activeSession!.exercises[e].sets.firstIndex(where: { $0.id == setID }),
+              let variant = variant(activeSession!.exercises[e].variantID) else { throw TrainingError.invalid("Set unavailable.") }
+        let item = activeSession!.exercises[e]
+        let followed = item.sets.indices.contains(s + 1) && item.sets[s + 1].plan.kind == .myoMini
+        let result = techniqueDefaults(for: item.exerciseID).convert(item.sets[s].plan, to: technique, followedByMini: followed)
+        try replaceSetPlan(exerciseID: exerciseID, setID: setID, plan: result.set)
+        if technique == .drop, s > 0 { activeSession!.exercises[e].sets[s - 1].plan.restSeconds = 0 }
+        var live = variant
+        live.workingWeight = activeSession!.exercises[e].sets[s].weight ?? item.workingLoad(fallback: variant.workingWeight)
+        live.rounding = item.roundingIncrement ?? variant.rounding
+        let following = result.following.map { plan -> LoggedSet in
+            var copy = plan
+            if item.mode != .strength { copy.load = .none }
+            return LoggedSet(plan: copy, variant: live)
+        }
+        activeSession!.exercises[e].sets.insert(contentsOf: following, at: s + 1)
+    }
+
     mutating func applyTechnique(to exerciseID: UUID, plans: [SetPlan], isDrop: Bool, replaceRemaining: Bool, saveFuture: Bool) throws {
         guard let e = activeSession?.exercises.firstIndex(where: { $0.id == exerciseID }),
               let v = variants.firstIndex(where: { $0.id == activeSession!.exercises[e].variantID }) else { throw TrainingError.invalid("Exercise unavailable.") }
@@ -62,5 +145,23 @@ public extension TrainingData {
         }
         if set.plan.repRange != nil || set.plan.reps == nil { set.reps = nil }
         activeSession!.exercises[e].sets.append(set)
+    }
+}
+
+public extension Variant {
+    /// Adds a drop or MYO chain to a saved prescription, as the live workout does.
+    mutating func addTechnique(_ technique: Technique, plans: [SetPlan], replacing: Bool) {
+        if replacing { sets.removeAll { $0.kind != .warmup } }
+        if technique == .drop, let last = sets.indices.last { sets[last].restSeconds = 0 }
+        sets.append(contentsOf: plans.map { plan in var copy = plan; copy.id = UUID(); return copy })
+    }
+
+    mutating func convertSet(_ id: UUID, to technique: Technique, defaults: TechniqueDefaults) {
+        guard let index = sets.firstIndex(where: { $0.id == id }) else { return }
+        let followed = sets.indices.contains(index + 1) && sets[index + 1].kind == .myoMini
+        let result = defaults.convert(sets[index], to: technique, followedByMini: followed)
+        sets[index] = result.set
+        if technique == .drop, index > 0 { sets[index - 1].restSeconds = 0 }
+        sets.insert(contentsOf: result.following, at: index + 1)
     }
 }

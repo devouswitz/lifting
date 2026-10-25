@@ -23,6 +23,8 @@ public struct Exercise: Identifiable, Codable, Equatable, Sendable {
     public var secondaryMuscles: [String]?
     /// Leaves the exercise out of the Progress overview; its own progress screen still works.
     public var hiddenFromProgress: Bool?
+    /// Drop and MYO setup for this exercise. Nil uses the app-wide defaults.
+    public var techniques: TechniqueDefaults?
     public init(id: UUID = UUID(), name: String, muscle: String = "Other", equipment: String = "", mode: ExerciseMode = .strength) {
         self.id = id; self.name = name; self.muscle = muscle; self.equipment = equipment; self.mode = mode
     }
@@ -65,7 +67,9 @@ public struct SetPlan: Identifiable, Codable, Equatable, Sendable {
     }
     public var isValid: Bool {
         func number(_ value: Double, maximum: Double = 10_000_000) -> Bool { value.isFinite && (0...maximum).contains(value) }
-        return number(fixedWeight) && (weightOverride.map { number($0) } ?? true)
+        // Loads may be negative: assisted bodyweight sets record the assistance as a negative load.
+        func load(_ value: Double) -> Bool { value.isFinite && abs(value) <= 10_000_000 }
+        return load(fixedWeight) && (weightOverride.map(load) ?? true)
             && number(percent, maximum: 1000) && (reps.map { (0...10000).contains($0) } ?? true)
             && (repCeiling.map { $0 >= (reps ?? 0) && $0 <= 10000 } ?? true)
             && (seconds.map { number($0) } ?? true) && (meters.map { number($0) } ?? true)
@@ -75,8 +79,11 @@ public struct SetPlan: Identifiable, Codable, Equatable, Sendable {
         guard let reps, let repCeiling, repCeiling > reps else { return nil }
         return reps...repCeiling
     }
-    public var initialReps: Int? { repRange == nil ? reps : nil }
+    /// Reps filled in before logging. Ranges and AMRAP sets start empty so nothing is assumed.
+    public var initialReps: Int? { repRange == nil && !amrap ? reps : nil }
+    /// "8", "8-12", "5+" for AMRAP with a goal, or "AMRAP" without one.
     public var repTarget: String? {
+        if amrap { return reps.map { "\($0)+" } ?? "AMRAP" }
         guard let reps else { return nil }
         return repRange.map { "\($0.lowerBound)-\($0.upperBound)" } ?? String(reps)
     }
@@ -203,6 +210,12 @@ public struct SessionExercise: Identifiable, Codable, Equatable, Sendable {
     public func workingLoad(fallback: Double) -> Double {
         sets.first(where: { $0.plan.kind != .warmup && $0.plan.load != .none })?.weight ?? workingWeight ?? fallback
     }
+    /// The load a set moved: for bodyweight exercises, body weight plus any added (or minus assisted) weight.
+    /// Nil when the load is unknown, so it adds no invented volume.
+    public func load(of set: LoggedSet, bodyWeight: Double?) -> Double? {
+        guard mode == .bodyweight else { return set.weight }
+        return bodyWeight.map { max(0, $0 + (set.weight ?? 0)) }
+    }
 }
 
 public struct Session: Identifiable, Codable, Equatable, Sendable {
@@ -215,6 +228,8 @@ public struct Session: Identifiable, Codable, Equatable, Sendable {
     public var skipped: Bool?
     /// Calories and heart rate from the Apple Health workout recorded at the same time.
     public var health: HealthLink?
+    /// Body weight logged on or before the workout, used for bodyweight exercise volume.
+    public var bodyWeight: Double?
     public var name: String
     public var startedAt: Date
     public var endedAt: Date?
@@ -232,7 +247,12 @@ public struct Session: Identifiable, Codable, Equatable, Sendable {
         let pausedSeconds = (pauses ?? []).reduce(0) { $0 + $1.duration }
         return max(0, (endedAt ?? pausedAt ?? now).timeIntervalSince(startedAt) - pausedSeconds)
     }
-    public var volume: Double { exercises.flatMap(\.sets).filter { $0.completedAt != nil && $0.plan.kind != .warmup }.reduce(0) { $0 + ($1.weight ?? 0) * Double($1.reps ?? 0) } }
+    public var volume: Double {
+        exercises.reduce(0) { total, exercise in
+            exercise.sets.filter { $0.completedAt != nil && $0.plan.kind != .warmup }
+                .reduce(total) { $0 + (exercise.load(of: $1, bodyWeight: bodyWeight) ?? 0) * Double($1.reps ?? 0) }
+        }
+    }
 }
 
 public struct Settings: Codable, Equatable, Sendable {
@@ -252,6 +272,11 @@ public struct Settings: Codable, Equatable, Sendable {
     public var colors: ColorTheme?
     /// The two quick-add buttons under each live exercise: "drop", "myo", "warmup", "failure", or "type:<uuid>".
     public var quickAdd: [String]?
+    /// Seconds the rest timer's − and + buttons change.
+    public var restStep: Int?
+    public var restAdjustment: Int { restStep ?? 15 }
+    /// App-wide Drop and MYO setup; an exercise can override it.
+    public var techniques: TechniqueDefaults?
     public var health: HealthSettings?
     public init() {}
 }
@@ -275,6 +300,7 @@ public struct TrainingData: Codable, Equatable, Sendable {
     public var programs: [TrainingProgram] = []
     public var warmupPresets: [WarmupPreset] = []
     public var customSetTypes: [CustomSetType] = []
+    public var bodyWeights: [BodyWeightEntry] = []
     public var activeProgramID: UUID?
     public var sessions: [Session] = []
     public var historyImports: [HistoryImportLink] = []
@@ -282,7 +308,7 @@ public struct TrainingData: Codable, Equatable, Sendable {
     public var restDeadline: Date?
     public var settings: Settings = Settings()
     public init() {}
-    enum CodingKeys: String, CodingKey { case schemaVersion, exercises, variants, routines, programs, warmupPresets, customSetTypes, activeProgramID, sessions, historyImports, activeSession, restDeadline, settings }
+    enum CodingKeys: String, CodingKey { case schemaVersion, exercises, variants, routines, programs, warmupPresets, customSetTypes, bodyWeights, activeProgramID, sessions, historyImports, activeSession, restDeadline, settings }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         schemaVersion = try c.decode(Int.self, forKey: .schemaVersion)
@@ -292,6 +318,7 @@ public struct TrainingData: Codable, Equatable, Sendable {
         programs = try c.decodeIfPresent([TrainingProgram].self, forKey: .programs) ?? []
         warmupPresets = try c.decodeIfPresent([WarmupPreset].self, forKey: .warmupPresets) ?? []
         customSetTypes = try c.decodeIfPresent([CustomSetType].self, forKey: .customSetTypes) ?? []
+        bodyWeights = try c.decodeIfPresent([BodyWeightEntry].self, forKey: .bodyWeights) ?? []
         activeProgramID = try c.decodeIfPresent(UUID.self, forKey: .activeProgramID)
         sessions = try c.decode([Session].self, forKey: .sessions)
         historyImports = try c.decodeIfPresent([HistoryImportLink].self, forKey: .historyImports) ?? []
