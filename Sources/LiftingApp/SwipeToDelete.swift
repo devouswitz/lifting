@@ -6,7 +6,7 @@ struct SwipeToDelete<Content: View>: View {
     @ViewBuilder let content: Content
     @State private var offset: CGFloat = 0
     @State private var origin: CGFloat = 0
-    @State private var horizontal = false
+    @State private var axis: Axis?
     @State private var width: CGFloat = 320
 
     var body: some View {
@@ -19,23 +19,26 @@ struct SwipeToDelete<Content: View>: View {
                 }.buttonStyle(.plain).accessibilityLabel("Delete set")
             }
             content
+                .disabled(axis == .horizontal || offset < 0)
                 .overlay { if offset < 0 { Color.clear.contentShape(Rectangle()).onTapGesture { close() } } }
                 .offset(x: offset)
         }
         .clipShape(RoundedRectangle(cornerRadius: 9))
         .background { GeometryReader { proxy in Color.clear.onAppear { width = proxy.size.width }.onChange(of: proxy.size.width) { width = $1 } } }
-        .simultaneousGesture(DragGesture(minimumDistance: 18)
+        .highPriorityGesture(DragGesture(minimumDistance: 12)
             .onChanged { value in
-                if !horizontal {
-                    guard abs(value.translation.width) > abs(value.translation.height) * 1.5 else { return }
-                    horizontal = true
+                if axis == nil {
+                    let x = abs(value.translation.width), y = abs(value.translation.height)
+                    if x > y * 1.5 { axis = .horizontal }
+                    else if y > x * 1.5 { axis = .vertical }
                 }
+                guard axis == .horizontal else { return }
                 offset = min(0, max(-width, origin + value.translation.width))
             }
             .onEnded { _ in
-                defer { horizontal = false }
-                guard horizontal else { return }
-                if -offset > max(150, width * 0.65) { remove() }
+                defer { axis = nil }
+                guard axis == .horizontal else { return }
+                if -offset >= min(180, width * 0.55) { remove() }
                 else { withAnimation(.snappy) { offset = offset < -38 ? -76 : 0; origin = offset } }
             })
         .accessibilityAction(named: "Delete set", action)
