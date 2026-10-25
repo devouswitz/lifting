@@ -73,19 +73,18 @@ struct PlanEditor: View {
     @Binding var plan: SetPlan
     let unit: WeightUnit
     var suggestedWeight: Double? = nil
-    var warmupOnly = false
     var ownsDraft = true
     var loggedSet: Binding<LoggedSet>? = nil
     @State private var original: SetPlan?
     var body: some View {
         ThemedForm {
             StoreErrorRow()
-            if !warmupOnly { Section("Set") {
-                Picker("Type", selection: typeChoice) {
+            Section("Set") {
+                Picker("Type", selection: setTypeChoice($plan, types: palette.setTypes)) {
                     ForEach(SetKind.allCases) { Text($0.title).tag(SetTypeChoice.kind($0)) }
                     ForEach(palette.setTypes) { Text($0.name).tag(SetTypeChoice.custom($0.id)) }
                 }
-            } }
+            }
             SetLoadFields(plan: $plan, unit: unit, suggestedWeight: suggestedWeight)
             Section("Targets") {
                 SetTargetFields(plan: $plan)
@@ -118,17 +117,6 @@ struct PlanEditor: View {
 
 /// A built-in kind or a custom type, as one picker value.
 enum SetTypeChoice: Hashable { case kind(SetKind), custom(UUID) }
-
-extension PlanEditor {
-    var typeChoice: Binding<SetTypeChoice> {
-        Binding(get: { plan.customTypeID.flatMap { id in palette.setTypes.contains { $0.id == id } ? .custom(id) : nil } ?? .kind(plan.kind) }, set: { choice in
-            switch choice {
-            case .kind(let kind): plan.kind = kind; plan.customTypeID = nil
-            case .custom(let id): plan.customTypeID = id; plan.kind = palette.setTypes.first { $0.id == id }?.countsAs ?? .working
-            }
-        })
-    }
-}
 
 struct RepTargetFields: View {
     @Binding var plan: SetPlan

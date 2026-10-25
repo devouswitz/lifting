@@ -64,7 +64,7 @@ struct RoutineEditor: View {
         .onAppear { if expanded == nil { expanded = routine?.slots.first?.id } }
         .sheet(isPresented: $picker) { ExercisePicker(title: "Add Exercises", onAdd: { store.add($0, to: routineID) }).sheetSize() }
         .sheet(isPresented: $linking) { LinkedExerciseEditor(routineID: routineID, exerciseID: linkedSlotID).sheetSize() }
-        .sheet(isPresented: $warmups) { ApplyWarmupPreset(routineID: routineID).sheetSize() }
+        .sheet(isPresented: $warmups) { WarmupsSheet(routineID: routineID).sheetSize() }
     }
 
     private var reordering: Reordering {

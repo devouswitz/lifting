@@ -257,3 +257,20 @@ Observed on the iPhone 17 simulator (iOS 27) through real touch paths:
 - Supersets move as a block. Found during testing: dragging Incline dumbbell press between Cable lateral raise and Triceps pressdown split their superset. Now a drag on either member lifts both, a drop on a member lands before or after the whole group, Move Up and Move Down step past a group, and members that drifted apart are gathered when the group moves; a new core test covers each case for days and the live workout. Observed: the same drag now put Incline press after the pair, and dragging Cable lateral raise to the top carried Triceps pressdown with it.
 
 Not verified: a physical iPhone (scrolling and drag feel), VoiceOver, accessibility text sizes, iPad, and the iOS 17 fallback path.
+
+## Build 11 (October 25, 2026)
+
+111 core test cases, zero failures.
+
+The warm-ups redesign approved from the mockup. One Warm-ups sheet replaces Apply Warm-up Preset, Save Warm-ups as Preset, Remove Warm-ups, and the old preset editor; warm-up sets get a trimmed details screen. The approved mockup also had a checkmark in the sheet's toolbar; it was left out because it duplicated the Apply button.
+
+Observed on the iPhone 17 simulator (iOS 27):
+- Bench press's menu in the Push day editor lists Plan Settings, Superset / Circuit, Warm-ups…, and Remove Exercise.
+- Warm-ups… opened with Current, Standard, and New chips; Standard's rows showed 50/70/85% as 97.5, 135, and 165 lb against 195 lb working; Bench press was preselected.
+- Selecting Overhead press changed the button to Apply to 2 Exercises; changing W3's reps to 3 on the keypad showed Save as New Preset; saving named the preset and selected its chip; applying gave Bench press W3 85% × 3.
+- Holding the W3 badge opened the trimmed details (85% of working, 165 lb, 3 exact; rest, type, folded RPE/time/distance; Delete Set). Delete Set removed W3 with no error.
+- Holding the orange Warm-up label opened the sheet with the last-applied preset selected.
+- Settings > Warm-up Presets > New preset opened the sheet with a name field, one row, and Create Preset disabled until named.
+- In a live workout, holding W1 opened the same trimmed details with 97.5 lb under 50%; Delete Set removed it with no error.
+
+Not verified: a physical iPhone, VoiceOver, accessibility text sizes, iPad, and scrolling that starts on the Warm-up label.

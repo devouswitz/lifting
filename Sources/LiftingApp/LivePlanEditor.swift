@@ -7,12 +7,20 @@ struct LivePlanEditor: View {
     let exerciseID: UUID
     let setID: UUID
     @State var plan: SetPlan
+    /// Deleted from the details: nothing is left to save.
+    @State private var removed = false
     init(exerciseID: UUID, setID: UUID, initial: SetPlan) { self.exerciseID = exerciseID; self.setID = setID; _plan = State(initialValue: initial) }
     var body: some View {
-        DraftEditor(valid: plan.isValid, changed: store.data.activeSession?.exercises.first { $0.id == exerciseID }?.sets.first { $0.id == setID }?.plan != plan, save: {
+        DraftEditor(valid: plan.isValid, changed: !removed && store.data.activeSession?.exercises.first { $0.id == exerciseID }?.sets.first { $0.id == setID }?.plan != plan, save: {
             store.perform { try $0.replaceSetPlan(exerciseID: exerciseID, setID: setID, plan: plan) }
         }) {
-            PlanEditor(plan: $plan, unit: store.data.settings.unit, suggestedWeight: loggedSet?.wrappedValue.weight, ownsDraft: false, loggedSet: loggedSet)
+            if plan.kind == .warmup, let item = store.data.activeSession?.exercises.first(where: { $0.id == exerciseID }) {
+                WarmupSetEditor(plan: $plan, badge: item.sets.firstIndex { $0.id == setID }.map { setBadge(item.sets.map(\.plan), index: $0, types: store.data.customSetTypes) },
+                                name: item.name, weight: loggedSet?.wrappedValue.weight, loggedSet: loggedSet,
+                                remove: { removed = true; store.editExercise(exerciseID) { $0.sets.removeAll { $0.id == setID } } })
+            } else {
+                PlanEditor(plan: $plan, unit: store.data.settings.unit, suggestedWeight: loggedSet?.wrappedValue.weight, ownsDraft: false, loggedSet: loggedSet)
+            }
         }
     }
     private var loggedSet: Binding<LoggedSet>? {

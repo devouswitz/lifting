@@ -134,11 +134,15 @@ extension NumericEdit {
     }
 }
 
-/// "Warm-up" or "Working sets" above a group of rows.
+/// "Warm-up" or "Working sets" above a group of rows. Holding the warm-up label opens the Warm-ups sheet.
 struct SetGroupLabel: View {
     let title: String
     let color: Color
-    var body: some View { Text(title).font(.footnote.weight(.semibold)).foregroundStyle(color).padding(.leading, 2).padding(.vertical, 2) }
+    var hold: (() -> Void)? = nil
+    var body: some View {
+        let label = Text(title).font(.footnote.weight(.semibold)).foregroundStyle(color).padding(.leading, 2).padding(.vertical, 2)
+        if let hold { label.contentShape(Rectangle()).longPress("Warm-ups", perform: hold) } else { label }
+    }
 }
 
 /// One tappable value in a set row.

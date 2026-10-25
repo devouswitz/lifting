@@ -204,6 +204,45 @@ struct Chip: View {
     }
 }
 
+/// A capsule choice: filled in its role's wash and outlined when selected, plain on the card color otherwise.
+struct ChipStyle: ButtonStyle {
+    let selected: Bool
+    var role: ColorRole = .action
+    @Environment(\.palette) var palette
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label.font(.subheadline.weight(selected ? .semibold : .regular)).lineLimit(1)
+            .foregroundStyle(selected ? palette.color(role) : Color.primary)
+            .padding(.horizontal, 14).frame(minHeight: 36)
+            .background(selected ? palette.wash(role) : palette.card, in: Capsule())
+            .overlay { if selected { Capsule().strokeBorder(palette.color(role), lineWidth: 1.5) } }
+            .opacity(configuration.isPressed ? 0.6 : 1).contentShape(Capsule())
+    }
+}
+
+/// Lays out children in rows, wrapping to a new row when one is full.
+struct FlowLayout: Layout {
+    var spacing: CGFloat = 8
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let frames = arrange(width: proposal.width ?? .infinity, subviews: subviews)
+        return CGSize(width: proposal.width ?? frames.map(\.maxX).max() ?? 0, height: frames.map(\.maxY).max() ?? 0)
+    }
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        for (frame, subview) in zip(arrange(width: bounds.width, subviews: subviews), subviews) {
+            subview.place(at: CGPoint(x: bounds.minX + frame.minX, y: bounds.minY + frame.minY), proposal: ProposedViewSize(frame.size))
+        }
+    }
+    private func arrange(width: CGFloat, subviews: Subviews) -> [CGRect] {
+        var frames: [CGRect] = [], x: CGFloat = 0, y: CGFloat = 0, rowHeight: CGFloat = 0
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if x > 0, x + size.width > width { x = 0; y += rowHeight + spacing; rowHeight = 0 }
+            frames.append(CGRect(origin: CGPoint(x: x, y: y), size: CGSize(width: min(size.width, width), height: size.height)))
+            x += size.width + spacing; rowHeight = max(rowHeight, size.height)
+        }
+        return frames
+    }
+}
+
 struct EmptyState: View {
     let symbol: String
     let text: String

@@ -67,7 +67,7 @@ struct WorkoutView: View {
             }
             #endif
             .sheet(isPresented: $adding) { ExercisePicker(title: "Add Exercises", onAdd: { exercises in store.perform { data in for exercise in exercises { try data.addExerciseToSession(exercise.id) } } }).environmentObject(store).sheetSize() }
-            .sheet(isPresented: $warmups) { ApplyWarmupPreset().environmentObject(store).sheetSize() }
+            .sheet(isPresented: $warmups) { WarmupsSheet().environmentObject(store).sheetSize() }
             .sheet(isPresented: $finishing) { finishSheet }
             .confirmationDialog("Cancel this workout?", isPresented: $cancelling, titleVisibility: .visible) {
                 Button("Discard Workout", role: .destructive) { store.discard() }
@@ -333,9 +333,9 @@ struct WorkoutExerciseCard: View {
         Button("Superset / Circuit", systemImage: "link") { sheet = .link }
         Divider()
         if let last = store.data.settings.lastWarmups, item.mode != .cardio {
-            Button("Apply \(last.name)", systemImage: "flame.fill") { store.perform { try $0.applyWarmups(last.sets, toSessionExercises: [exerciseID]) } }
+            RepeatWarmupsButton(last: last) { store.perform { try $0.applyWarmups(last.sets, toSessionExercises: [exerciseID]) } }
         }
-        Button("Apply Warm-up Preset", systemImage: "flame") { sheet = .warmups }.disabled(item.mode == .cardio)
+        Button("Warm-ups…", systemImage: "flame") { sheet = .warmups }.disabled(item.mode == .cardio)
         Button("Edit Saved Prescription", systemImage: "slider.horizontal.3") { sheet = .savedPlan(item.variantID) }
         Button("Save Changes to Plan", systemImage: "square.and.arrow.down") { store.perform { try $0.saveSessionPlan(exerciseID) } }
         Button("Plate Calculator", systemImage: "circle.grid.2x1") { sheet = .plates }.disabled(item.mode != .strength)
@@ -367,7 +367,7 @@ struct WorkoutExerciseCard: View {
         case .savedPlan(let id): SavedExerciseEditor(variantID: id).sheetSize()
         case .plates: PlateView(initialWeight: unit.display(item.sets.last?.weight ?? 0)).sheetSize()
         case .link: LinkedExerciseEditor(exerciseID: exerciseID).sheetSize()
-        case .warmups: ApplyWarmupPreset(exerciseID: exerciseID).sheetSize()
+        case .warmups: WarmupsSheet(exerciseID: exerciseID).sheetSize()
         case .rest:
             RestSettingsEditor(name: item.name,
                                rest: Binding(get: { self.item?.restSeconds ?? 0 }, set: { value in _ = editItem { $0.restSeconds = value } }),
@@ -407,7 +407,7 @@ struct WorkoutExerciseCard: View {
                 }.font(.caption.weight(.medium)).foregroundStyle(.secondary).padding(.horizontal, 2)
             }
             if !warmups.isEmpty {
-                SetGroupLabel(title: "Warm-up", color: palette.warmup)
+                SetGroupLabel(title: "Warm-up", color: palette.warmup) { sheet = .warmups }
                 ForEach(warmups, id: \.element.id) { index, set in row(set, index: index) }
             }
             if !work.isEmpty {

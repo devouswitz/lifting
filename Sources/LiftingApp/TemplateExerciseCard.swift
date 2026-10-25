@@ -27,7 +27,7 @@ struct TemplateExerciseCard: View {
     private var mode: ExerciseMode { exercise?.mode ?? .strength }
 
     private enum Sheet: Identifiable {
-        case keypad(NumericEdit), reps(SetPlan), load(SetPlan), details(SetPlan), technique(Technique), settings, warmups, saveWarmups, rest
+        case keypad(NumericEdit), reps(SetPlan), load(SetPlan), details(SetPlan), technique(Technique), settings, warmups, rest
         var id: String {
             switch self {
             case .keypad(let edit): return "keypad.\(edit.id)"
@@ -37,7 +37,6 @@ struct TemplateExerciseCard: View {
             case .technique(let technique): return "technique.\(technique.rawValue)"
             case .settings: return "settings"
             case .warmups: return "warmups"
-            case .saveWarmups: return "saveWarmups"
             case .rest: return "rest"
             }
         }
@@ -70,7 +69,7 @@ struct TemplateExerciseCard: View {
             VStack(alignment: .leading, spacing: 8) {
                 ForEach(Array(variant.sets.enumerated()), id: \.element.id) { index, plan in
                     if plan.kind == .warmup && (index == 0 || variant.sets[index - 1].kind != .warmup) {
-                        SetGroupLabel(title: "Warm-up", color: palette.warmup)
+                        SetGroupLabel(title: "Warm-up", color: palette.warmup) { sheet = .warmups }
                     } else if index > 0 && plan.kind != .warmup && variant.sets[index - 1].kind == .warmup {
                         SetGroupLabel(title: "Working sets", color: .secondary).padding(.top, 6)
                     }
@@ -88,13 +87,9 @@ struct TemplateExerciseCard: View {
         if let link { Button("Superset / Circuit", systemImage: "link", action: link) }
         if mode != .cardio {
             if let last = store.data.settings.lastWarmups {
-                Button("Apply \(last.name)", systemImage: "flame.fill") { store.perform { try $0.applyWarmups(last.sets, toVariants: [variant.id]) } }
+                RepeatWarmupsButton(last: last) { store.perform { try $0.applyWarmups(last.sets, toVariants: [variant.id]) } }
             }
-            Button("Apply Warm-up Preset", systemImage: "flame") { sheet = .warmups }
-            if variant.sets.contains(where: { $0.kind == .warmup }) {
-                Button("Save Warm-ups as Preset", systemImage: "square.and.arrow.down") { sheet = .saveWarmups }
-                Button("Remove Warm-ups", systemImage: "minus.circle") { variant.sets.removeAll { $0.kind == .warmup } }
-            }
+            Button("Warm-ups…", systemImage: "flame") { sheet = .warmups }
         }
         if let remove {
             Divider()
@@ -113,10 +108,9 @@ struct TemplateExerciseCard: View {
                 var edited = variant; edited.addTechnique(technique, plans: plans, replacing: replace); return store.saveVariant(edited)
             }.sheetSize()
         case .settings: PlanSettingsEditor(variant: variant).sheetSize()
-        case .warmups: ApplyWarmupPreset(variantID: variant.id).sheetSize()
+        case .warmups: WarmupsSheet(variantID: variant.id).sheetSize()
         case .rest:
             RestSettingsEditor(name: exercise?.name ?? "Rest", rest: $variant.restSeconds, warmupRest: $variant.warmupRestSeconds, failRest: $variant.failRestSeconds)
-        case .saveWarmups: WarmupPresetEditor(preset: WarmupPreset(name: variant.label + " warm-up", sets: variant.sets.filter { $0.kind == .warmup })).sheetSize()
         }
     }
 

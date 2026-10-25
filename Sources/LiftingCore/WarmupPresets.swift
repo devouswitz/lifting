@@ -5,6 +5,9 @@ public struct WarmupPreset: Identifiable, Codable, Equatable, Sendable {
     public var name: String
     public var sets: [SetPlan]
     public init(id: UUID = UUID(), name: String, sets: [SetPlan]) { self.id = id; self.name = name; self.sets = sets }
+    /// The built-in preset offered before any are saved. Its id is fixed so the last-applied preset can be recognized.
+    public static let standard = WarmupPreset(id: UUID(uuidString: "5E7F0A11-0000-4000-8000-000000000001")!, name: "Standard",
+        sets: [(50.0, 8), (70.0, 5), (85.0, 2)].map { SetPlan(kind: .warmup, load: .percent, percent: $0.0, reps: $0.1, repCeiling: nil) })
 }
 
 public extension TrainingData {
@@ -50,5 +53,15 @@ public extension TrainingData {
             if saveFuture { try applyWarmups(plans, toVariants: [variant.id], replacing: replacing) }
         }
         restDeadline = nil
+    }
+    mutating func removeWarmups(fromVariants ids: Set<UUID>) {
+        for v in variants.indices where ids.contains(variants[v].id) { variants[v].sets.removeAll { $0.kind == .warmup } }
+    }
+    /// Logged warm-ups stay; only pending ones are removed.
+    mutating func removePendingWarmups(fromSessionExercises ids: Set<UUID>) {
+        guard activeSession != nil else { return }
+        for e in activeSession!.exercises.indices where ids.contains(activeSession!.exercises[e].id) {
+            activeSession!.exercises[e].sets.removeAll { $0.plan.kind == .warmup && $0.completedAt == nil }
+        }
     }
 }
