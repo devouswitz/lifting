@@ -20,7 +20,6 @@ struct TemplateExerciseCard: View {
     /// Points this day's slot at another exercise, such as the same movement on other equipment.
     var swap: ((UUID) -> Void)? = nil
     @State private var sheet: Sheet?
-    @State private var reorderingSets = false
     @State private var liftedSet: LiftedRow?
     @State private var setRows = RowFrames()
     private var unit: WeightUnit { store.data.settings.unit }
@@ -68,7 +67,6 @@ struct TemplateExerciseCard: View {
                     Text("RPE").frame(width: 50)
                 }.font(.caption.weight(.medium)).foregroundStyle(.secondary).accessibilityHidden(true)
             }
-            if reorderingSets { Button("Finish Reordering") { reorderingSets = false }.font(.subheadline) }
             VStack(alignment: .leading, spacing: 8) {
                 ForEach(Array(variant.sets.enumerated()), id: \.element.id) { index, plan in
                     if plan.kind == .warmup && (index == 0 || variant.sets[index - 1].kind != .warmup) {
@@ -76,16 +74,8 @@ struct TemplateExerciseCard: View {
                     } else if index > 0 && plan.kind != .warmup && variant.sets[index - 1].kind == .warmup {
                         SetGroupLabel(title: "Working sets", color: .secondary).padding(.top, 6)
                     }
-                    if reorderingSets {
-                        HStack {
-                            Image(systemName: "line.3.horizontal").foregroundStyle(.secondary).frame(width: 44, height: 44)
-                            Text(prescribedSetSummary(plan, weight: weights[index], unit: unit)).font(.subheadline)
-                        }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
-                            .reorderHandle(plan.id, setReordering).reorderRow(plan.id, setReordering)
-                            .modifier(ReorderActions(canMoveUp: index > 0, canMoveDown: index + 1 < variant.sets.count) { moveSet(plan.id, by: $0) })
-                    } else {
-                        SwipeToDelete(action: { variant.sets.removeAll { $0.id == plan.id } }) { row(plan, index: index, weight: weights[index]) }
-                    }
+                    SwipeToDelete(action: { variant.sets.removeAll { $0.id == plan.id } }) { row(plan, index: index, weight: weights[index]) }
+                        .reorderRow(plan.id, setReordering)
                 }
             }.reorderingStack("sets.\(slotID)")
             ExerciseActions(addTitle: "Add Set", quickAdds: mode != .cardio, adder: adder, customize: { sheet = .technique($0) })
@@ -96,9 +86,7 @@ struct TemplateExerciseCard: View {
     @ViewBuilder private var menuItems: some View {
         Button("Plan Settings", systemImage: "slider.horizontal.3") { sheet = .settings }
         if let link { Button("Superset / Circuit", systemImage: "link", action: link) }
-        Button(reorderingSets ? "Finish Reordering" : "Reorder Sets", systemImage: "arrow.up.arrow.down") { reorderingSets.toggle() }
         if mode != .cardio {
-            Button("Add Warm-up", systemImage: "plus") { addWarmup() }
             Button("Apply Warm-up Preset", systemImage: "flame") { sheet = .warmups }
             if variant.sets.contains(where: { $0.kind == .warmup }) {
                 Button("Save Warm-ups as Preset", systemImage: "square.and.arrow.down") { sheet = .saveWarmups }
@@ -136,11 +124,14 @@ struct TemplateExerciseCard: View {
             : loadText(weight.flatMap { $0 == 0 && plan.load != .fixed && mode != .bodyweight ? nil : $0 }, mode: mode, unit: unit) ?? "–"
         return layout {
             VStack(spacing: 0) {
+                // Hold the badge and drag to move the set; hold without moving for Set Details.
                 SetTypeButton(plan: plan, change: { edited in update(plan.id) { $0 = edited } }, convert: { technique in
                     var edited = variant; edited.convertSet(plan.id, to: technique, defaults: store.data.techniqueDefaults(for: variant.exerciseID)); variant = edited
-                }, details: { sheet = .details(plan) }, duplicate: { duplicate(plan) }) {
+                }, details: { sheet = .details(plan) }, duplicate: { duplicate(plan) },
+                    reorder: (plan.id, setReordering, variant.sets.count > 1)) {
                     SetBadge(text: setBadge(variant.sets, index: index, types: store.data.customSetTypes), plan: plan)
                 }.accessibilityLabel("\(palette.title(plan)), set \(index + 1), change set type")
+                .modifier(ReorderActions(canMoveUp: index > 0, canMoveDown: index + 1 < variant.sets.count) { moveSet(plan.id, by: $0) })
                 if plan.load == .percent {
                     Button("\(number(plan.percent))%") { open(plan.id, .percent) }
                         .font(.caption).frame(minWidth: 44, minHeight: 20)

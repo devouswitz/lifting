@@ -231,3 +231,15 @@ Observed on the iPhone 17 simulator (iOS 27) through real touch paths:
 Found and fixed during testing: the simulator's notification service stalled, and because rest alerts were scheduled synchronously on the main thread, logging a set froze the app. Rest alerts now run on a background queue with a generation check. An independent review found ten issues in the build 8 changes; all were fixed except one kept by design (Save Changes to Plan keeps a MYO cluster shortened by a miss).
 
 Not verified: a physical iPhone (gestures, haptics, scrolling while a card is lifted near the screen edge), VoiceOver, accessibility text sizes, and iPad.
+
+## Build 9 (October 25, 2026)
+
+110 core test cases, zero failures.
+
+Observed on the iPhone 17 simulator (iOS 27) through real touch paths, in the Push day editor with Bench press expanded:
+- Scrolling: a vertical swipe that starts on a set row scrolls the page. The row's swipe-to-delete drag had high priority and captured vertical drags; it now runs alongside the scroll view and the first direction decides.
+- Set reordering: holding the 50% warm-up badge and dragging it below working set 1 moved it there, and dragging it back restored the order. Holding a badge without moving opened Set Details; a tap opened the Set Type list. The first attempt failed because the badge's button gesture outranked a drag attached outside it; the drag now sits on the badge beside its tap.
+- Rep target keypad: Range shows Minimum, Maximum, and Exact. Typing 5 in Exact turned 6–8 into 5 for set 1, and later sets with the same target followed.
+- The exercise menu no longer lists Add Warm-up or Reorder Sets.
+
+Not verified: a physical iPhone, VoiceOver, accessibility text sizes, and iPad.

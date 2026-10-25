@@ -25,7 +25,9 @@ struct SwipeToDelete<Content: View>: View {
         }
         .clipShape(RoundedRectangle(cornerRadius: 9))
         .background { GeometryReader { proxy in Color.clear.onAppear { width = proxy.size.width }.onChange(of: proxy.size.width) { width = $1 } } }
-        .highPriorityGesture(DragGesture(minimumDistance: 12)
+        // Runs alongside the scroll view: a vertical drag scrolls, a horizontal one swipes, and the first
+        // direction decides so a scroll never nudges the row sideways.
+        .simultaneousGesture(DragGesture(minimumDistance: 12)
             .onChanged { value in
                 if axis == nil {
                     let x = abs(value.translation.width), y = abs(value.translation.height)

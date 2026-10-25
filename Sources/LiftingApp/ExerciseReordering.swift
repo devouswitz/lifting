@@ -40,8 +40,9 @@ extension View {
     func reorderRow(_ id: UUID, _ reordering: Reordering) -> some View { modifier(ReorderRow(id: id, reordering: reordering)) }
 
     /// Hold, then drag, to move the row. Only a hold starts it, so taps and scrolling pass through.
-    func reorderHandle(_ id: UUID, _ reordering: Reordering, enabled: Bool = true) -> some View {
-        modifier(ReorderHandle(id: id, reordering: reordering, enabled: enabled))
+    /// A hold released without moving runs `hold` instead, when one is given.
+    func reorderHandle(_ id: UUID, _ reordering: Reordering, enabled: Bool = true, hold: (() -> Void)? = nil) -> some View {
+        modifier(ReorderHandle(id: id, reordering: reordering, enabled: enabled, hold: hold))
     }
 }
 
@@ -71,6 +72,7 @@ private struct ReorderHandle: ViewModifier {
     let id: UUID
     let reordering: Reordering
     let enabled: Bool
+    let hold: (() -> Void)?
     /// True while the hold-and-drag is in progress; resets on its own if the system cancels the gesture.
     @GestureState private var active = false
     func body(content: Content) -> some View {
@@ -84,11 +86,12 @@ private struct ReorderHandle: ViewModifier {
                         reordering.lifted = LiftedRow(id: id, offset: drag?.translation.height ?? 0, location: drag?.location ?? reordering.rows.frames[id].map { CGPoint(x: $0.midX, y: $0.midY) } ?? .zero)
                     }
                     .onEnded { value in
-                        if case .second(true, let drag?) = value,
-                           let target = reordering.target(for: LiftedRow(id: id, offset: drag.translation.height, location: drag.location)) {
+                        guard case .second(true, let drag) = value else { return }
+                        reordering.lifted = nil
+                        if let hold, abs(drag?.translation.height ?? 0) < 6 { hold(); return }
+                        if let drag, let target = reordering.target(for: LiftedRow(id: id, offset: drag.translation.height, location: drag.location)) {
                             withAnimation(.snappy) { reordering.place(id, target.id, target.after) }
                         }
-                        reordering.lifted = nil
                     }
             )
             .onChange(of: active) { _, active in if !active, reordering.lifted?.id == id { reordering.lifted = nil } }

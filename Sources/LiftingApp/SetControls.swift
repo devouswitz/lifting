@@ -10,6 +10,7 @@ extension View {
 
 /// The set badge. Tap to change the set's type, hold for Set Details. Drop and MYO convert the set
 /// into a working drop or MYO activation set, with the lifter's Drop and MYO setup.
+/// Given a reordering, holding and dragging the badge moves the set; a hold without moving still opens Set Details.
 struct SetTypeButton<Label: View>: View {
     @EnvironmentObject private var store: AppStore
     let plan: SetPlan
@@ -17,13 +18,12 @@ struct SetTypeButton<Label: View>: View {
     let convert: (Technique) -> Void
     let details: () -> Void
     var duplicate: (() -> Void)? = nil
+    var reorder: (id: UUID, reordering: Reordering, enabled: Bool)? = nil
     @ViewBuilder let label: () -> Label
     @State private var choosing = false
 
     var body: some View {
-        // A percentage label shares the badge's cell, so the badge gives up half its height.
-        Button { choosing = true } label: { label().frame(minWidth: 44, minHeight: plan.load == .percent ? 26 : 44).contentShape(Rectangle()) }
-            .buttonStyle(.plain)
+        badge
             .confirmationDialog("Set Type", isPresented: $choosing, titleVisibility: .visible) {
                 Button("Working") { select(.working) }
                 Button("Warm-up") { select(.warmup) }
@@ -35,9 +35,21 @@ struct SetTypeButton<Label: View>: View {
                 if let duplicate { Button("Duplicate Set", action: duplicate) }
                 Button("Cancel", role: .cancel) {}
             }
-            .longPress("Set details", perform: details)
             .accessibilityLabel("\(plan.kind.title), change set type")
             .accessibilityValue(plan.load == .percent ? "\(number(plan.percent))% of working weight" : "")
+    }
+    @ViewBuilder private var badge: some View {
+        // A percentage label shares the badge's cell, so the badge gives up half its height.
+        let face = label().frame(minWidth: 44, minHeight: plan.load == .percent ? 26 : 44).contentShape(Rectangle())
+        if let reorder, reorder.enabled {
+            // The tap and the hold-to-drag sit on the same view; a Button's own gesture would outrank the drag.
+            face.onTapGesture { choosing = true }
+                .reorderHandle(reorder.id, reorder.reordering, hold: details)
+                .accessibilityAddTraits(.isButton).accessibilityAction { choosing = true }
+                .accessibilityAction(named: "Set details", details)
+        } else {
+            Button { choosing = true } label: { face }.buttonStyle(.plain).longPress("Set details", perform: details)
+        }
     }
     private func select(_ kind: SetKind, customID: UUID? = nil) {
         var edited = plan

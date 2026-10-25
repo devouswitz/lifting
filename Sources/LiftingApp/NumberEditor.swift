@@ -168,7 +168,10 @@ struct RepValuesEditor: View {
     @State private var mode: RepTargetMode
     @State private var lower: KeypadValue
     @State private var upper: KeypadValue
-    @State private var editingUpper = false
+    @State private var exact: KeypadValue = .integer(nil)
+    /// Which value the keys type into while a range is shown.
+    private enum Bound { case lower, upper, exact }
+    @State private var bound = Bound.lower
     init(plan: SetPlan, save: @escaping (SetPlan) -> Bool, adjacent: ((UUID, Int) -> SetPlan?)? = nil) {
         _plan = State(initialValue: plan); self.save = save; self.adjacent = adjacent
         _mode = State(initialValue: RepTargetMode(plan))
@@ -178,6 +181,8 @@ struct RepValuesEditor: View {
     private var edited: SetPlan {
         var target = plan
         target.amrap = mode == .amrap
+        // A number typed in Exact replaces the range with that one count.
+        if mode == .range, bound == .exact, let value = exact.value { target.reps = Int(value); target.repCeiling = nil; return target }
         switch mode {
         case .none: target.reps = nil; target.repCeiling = nil
         case .exact, .amrap: target.reps = lower.value.map(Int.init); target.repCeiling = nil
@@ -190,7 +195,7 @@ struct RepValuesEditor: View {
         case .none: return true
         case .amrap: return lower.isValid
         case .exact: return lower.isValid && lower.value != nil
-        case .range: return lower.isValid && upper.isValid && (lower.value.flatMap { l in upper.value.map { $0 >= l } } ?? false)
+        case .range: return bound == .exact ? exact.isValid : lower.isValid && upper.isValid && (lower.value.flatMap { l in upper.value.map { $0 >= l } } ?? false)
         }
     }
     var body: some View {
@@ -200,7 +205,7 @@ struct RepValuesEditor: View {
                     Picker("Target", selection: $mode) { ForEach(RepTargetMode.allCases) { Text($0.rawValue).tag($0) } }
                         .pickerStyle(.segmented).labelsHidden().accessibilityIdentifier("reps.mode")
                         .onChange(of: mode) { _, value in
-                            editingUpper = false; lower.select()
+                            bound = .lower; lower.select()
                             if value == .range, upper.value == nil, let low = lower.value { upper = .integer(Int(low) + 2) }
                         }
                     if let adjacent {
@@ -216,16 +221,17 @@ struct RepValuesEditor: View {
                     case .amrap: NumericDisplay(entry: $lower, title: "Goal, optional")
                     case .range:
                         HStack(spacing: 12) {
-                            bound("Minimum", entry: $lower, upper: false)
-                            bound("Maximum", entry: $upper, upper: true)
+                            field("Minimum", entry: $lower, bound: .lower)
+                            field("Maximum", entry: $upper, bound: .upper)
                         }
+                        field("Exact", entry: $exact, bound: .exact)
                     }
-                    if mode != .none { NumericKeys(entry: editingUpper && mode == .range ? $upper : $lower, step: 1) }
+                    if mode != .none { NumericKeys(entry: mode == .range ? keyed : $lower, step: 1) }
                     if mode == .range && !valid { Text("Maximum reps must be at least the minimum.").font(.footnote).foregroundStyle(.red) }
                     StoreErrorRow()
                 }.padding(20)
             }.navigationTitle("Rep Target").inlineTitle()
-        }.modifier(KeypadPresentation(height: 600))
+        }.modifier(KeypadPresentation(height: mode == .range ? 660 : 600))
     }
     private func commit() -> Bool {
         guard valid else { return false }
@@ -235,23 +241,26 @@ struct RepValuesEditor: View {
         load(target)
         return true
     }
+    private var keyed: Binding<KeypadValue> { bound == .upper ? $upper : bound == .exact ? $exact : $lower }
     private func load(_ value: SetPlan) {
-        plan = value; mode = RepTargetMode(value); editingUpper = false
-        lower = .integer(value.reps); upper = .integer(value.repCeiling)
+        plan = value; mode = RepTargetMode(value); bound = .lower
+        lower = .integer(value.reps); upper = .integer(value.repCeiling); exact = .integer(nil)
     }
     private func advance(_ offset: Int) {
         guard commit(), let next = adjacent?(plan.id, offset) else { return }
         load(next)
     }
-    private func bound(_ title: String, entry: Binding<KeypadValue>, upper isUpper: Bool) -> some View {
-        Button { editingUpper = isUpper; entry.wrappedValue.select() } label: {
-            VStack(spacing: 6) {
+    private func field(_ title: String, entry: Binding<KeypadValue>, bound value: Bound) -> some View {
+        let layout = value == .exact ? AnyLayout(HStackLayout(spacing: 12)) : AnyLayout(VStackLayout(spacing: 6))
+        return Button { bound = value; entry.wrappedValue.select() } label: {
+            layout {
                 Text(title).font(.subheadline)
-                Text(entry.wrappedValue.text.isEmpty ? "–" : entry.wrappedValue.text).font(.largeTitle.monospacedDigit())
-            }.frame(maxWidth: .infinity, minHeight: 80)
+                if value == .exact { Spacer() }
+                Text(entry.wrappedValue.text.isEmpty ? "–" : entry.wrappedValue.text).font((value == .exact ? Font.title2 : .largeTitle).monospacedDigit())
+            }.padding(.horizontal, value == .exact ? 16 : 0).frame(maxWidth: .infinity, minHeight: value == .exact ? 44 : 80)
                 .background(.quaternary, in: RoundedRectangle(cornerRadius: 12))
-                .overlay(RoundedRectangle(cornerRadius: 12).stroke(editingUpper == isUpper ? Color.accentColor : .clear, lineWidth: 2))
-        }.buttonStyle(.plain).accessibilityAddTraits(editingUpper == isUpper ? .isSelected : [])
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(bound == value ? Color.accentColor : .clear, lineWidth: 2))
+        }.buttonStyle(.plain).accessibilityAddTraits(bound == value ? .isSelected : [])
     }
 }
 
