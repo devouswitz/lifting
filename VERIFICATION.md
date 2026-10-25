@@ -212,4 +212,6 @@ Observed on the iPhone 17 simulator (iOS 27) through XCUITest driving the instal
 
 An independent review of the diff found eight issues; all were fixed with regression tests (assisted loads in CSV import, undoing a missed mini-set, body weight on synced or imported workouts, drop conversion keeping an entered load, legacy MYO quick-add choices, AMRAP copies starting empty, the ± key replacing the value, and AMRAP misses counting toward deloads). Sync now keeps record kinds it does not recognize instead of rejecting the merge; devices on build 6 or earlier still reject weigh-in records, so update every device.
 
-Not verified: a physical iPhone, VoiceOver, accessibility text sizes, older iOS runtimes, iPad, and distribution signing. The signed export and TestFlight upload need the paid team in Xcode, which is not yet signed in on this Mac.
+Release: the unsigned archive was signed locally with `Resources/Lifting.entitlements`, exported for App Store Connect with automatic signing on team VFT92SUD4D, passed `scripts/verify-ipa.py --build 7` (signature, identity, HealthKit), and was uploaded to App Store Connect on October 25, 2026.
+
+Not verified: a physical iPhone, VoiceOver, accessibility text sizes, older iOS runtimes, and iPad.
