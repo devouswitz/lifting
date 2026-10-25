@@ -180,7 +180,7 @@ struct ProgramEditor: View {
                 Section {
                     ForEach(Array(program.dayIDs.enumerated()), id: \.element) { index, id in
                         if let day = store.data.routine(id) {
-                            NavigationLink { DayView(dayID: id) } label: {
+                            NavigationLink { RoutineEditor(routineID: id, showsStart: true) } label: {
                                 HStack(spacing: 12) {
                                     Text("\(index + 1)").font(.subheadline.weight(.semibold)).monospacedDigit().foregroundStyle(.secondary).frame(width: 20)
                                     VStack(alignment: .leading, spacing: 2) {

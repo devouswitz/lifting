@@ -1,6 +1,13 @@
 import SwiftUI
 import LiftingCore
 
+extension View {
+    /// A hold that opens a value's extra settings, also offered as a named accessibility action.
+    func longPress(_ label: String, perform action: @escaping () -> Void) -> some View {
+        highPriorityGesture(LongPressGesture().onEnded { _ in action() }).accessibilityAction(named: label, action)
+    }
+}
+
 /// The set badge. Tap to change the set's type, hold for Set Details. Drop and MYO convert the set
 /// into a working drop or MYO activation set, with the lifter's Drop and MYO setup.
 struct SetTypeButton<Label: View>: View {
@@ -14,7 +21,8 @@ struct SetTypeButton<Label: View>: View {
     @State private var choosing = false
 
     var body: some View {
-        Button { choosing = true } label: { label().frame(minWidth: 44, minHeight: 44).contentShape(Rectangle()) }
+        // A percentage label shares the badge's cell, so the badge gives up half its height.
+        Button { choosing = true } label: { label().frame(minWidth: 44, minHeight: plan.load == .percent ? 26 : 44).contentShape(Rectangle()) }
             .buttonStyle(.plain)
             .confirmationDialog("Set Type", isPresented: $choosing, titleVisibility: .visible) {
                 Button("Working") { select(.working) }
@@ -55,7 +63,7 @@ struct QuickAddButton: View {
         }.buttonStyle(FieldButtonStyle(role: .technique))
             .contextMenu {
                 if let technique = slot.technique {
-                    Button("Customize \(technique.title)…", systemImage: "slider.horizontal.3") { customize(technique) }
+                    Button("\(slot.title(store.data)) Setup…", systemImage: "slider.horizontal.3") { customize(technique) }
                 }
                 Section("Change Button") {
                     ForEach(QuickAdd.options(store.data), id: \.self) { option in
@@ -69,7 +77,7 @@ struct QuickAddButton: View {
             }
             .accessibilityHint("Hold to customize or change this button")
             .accessibilityActions {
-                if let technique = slot.technique { Button("Customize \(technique.title)") { customize(technique) } }
+                if let technique = slot.technique { Button("\(slot.title(store.data)) Setup") { customize(technique) } }
                 ForEach(QuickAdd.options(store.data), id: \.self) { option in
                     Button("Change to \(option.title(store.data))") { assign(option) }
                 }

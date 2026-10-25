@@ -37,6 +37,7 @@ struct SettingsView: View {
                 NavigationLink { WarmupPresetLibrary() } label: { TileLabel(title: "Warm-up Presets", symbol: "flame.fill", color: palette.warmup) }.accessibilityIdentifier("settings.warmups")
                 NavigationLink { SetTypesView() } label: { TileLabel(title: "Set Types", symbol: "square.stack.3d.up.fill", color: palette.technique) }.accessibilityIdentifier("settings.settypes")
                 Toggle(isOn: setting(\.autoRest)) { TileLabel(title: "Start Rest Timer Automatically", symbol: "timer", color: palette.rest) }
+                RestStepPicker(tiled: true)
                 #if os(iOS)
                 Button {
                     Task {

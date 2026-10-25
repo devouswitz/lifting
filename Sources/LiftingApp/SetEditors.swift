@@ -62,7 +62,7 @@ struct SavedExerciseEditor: View {
                     }.padding(16)
                 }
             }.navigationTitle("Saved Plan").inlineTitle()
-                .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Close", systemImage: "xmark") { dismiss() }.labelStyle(.iconOnly) } }
+                .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done", systemImage: "checkmark") { dismiss() }.labelStyle(.iconOnly) } }
                 .sheet(isPresented: $linking) { LinkedExerciseEditor(routineID: day?.id, exerciseID: slot?.id).sheetSize() }
         }
     }

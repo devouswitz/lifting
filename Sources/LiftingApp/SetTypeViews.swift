@@ -11,6 +11,8 @@ enum QuickAdd: Hashable {
         case "warmup": self = .warmup
         case "failure": self = .failure
         case "working": self = .working
+        // Earlier builds offered the MYO parts separately; they now add the MYO cluster.
+        case "myoActivation", "myoMini": self = .myo
         default:
             guard raw.hasPrefix("type:"), let id = UUID(uuidString: String(raw.dropFirst(5))) else { return nil }
             self = .custom(id)

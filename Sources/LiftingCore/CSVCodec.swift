@@ -61,10 +61,11 @@ struct CSVRow {
     let values: [String: String]
     let number: Int
     func text(_ key: String, default fallback: String = "") -> String { CSVCodec.unprotect(values[key] ?? fallback) }
-    func double(_ key: String, default fallback: Double? = nil, maximum: Double = 10_000_000) throws -> Double? {
+    /// Loads may be negative (assisted bodyweight), so they pass `minimum: -maximum`.
+    func double(_ key: String, default fallback: Double? = nil, minimum: Double = 0, maximum: Double = 10_000_000) throws -> Double? {
         let value = text(key).trimmingCharacters(in: .whitespacesAndNewlines)
         if value.isEmpty { return fallback }
-        guard let parsed = Double(value.replacingOccurrences(of: ",", with: ".")), parsed.isFinite, parsed >= 0, parsed <= maximum else { throw TrainingError.invalid("Invalid \(key) on CSV row \(number). Use a number from 0 to \(maximum.formatted(.number.grouping(.never))).") }
+        guard let parsed = Double(value.replacingOccurrences(of: ",", with: ".")), parsed.isFinite, parsed >= minimum, parsed <= maximum else { throw TrainingError.invalid("Invalid \(key) on CSV row \(number). Use a number from \(minimum.formatted(.number.grouping(.never))) to \(maximum.formatted(.number.grouping(.never))).") }
         return parsed
     }
     func int(_ key: String, default fallback: Int? = nil) throws -> Int? {

@@ -37,7 +37,7 @@ struct LiveSetRow: View {
                         }.accessibilityLabel("\(palette.title(set.plan)), set \(setLabel(item)), change set type")
                         if set.plan.load == .percent {
                             Button("\(number(set.plan.percent))%") { open(.percent) }
-                                .font(.caption).frame(minWidth: 44, minHeight: 44)
+                                .font(.caption).frame(minWidth: 44, minHeight: 20)
                                 .longPress("Weight settings") { present(.load(setID)) }
                         }
                     }.frame(width: typeSize.isAccessibilitySize ? nil : 44)

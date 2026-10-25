@@ -196,3 +196,20 @@ A sustained simulator click exposed the parent row context menu intercepting rep
 Live keypad navigation saved actual reps 10 and 12 while keeping targets 8–12 and 9–15 and all completion markers empty. App updates and relaunch retained the test days, notes, weights, exercise order and active session in isolated data directories. iPad portrait, landscape, dark appearance and maximum text size were inspected; numeric value scaling at accessibility sizes was corrected. Physical touch dragging, VoiceOver speech, external keyboards, older OS versions, Health/watch integration and notification delivery were not retested. Existing core coverage and integration code remain.
 
 Existing editor dismissal and explicit creation/batch confirmation share DraftEditor. Saved-plan editing reuses the main exercise card instead of a second set table. Unchanged mutations skip validation, disk writes and activity/sync scheduling. No runtime speed claim is made without a benchmark. Bundle identity, local storage and sync paths remain unchanged; the installed name is Setform. See the release report for signing, package sizes and final TestFlight availability.
+
+## Build 7 mechanics pass (October 25, 2026)
+
+104 core test cases, zero failures; 10 new cases cover AMRAP targets and progression, Drop and MYO setup resolution, set conversion, the missed-mini-set rule and its undo, body weight volume and sync, signed and duration keypad entry, equipment families and slot swaps, collapse re-arming, and assisted-load CSV round trips. The iOS simulator Debug build and an unsigned Release device archive (build 7) pass.
+
+Observed on the iPhone 17 simulator (iOS 27) through XCUITest driving the installed app with showcase data:
+- Keypad: confirming reps with the checkmark completed the set and started rest; Next Set logged W1 and W2 in turn; four working sets entered through Next Set completed, and Bench press collapsed only after the keypad closed.
+- Auto-collapse: a finished exercise collapsed; on the next exercise, a set changed to Failure and another removed with a full swipe still collapsed when the rest were checked; reopening a finished exercise kept it open.
+- Rest: holding the rest bar's step buttons offered 5 seconds to 1 minute and 30 seconds applied; the rest token opened the m:ss keypad with presets and 2, 0, 0 read 2:00.
+- Equipment: the menu listed Barbell with new versions; choosing one swapped the exercise for today, kept completed sets on the original, and showed an empty weight rather than 0. The day editor swapped a slot to Dumbbell row.
+- MYO from the set badge turned set 3 into a 15+ activation with four 0:20 mini-sets; the Drop button added a drop in one tap; holding it offered Drop Setup and button choices.
+- Bodyweight: Dip took +25 on one set, showing BW for the others; Progress > Body Weight logged 180 lb.
+- Warm-up badge and percentage now share one compact cell.
+
+An independent review of the diff found eight issues; all were fixed with regression tests (assisted loads in CSV import, undoing a missed mini-set, body weight on synced or imported workouts, drop conversion keeping an entered load, legacy MYO quick-add choices, AMRAP copies starting empty, the ± key replacing the value, and AMRAP misses counting toward deloads). Sync now keeps record kinds it does not recognize instead of rejecting the merge; devices on build 6 or earlier still reject weigh-in records, so update every device.
+
+Not verified: a physical iPhone, VoiceOver, accessibility text sizes, older iOS runtimes, iPad, and distribution signing. The signed export and TestFlight upload need the paid team in Xcode, which is not yet signed in on this Mac.

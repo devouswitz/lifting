@@ -851,7 +851,8 @@ final class TrainingTests: XCTestCase {
         try data.setLoggedWeight(100, exerciseID: item.id, setID: item.sets[2].id)
         let updated = data.activeSession!.exercises[0]
         XCTAssertEqual(updated.workingWeight, 100)
-        XCTAssertEqual(updated.sets.map(\.weight), [0, 75, 100, 100, 120, 60])
+        // The warm-up was logged before any weight existed, so its load stays unknown rather than zero.
+        XCTAssertEqual(updated.sets.map(\.weight), [nil, 75, 100, 100, 120, 60])
         XCTAssertEqual(updated.sets[3].weightIsEdited, false)
         XCTAssertEqual(updated.sets[4].weightIsEdited, true)
         let restored = try LocalRepository.decode(LocalRepository.encode(data))
@@ -1958,8 +1959,9 @@ final class TrainingTests: XCTestCase {
     func testSignedAndDurationKeypadEntries() {
         var signed = NumericEntry(value: 25, maximum: 1000, integer: false, signed: true)
         signed.toggleSign(); XCTAssertEqual(signed.value, -25)
-        signed.insert("0"); XCTAssertEqual(signed.value, -250); XCTAssertTrue(signed.isValid)
-        signed.toggleSign(); XCTAssertEqual(signed.value, 250)
+        // The sign does not stop the next digit from replacing the shown value.
+        signed.insert("4"); signed.insert("0"); XCTAssertEqual(signed.value, -40); XCTAssertTrue(signed.isValid)
+        signed.toggleSign(); XCTAssertEqual(signed.value, 40)
         var unsigned = NumericEntry(value: 5, maximum: 10, integer: false)
         unsigned.toggleSign(); XCTAssertEqual(unsigned.value, 5)
         var rest = DurationEntry(seconds: 90)
@@ -2013,5 +2015,82 @@ final class TrainingTests: XCTestCase {
         XCTAssertNil(data.activeSession!.exercises[0].keepExpanded)
         XCTAssertNotNil(data.collapseCompletedExercise(item.id))
         XCTAssertEqual(data.activeSession!.exercises[0].collapsed, true)
+    }
+
+    func testReviewRegressions() throws {
+        // Assisted loads survive a logged-set CSV round trip.
+        var data = TrainingData.starter()
+        let dip = try XCTUnwrap(data.exercises.first { $0.name == "Dip" })
+        data.activeSession = Session(name: "Dips", startedAt: Date(timeIntervalSince1970: 1_792_000_000))
+        try data.addExerciseToSession(dip.id)
+        var item = data.activeSession!.exercises[0]
+        try data.setLoggedWeight(-20, exerciseID: item.id, setID: item.sets[0].id)
+        try data.toggleSet(exerciseID: item.id, setID: item.sets[0].id)
+        try data.finish(now: Date(timeIntervalSince1970: 1_792_001_000))
+        let imported = try HistoryCSV.decode(HistoryCSV.export(data)).content
+        XCTAssertEqual(imported.sessions.first?.exercises.first?.sets.first?.weight, -20)
+
+        // A missed mini-set ends the cluster; unchecking it restores the cluster.
+        data = TrainingData.starter()
+        try data.start(routineID: data.routines[0].id)
+        item = data.activeSession!.exercises[0]
+        try data.applyTechnique(to: item.id, plans: TechniqueDefaults().plans(.myo), isDrop: false, replaceRemaining: false, saveFuture: false)
+        var sets = data.activeSession!.exercises[0].sets
+        let mini = try XCTUnwrap(sets.firstIndex { $0.plan.kind == .myoMini })
+        data.activeSession!.exercises[0].sets[mini].reps = 2
+        try data.toggleSet(exerciseID: item.id, setID: sets[mini].id)
+        XCTAssertEqual(data.activeSession!.exercises[0].sets.filter { $0.plan.kind == .myoMini }.count, 1)
+        try data.toggleSet(exerciseID: item.id, setID: sets[mini].id)
+        sets = data.activeSession!.exercises[0].sets
+        XCTAssertEqual(sets.filter { $0.plan.kind == .myoMini }.count, 4)
+        XCTAssertEqual(sets[mini].plan.restSeconds, 20); XCTAssertNil(sets.last?.plan.restSeconds)
+        // MYO on the set after a MYO set continues the cluster.
+        try data.addSessionSet(to: item.id)
+        let next = data.activeSession!.exercises[0].sets.last!
+        XCTAssertEqual(next.plan.kind, .myoMini)
+
+        // Converting a set with an entered weight to a drop keeps that weight; rest is cleared only before a pending work set.
+        data = TrainingData.starter()
+        try data.start(routineID: data.routines[0].id)
+        item = data.activeSession!.exercises[0]
+        let last = item.sets.count - 1
+        try data.setLoggedWeight(30, exerciseID: item.id, setID: item.sets[last].id)
+        try data.toggleSet(exerciseID: item.id, setID: item.sets[last - 1].id)
+        try data.convertSessionSet(exerciseID: item.id, setID: item.sets[last].id, to: .drop)
+        sets = data.activeSession!.exercises[0].sets
+        XCTAssertEqual(sets[last].weight, 30); XCTAssertEqual(sets[last].plan.kind, .drop)
+        XCTAssertNil(sets[last - 1].plan.restSeconds)
+        try data.convertSessionSet(exerciseID: item.id, setID: item.sets[last].id, to: .myo)
+        XCTAssertEqual(data.activeSession!.exercises[0].sets.filter { $0.plan.kind == .myoMini }.count, 4)
+        try data.convertSessionSet(exerciseID: item.id, setID: item.sets[last].id, to: .drop)
+        XCTAssertEqual(data.activeSession!.exercises[0].sets.filter { $0.plan.kind == .myoMini }.count, 0)
+
+        // A new AMRAP set starts empty even after a logged one.
+        data.activeSession!.exercises[0].sets[last].plan.amrap = true
+        data.activeSession!.exercises[0].sets[last].plan.reps = 5
+        data.activeSession!.exercises[0].sets[last].reps = 11
+        try data.addSessionSet(to: item.id)
+        XCTAssertNil(data.activeSession!.exercises[0].sets.last?.reps)
+
+        // Records of a kind this version does not know are kept but do not block the merge.
+        var sync = DeviceSyncState(); try sync.capture(TrainingData.starter())
+        sync.records["future/\(UUID().uuidString)"] = SyncRecord(revision: SyncRevision(counter: sync.clock, device: sync.deviceID), payload: Data("{}".utf8))
+        var local = DeviceSyncState()
+        XCTAssertNoThrow(try local.merge([sync], into: TrainingData()))
+    }
+
+    func testAmrapShortOfItsGoalCountsAsAMiss() throws {
+        var data = TrainingData.starter()
+        let id = data.routines[0].slots[0].variantID
+        let v = try XCTUnwrap(data.variants.firstIndex { $0.id == id })
+        data.variants[v].workingWeight = 100; data.variants[v].progression.mode = .linear
+        data.variants[v].sets = [SetPlan(reps: 5, repCeiling: nil, amrap: true)]
+        try data.start(routineID: data.routines[0].id)
+        let item = data.activeSession!.exercises[0]
+        data.activeSession!.exercises[0].sets[0].reps = 3
+        try data.toggleSet(exerciseID: item.id, setID: item.sets[0].id)
+        data.activeSession!.exercises.removeSubrange(1...)
+        try data.finish()
+        XCTAssertEqual(data.variants[v].workingWeight, 100); XCTAssertEqual(data.variants[v].progression.failures, 1)
     }
 }

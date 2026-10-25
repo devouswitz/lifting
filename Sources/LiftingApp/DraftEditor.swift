@@ -26,7 +26,8 @@ struct DraftEditor<Content: View>: View {
                             Button(confirmation, action: finish).disabled(!valid)
                                 .keyboardShortcut(.defaultAction).accessibilityIdentifier(saveID)
                         } else {
-                            Button("Close", systemImage: "xmark", action: finish).labelStyle(.iconOnly)
+                            // Closing keeps the edits, so it reads as done rather than dismiss.
+                            Button("Done", systemImage: "checkmark", action: finish).labelStyle(.iconOnly)
                                 .disabled(!valid).keyboardShortcut(.cancelAction)
                         }
                     }

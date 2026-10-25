@@ -204,7 +204,7 @@ struct SessionDetail: View {
                             }.contentShape(Rectangle())
                         }.buttonStyle(.plain)
                         if let from = exercise.substitutedFrom { Text("Substitute for \(from)").font(.caption).foregroundStyle(.secondary) }
-                        HistorySetTable(sets: exercise.sets, unit: store.data.settings.unit)
+                        HistorySetTable(sets: exercise.sets, mode: exercise.mode, unit: store.data.settings.unit)
                         if !exercise.recurringNotes.isEmpty { Label(exercise.recurringNotes, systemImage: "pin.fill").font(.caption).foregroundStyle(.secondary) }
                         if !exercise.notes.isEmpty { Text(exercise.notes).font(.subheadline).textSelection(.enabled) }
                     }.card(padding: 16)
@@ -248,7 +248,7 @@ struct SessionDetail: View {
                                     }
                                 }
                             }), unit: store.data.settings.unit)
-                        } label: { setRow(set) }
+                        } label: { setRow(set, mode: exercise.mode) }
                     }.onDelete { offsets in
                         let ids = offsets.map { exercise.sets[$0].id }
                         update { value in if let index = value.exercises.firstIndex(where: { $0.id == exercise.id }) { value.exercises[index].sets.removeAll { ids.contains($0.id) } } }
@@ -277,12 +277,12 @@ struct SessionDetail: View {
         }.formStyle(.grouped)
     }
 
-    private func setRow(_ set: LoggedSet) -> some View {
+    private func setRow(_ set: LoggedSet, mode: ExerciseMode) -> some View {
         HStack(alignment: .top) {
             Image(systemName: set.completedAt == nil ? "minus.circle" : "checkmark.circle.fill")
                 .foregroundStyle(set.completedAt == nil ? Color.secondary : palette.completed)
             VStack(alignment: .leading, spacing: 4) {
-                Text(loggedSetSummary(set, unit: store.data.settings.unit)).monospacedDigit()
+                Text(loggedSetSummary(set, mode: mode, unit: store.data.settings.unit)).monospacedDigit()
                 if set.plan.kind != .working || set.plan.customTypeID != nil { Text(palette.title(set.plan)).font(.caption).foregroundStyle(palette.color(for: set.plan)) }
             }
         }
@@ -293,8 +293,9 @@ private struct HistorySetTable: View {
     @Environment(\.colorScheme) private var scheme
     @Environment(\.palette) private var palette
     let sets: [LoggedSet]
+    let mode: ExerciseMode
     let unit: WeightUnit
-    private var columns: [HistorySetColumn] { HistorySetColumn.allCases.filter { column in sets.contains { column.value($0, unit: unit) != nil } } }
+    private var columns: [HistorySetColumn] { HistorySetColumn.allCases.filter { column in sets.contains { column.value($0, mode: mode, unit: unit) != nil } } }
 
     var body: some View {
         if columns.count > 3 {
@@ -306,7 +307,7 @@ private struct HistorySetTable: View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
                 Text("Set").frame(maxWidth: .infinity, alignment: .leading)
-                ForEach(columns) { column in Text(column.title(unit: unit)).frame(maxWidth: .infinity, alignment: .trailing) }
+                ForEach(columns) { column in Text(column.title(mode: mode, unit: unit)).frame(maxWidth: .infinity, alignment: .trailing) }
             }.font(.caption).foregroundStyle(.secondary).padding(.bottom, 8)
             Divider()
             ForEach(Array(sets.enumerated()), id: \.element.id) { index, set in
@@ -319,10 +320,10 @@ private struct HistorySetTable: View {
                         }
                         if set.plan.kind != .working || set.plan.customTypeID != nil { Text(palette.title(set.plan)).font(.caption2).foregroundStyle(palette.color(for: set.plan)) }
                     }.frame(maxWidth: .infinity, alignment: .leading)
-                    ForEach(columns) { column in Text(column.value(set, unit: unit) ?? "-").frame(maxWidth: .infinity, alignment: .trailing) }
+                    ForEach(columns) { column in Text(column.value(set, mode: mode, unit: unit) ?? "-").frame(maxWidth: .infinity, alignment: .trailing) }
                 }.font(.subheadline).monospacedDigit().padding(.vertical, 9).opacity(set.completedAt == nil ? 0.5 : 1)
                     .accessibilityElement(children: .ignore)
-                    .accessibilityLabel("Set \(index + 1), \(palette.title(set.plan)), \(set.completedAt == nil ? "not completed" : "completed"), \(loggedSetSummary(set, unit: unit))")
+                    .accessibilityLabel("Set \(index + 1), \(palette.title(set.plan)), \(set.completedAt == nil ? "not completed" : "completed"), \(loggedSetSummary(set, mode: mode, unit: unit))")
                 if index < sets.count - 1 { Divider().opacity(0.5) }
             }
         }
@@ -332,19 +333,19 @@ private struct HistorySetTable: View {
 private enum HistorySetColumn: CaseIterable, Identifiable, Hashable {
     case weight, reps, time, distance, rpe
     var id: Self { self }
-    func title(unit: WeightUnit) -> String {
+    func title(mode: ExerciseMode, unit: WeightUnit) -> String {
         switch self {
-        case .weight: return unit.rawValue
+        case .weight: return mode == .bodyweight ? "+\(unit.rawValue)" : unit.rawValue
         case .reps: return "Reps"
         case .time: return "Time"
         case .distance: return "Meters"
         case .rpe: return "RPE"
         }
     }
-    func value(_ set: LoggedSet, unit: WeightUnit) -> String? {
+    func value(_ set: LoggedSet, mode: ExerciseMode, unit: WeightUnit) -> String? {
         switch self {
-        case .weight: return set.weight.map { number(unit.display($0)) }
-        case .reps: return set.reps.map(String.init) ?? (set.plan.repRange != nil ? set.plan.repTarget : nil)
+        case .weight: return set.weight == nil && mode == .bodyweight ? nil : loadText(set.weight, mode: mode, unit: unit)
+        case .reps: return set.reps.map(String.init) ?? (set.plan.repRange != nil || set.plan.amrap ? set.plan.repTarget.map(displayTarget) : nil)
         case .time: return set.seconds.map(clockText)
         case .distance: return set.meters.map { number($0) }
         case .rpe: return set.rpe.map { number($0) }
@@ -361,7 +362,7 @@ struct LoggedSetEditor: View {
             Toggle("Completed", isOn: Binding(get: { set.completedAt != nil }, set: { set.completedAt = $0 ? .now : nil }))
             NumberRow("Weight (\(unit.rawValue))", value: $set.weight, factor: unit.kilograms(1))
             NumberRow("Reps", value: Binding(get: { set.reps.map(Double.init) }, set: { set.reps = $0.map(Int.init) }), integer: true)
-            NumberRow("Time (minutes)", value: $set.seconds, factor: 60)
+            DurationRow(title: "Time", seconds: $set.seconds)
             NumberRow("Distance (meters)", value: $set.meters)
             NumberRow("RPE", value: $set.rpe)
         }.formStyle(.grouped).navigationTitle("Edit set").inlineTitle()

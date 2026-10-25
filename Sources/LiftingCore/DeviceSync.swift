@@ -66,8 +66,8 @@ public struct DeviceSyncState: Codable, Equatable, Sendable {
                 return value
             }
         }
-        let allowed = ["exercise", "variant", "routine", "program", "session", "import", "warmup", "settype", "bodyweight"]
-        guard next.records.keys.allSatisfy({ key in let parts = key.split(separator: "/"); return parts.count == 2 && allowed.contains(String(parts[0])) && UUID(uuidString: String(parts[1])) != nil }) else { throw TrainingError.invalid("Unknown sync record.") }
+        // Kinds from a newer app version are kept in the replica but not read, so older devices keep syncing.
+        guard next.records.keys.allSatisfy({ key in let parts = key.split(separator: "/"); return parts.count == 2 && UUID(uuidString: String(parts[1])) != nil }) else { throw TrainingError.invalid("Unknown sync record.") }
         result.exercises = try values("exercise", as: Exercise.self); result.variants = try values("variant", as: Variant.self)
         result.routines = try values("routine", as: Routine.self); result.programs = try values("program", as: TrainingProgram.self)
         result.warmupPresets = try values("warmup", as: WarmupPreset.self)
@@ -82,6 +82,7 @@ public struct DeviceSyncState: Codable, Equatable, Sendable {
             guard key == "import/\(value.sourceVariantID.uuidString)" else { throw TrainingError.invalid("Sync import identity mismatch.") }; return value
         }
         if result.activeProgramID.flatMap(result.program) == nil { result.activeProgramID = result.programs.first?.id }
+        result.refreshSessionBodyWeights()
         // A mixed concurrent delete/edit can break a reference. Reject that merge
         // atomically instead of discarding a workout or silently repairing history.
         do { result = try result.validated() }

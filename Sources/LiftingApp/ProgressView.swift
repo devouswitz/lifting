@@ -12,7 +12,7 @@ struct ProgressView: View {
     @State private var selectedProgramID: UUID?
     @State private var selectedExerciseID: UUID?
     @State private var initialized = false
-    @State private var muscles = false
+    @State private var view = ProgressMode.exercises
 
     var body: some View {
         let history = ProgressHistory(data: store.data, programID: selectedProgramID, includeHidden: false)
@@ -23,9 +23,9 @@ struct ProgressView: View {
         }
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 20) {
-                Picker("View", selection: $muscles) { Text("Exercises").tag(false); Text("Muscles").tag(true) }.pickerStyle(.segmented).labelsHidden().accessibilityIdentifier("progress.view")
+                Picker("View", selection: $view) { ForEach(ProgressMode.allCases) { Text($0.rawValue).tag($0) } }.pickerStyle(.segmented).labelsHidden().accessibilityIdentifier("progress.view")
                 VStack(alignment: .leading, spacing: 14) {
-                    if !muscles {
+                    if view == .exercises {
                     HStack {
                         Picker("Exercise", selection: $selectedExerciseID) {
                             Text("All exercises").tag(UUID?.none)
@@ -41,14 +41,15 @@ struct ProgressView: View {
                     }
                     }
                     ProgressRangePicker(range: $range)
-                    if muscles { MuscleAnalyticsView(programID: selectedProgramID, since: range.since) }
-                    else {
-                    ProgressLineChart(tracks: tracks, metric: metric, unit: store.data.settings.unit, height: 270)
+                    switch view {
+                    case .exercises: ProgressLineChart(tracks: tracks, metric: metric, unit: store.data.settings.unit, height: 270)
+                    case .muscles: MuscleAnalyticsView(programID: selectedProgramID, since: range.since)
+                    case .body: BodyWeightView(since: range.since)
                     }
                 }
                 .card()
 
-                if !muscles { SectionTitle(title: "Records").padding(.top, 4); VStack(alignment: .leading, spacing: 10) {
+                if view == .exercises { SectionTitle(title: "Records").padding(.top, 4); VStack(alignment: .leading, spacing: 10) {
                     HStack(spacing: 8) {
                         Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                         TextField("Search logged exercises", text: $search)
@@ -334,6 +335,11 @@ private enum ProgressRange: Int, CaseIterable, Identifiable {
     var since: Date {
         self == .all ? .distantPast : Calendar.current.date(byAdding: .day, value: -rawValue, to: .now) ?? .distantPast
     }
+}
+
+private enum ProgressMode: String, CaseIterable, Identifiable {
+    case exercises = "Exercises", muscles = "Muscles", body = "Body Weight"
+    var id: Self { self }
 }
 
 private struct ProgressRangePicker: View {

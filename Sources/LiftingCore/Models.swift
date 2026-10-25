@@ -203,7 +203,8 @@ public struct SessionExercise: Identifiable, Codable, Equatable, Sendable {
         let weights = variant.resolvedWeights
         sets = variant.sets.enumerated().map { index, plan in
             var set = LoggedSet(plan: plan, variant: variant)
-            set.weight = weights[index]
+            // A load derived from an unset working weight is unknown, not zero.
+            set.weight = weights[index].flatMap { $0 == 0 && plan.load != .fixed ? nil : $0 }
             return set
         }
     }

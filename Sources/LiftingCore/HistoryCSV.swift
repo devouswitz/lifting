@@ -101,7 +101,7 @@ public enum HistoryCSV {
             }
             let e = data.sessions[s].exercises.firstIndex { $0.id == sessionExerciseID }!
             guard let kind = SetKind(rawValue: r.text("kind", default: "working")) else { throw TrainingError.invalid("Invalid kind on row \(r.number).") }
-            let weight = try r.double("weight_kg"), reps = try r.int("reps")
+            let weight = try r.double("weight_kg", minimum: -10_000_000), reps = try r.int("reps")
             let targetReps = header.contains("target_reps") ? try r.int("target_reps") : reps
             let plan = SetPlan(kind: kind, load: weight == nil ? .none : .fixed, fixedWeight: weight ?? 0, reps: targetReps, repCeiling: try r.int("target_rep_ceiling"), seconds: try r.double("seconds"), meters: try r.double("meters"), rpe: try r.double("rpe", maximum: 10), restSeconds: try r.int("rest_seconds"))
             var typedPlan = plan

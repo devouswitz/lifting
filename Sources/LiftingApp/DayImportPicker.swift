@@ -54,7 +54,7 @@ struct SavedDaysView: View {
     var body: some View {
         ThemedForm {
             ForEach(store.data.dayTemplates) { day in
-                NavigationLink { DayView(dayID: day.id) } label: {
+                NavigationLink { RoutineEditor(routineID: day.id, showsStart: true) } label: {
                     VStack(alignment: .leading, spacing: 3) {
                         Text(day.name)
                         Text(counted(day.slots.count, "exercise")).font(.caption).foregroundStyle(.secondary)

@@ -181,11 +181,13 @@ struct RestBar: View {
                     }.frame(width: 30, height: 30).accessibilityHidden(true)
                     Text(remaining > 0 ? clockText(remaining) : "Rest done").font(.figure(22, weight: .bold)).foregroundStyle(remaining > 0 ? Color.primary : palette.rest)
                         .frame(maxWidth: .infinity, alignment: .leading).accessibilityLabel(remaining > 0 ? "Rest, \(clockText(remaining)) left" : "Rest complete")
+                    let step = store.data.settings.restAdjustment
                     Group {
-                        Button("−15") { store.adjustRest(-15) }.accessibilityLabel("Subtract 15 seconds")
-                        Button("+15") { store.adjustRest(15) }.accessibilityLabel("Add 15 seconds")
-                    }.font(.subheadline.weight(.semibold).monospacedDigit()).foregroundStyle(palette.rest)
+                        Button("−\(stepText(step))") { store.adjustRest(-Double(step)) }.accessibilityLabel("Subtract \(step) seconds")
+                        Button("+\(stepText(step))") { store.adjustRest(Double(step)) }.accessibilityLabel("Add \(step) seconds")
+                    }.font(.subheadline.weight(.semibold).monospacedDigit()).foregroundStyle(palette.rest).lineLimit(1).minimumScaleFactor(0.7)
                     .frame(width: 48, height: 36).background(palette.rest.opacity(palette.dark ? 0.2 : 0.12), in: Capsule()).buttonStyle(.plain)
+                    .contextMenu { RestStepPicker() }
                     Button("Skip", action: store.skipRest).font(.subheadline.weight(.semibold)).foregroundStyle(palette.on(.rest))
                         .frame(width: 56, height: 36).background(palette.rest, in: Capsule()).buttonStyle(.plain).accessibilityIdentifier("rest.skip")
                 }
@@ -199,6 +201,21 @@ struct RestBar: View {
         }
     }
     @State private var total: Double = 1
+    private func stepText(_ seconds: Int) -> String { seconds % 60 == 0 ? "\(seconds / 60)m" : "\(seconds)" }
+}
+
+/// How much the rest timer's − and + buttons change it. Held on those buttons, and in Settings.
+struct RestStepPicker: View {
+    @EnvironmentObject var store: AppStore
+    @Environment(\.palette) var palette
+    var tiled = false
+    var body: some View {
+        Picker(selection: Binding(get: { store.data.settings.restAdjustment }, set: { value in store.perform { $0.settings.restStep = value } })) {
+            ForEach([5, 10, 15, 30, 60], id: \.self) { Text($0 < 60 ? "\($0) seconds" : "1 minute").tag($0) }
+        } label: {
+            if tiled { TileLabel(title: "Adjust Rest By", symbol: "plusminus", color: palette.rest) } else { Text("Adjust Rest By") }
+        }
+    }
 }
 
 /// Everything a live exercise card can present. One sheet at a time, owned by the card, so auto-collapse

@@ -60,23 +60,26 @@ public struct TechniqueDefaults: Codable, Equatable, Sendable {
         }
     }
 
-    /// Turns one set into a drop set or a MYO activation set, keeping its identity and load.
-    /// Returns the converted set and any MYO mini-sets that should follow it.
-    func convert(_ plan: SetPlan, to technique: Technique, followedByMini: Bool) -> (set: SetPlan, following: [SetPlan]) {
+    /// Turns one set into a drop set or a MYO set, keeping its identity and any load entered for it.
+    /// MYO right after a MYO set continues that cluster as a mini-set; otherwise the set becomes the
+    /// activation and the mini-sets that should follow it are returned.
+    func convert(_ plan: SetPlan, to technique: Technique, after previous: SetKind?, followedByMini: Bool) -> (set: SetPlan, following: [SetPlan]) {
         var set = plan
         set.customTypeID = nil
-        let target = technique == .drop ? drop : activation
+        let continuing = technique == .myo && (previous == .myoActivation || previous == .myoMini)
+        let target = technique == .drop ? drop : continuing ? mini : activation
         set.reps = target.reps; set.repCeiling = target.repCeiling; set.amrap = target.amrap; set.rpe = target.rpe
         if technique == .drop {
             set.kind = .drop
-            if set.load != .none { set.load = .percent; set.percent = 100 - dropPercent; set.weightOverride = nil }
+            // A drop follows the previous set's load, unless a weight was already entered for it.
+            if set.load == .working && set.weightOverride == nil { set.load = .percent; set.percent = 100 - dropPercent }
             set.restSeconds = nil
             return (set, [])
         }
-        set.kind = .myoActivation
+        set.kind = continuing ? .myoMini : .myoActivation
         if set.load == .percent { set.load = .working }
         set.restSeconds = myoRest
-        guard !followedByMini else { return (set, []) }
+        guard !continuing, !followedByMini else { return (set, []) }
         return (set, Array(plans(.myo).dropFirst()))
     }
 }
@@ -94,9 +97,19 @@ public extension TrainingData {
               let variant = variant(activeSession!.exercises[e].variantID) else { throw TrainingError.invalid("Set unavailable.") }
         let item = activeSession!.exercises[e]
         let followed = item.sets.indices.contains(s + 1) && item.sets[s + 1].plan.kind == .myoMini
-        let result = techniqueDefaults(for: item.exerciseID).convert(item.sets[s].plan, to: technique, followedByMini: followed)
+        var converting = item.sets[s].plan
+        // An entered weight belongs to the set, not to the drop percentage.
+        if item.sets[s].weightIsEdited == true || item.sets[s].completedAt != nil, converting.load == .working { converting.weightOverride = item.sets[s].weight }
+        let result = techniqueDefaults(for: item.exerciseID).convert(converting, to: technique, after: s > 0 ? item.sets[s - 1].plan.kind : nil, followedByMini: followed)
         try replaceSetPlan(exerciseID: exerciseID, setID: setID, plan: result.set)
-        if technique == .drop, s > 0 { activeSession!.exercises[e].sets[s - 1].plan.restSeconds = 0 }
+        if technique == .drop {
+            // An activation turned into a drop leaves its pending mini-sets behind.
+            if item.sets[s].plan.kind == .myoActivation {
+                let ids = Set(item.sets.dropFirst(s + 1).prefix { $0.plan.kind == .myoMini && $0.completedAt == nil }.map(\.id))
+                activeSession!.exercises[e].sets.removeAll { ids.contains($0.id) }
+            }
+            if s > 0, item.sets[s - 1].completedAt == nil, item.sets[s - 1].plan.kind != .warmup { activeSession!.exercises[e].sets[s - 1].plan.restSeconds = 0 }
+        }
         var live = variant
         live.workingWeight = activeSession!.exercises[e].sets[s].weight ?? item.workingLoad(fallback: variant.workingWeight)
         live.rounding = item.roundingIncrement ?? variant.rounding
@@ -143,7 +156,7 @@ public extension TrainingData {
             set.plan.kind = .myoMini; set.plan.amrap = false; set.plan.restSeconds = nil
             if item.sets.last?.plan.kind == .myoActivation { set.reps = 5; set.plan.reps = 5; set.plan.repCeiling = nil }
         }
-        if set.plan.repRange != nil || set.plan.reps == nil { set.reps = nil }
+        if set.plan.initialReps == nil { set.reps = nil }
         activeSession!.exercises[e].sets.append(set)
     }
 }
@@ -159,9 +172,13 @@ public extension Variant {
     mutating func convertSet(_ id: UUID, to technique: Technique, defaults: TechniqueDefaults) {
         guard let index = sets.firstIndex(where: { $0.id == id }) else { return }
         let followed = sets.indices.contains(index + 1) && sets[index + 1].kind == .myoMini
-        let result = defaults.convert(sets[index], to: technique, followedByMini: followed)
+        let result = defaults.convert(sets[index], to: technique, after: index > 0 ? sets[index - 1].kind : nil, followedByMini: followed)
+        if technique == .drop, sets[index].kind == .myoActivation {
+            let ids = Set(sets.dropFirst(index + 1).prefix { $0.kind == .myoMini }.map(\.id))
+            sets.removeAll { ids.contains($0.id) }
+        }
         sets[index] = result.set
-        if technique == .drop, index > 0 { sets[index - 1].restSeconds = 0 }
+        if technique == .drop, index > 0, sets[index - 1].kind != .warmup { sets[index - 1].restSeconds = 0 }
         sets.insert(contentsOf: result.following, at: index + 1)
     }
 }

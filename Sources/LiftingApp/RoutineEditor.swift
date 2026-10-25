@@ -57,7 +57,7 @@ struct RoutineEditor: View {
         .toolbar {
             if let routine {
                 ToolbarItem(placement: .primaryAction) {
-                    DayMenu(day: routine, program: store.data.programForDay(routineID), includeEdit: false,
+                    DayMenu(day: routine, program: store.data.programForDay(routineID),
                             onDelete: { dismiss() }, onRename: { name = routine.name; renaming = true },
                             onWarmups: { warmups = true })
                 }

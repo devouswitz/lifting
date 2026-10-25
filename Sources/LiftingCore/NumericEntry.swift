@@ -24,7 +24,7 @@ public struct NumericEntry: Equatable {
         guard signed else { return }
         text = text.hasPrefix("-") ? String(text.dropFirst()) : "-" + (text.isEmpty ? "0" : text)
         if text == "0" { text = "" }
-        replacing = false; changed = true
+        changed = true
     }
     public mutating func select() { replacing = true }
     public mutating func clear() { text = ""; replacing = true; changed = true }
@@ -35,7 +35,7 @@ public struct NumericEntry: Equatable {
     public mutating func insert(_ input: String) {
         let input = input.replacingOccurrences(of: ",", with: ".")
         guard !input.isEmpty, input.allSatisfy({ "0123456789".contains($0) || (!integer && $0 == ".") }) else { return }
-        let negative = !replacing && text.hasPrefix("-")
+        let negative = signed && text.hasPrefix("-")
         var next = replacing ? "" : String(text.drop { $0 == "-" })
         next += input
         guard next.count <= 14, next.filter({ $0 == "." }).count <= 1 else { return }

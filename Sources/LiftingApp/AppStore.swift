@@ -72,6 +72,8 @@ final class AppStore: ObservableObject {
         do {
             try change(&next)
             guard next != data else { return true }
+            // Imported or finished workouts take their body weight from the log.
+            if next.sessions.map(\.id) != data.sessions.map(\.id) { next.refreshSessionBodyWeights() }
             let workoutChanged = next.activeSession != data.activeSession
             if workoutChanged, next.activeSession != nil { next.activeSession?.lastActivityAt = Date() }
             _ = try next.validated()
@@ -107,7 +109,7 @@ final class AppStore: ObservableObject {
     func setHiddenFromProgress(_ exerciseID: UUID, _ hidden: Bool) {
         perform { d in if let i = d.exercises.firstIndex(where: { $0.id == exerciseID }) { d.exercises[i].hiddenFromProgress = hidden ? true : nil } }
     }
-        func skipNext(in programID: UUID) { perform { try $0.skipNextDay(in: programID) } }
+    func skipNext(in programID: UUID) { perform { try $0.skipNextDay(in: programID) } }
 
     func editActive(_ change: (inout Session) -> Void) { perform { d in if var session = d.activeSession { change(&session); d.activeSession = session } } }
     func editExercise(_ id: UUID, _ change: (inout SessionExercise) -> Void) {
@@ -171,12 +173,6 @@ final class AppStore: ObservableObject {
     func pauseWorkout(_ paused: Bool) {
         perform { $0.setWorkoutPaused(paused) }
         if paused { cancelRestAlert() }
-    }
-    func addToWorkout(_ exercise: Exercise) {
-        perform { try $0.addExerciseToSession(exercise.id) }
-    }
-    static func newVariant(_ exercise: Exercise, label: String) -> Variant {
-        Variant.standard(for: exercise, label: label)
     }
     func importBackup(_ next: TrainingData) {
         do {
@@ -279,7 +275,7 @@ func loggedExerciseSummary(_ exercise: SessionExercise, unit: WeightUnit) -> Str
         if let reps = set.reps { parts.append("\(group.count) × \(reps)") }
         else if let range = set.plan.repRange { parts.append("\(group.count) × \(range.lowerBound)–\(range.upperBound)") }
         else if group.count > 1 || (set.seconds == nil && set.meters == nil && set.weight == nil) { parts.append(counted(group.count, "set")) }
-        if let weight = set.weight { parts.append("\(number(unit.display(weight))) \(unit.rawValue)") }
+        if let weight = set.weight, let load = loadText(weight, mode: exercise.mode, unit: unit), load != "BW" { parts.append("\(load) \(unit.rawValue)") }
         if let seconds = set.seconds { parts.append(clockText(seconds)) }
         if let meters = set.meters { parts.append("\(number(meters)) m") }
         if let rpe = set.rpe { parts.append("RPE \(number(rpe))") }
@@ -307,10 +303,14 @@ func loadText(_ kilograms: Double?, mode: ExerciseMode, unit: WeightUnit) -> Str
 
 /// The working load line under an exercise: a weight or range, or the added load for bodyweight work.
 func loadSummary(_ weights: [Double?], mode: ExerciseMode, unit: WeightUnit) -> String? {
-    let values = weights.compactMap { $0 }
+    // A bodyweight set without an entry is bodyweight only.
+    let values = mode == .bodyweight ? weights.map { $0 ?? 0 } : weights.compactMap { $0 }
     switch mode {
     case .cardio: return nil
-    case .strength: return values.isEmpty ? nil : weightSummary(values, unit: unit)
+    case .strength:
+        // An unset working weight resolves to zero; that is unknown, not an empty bar.
+        let known = values.filter { $0 > 0 }
+        return known.isEmpty ? nil : weightSummary(known, unit: unit)
     case .bodyweight:
         guard let low = values.min(), let high = values.max(), abs(low) > 0.00001 || abs(high) > 0.00001 else { return nil }
         let lower = loadText(low, mode: mode, unit: unit) ?? ""

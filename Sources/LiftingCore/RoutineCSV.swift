@@ -119,8 +119,8 @@ public enum RoutineCSV {
             if let existing = slotOrder[dayID]?[exerciseOrder], existing != slot { throw TrainingError.invalid("Conflicting linked exercise settings on row \(r.number).") }
             slotOrder[dayID, default: [:]][exerciseOrder] = slot
             guard let kind = SetKind(rawValue: r.text("set_type", default: "working")), let load = LoadRule(rawValue: r.text("load_rule", default: mode == .strength ? "working" : "none")) else { throw TrainingError.invalid("Invalid set_type or load_rule on row \(r.number).") }
-            var plan = SetPlan(id: try r.uuid("set_id") ?? UUID(), kind: kind, load: load, fixedWeight: try r.double("fixed_weight_kg", default: 0)!, percent: try r.double("percent", default: 50, maximum: 1000)!, reps: try r.int("reps_min"), repCeiling: try r.int("reps_max"), seconds: try r.double("seconds"), meters: try r.double("meters"), rpe: try r.double("rpe", maximum: 10), amrap: try r.bool("amrap"), restSeconds: try r.int("set_rest_seconds"))
-            plan.weightOverride = try r.double("weight_override_kg")
+            var plan = SetPlan(id: try r.uuid("set_id") ?? UUID(), kind: kind, load: load, fixedWeight: try r.double("fixed_weight_kg", default: 0, minimum: -10_000_000)!, percent: try r.double("percent", default: 50, maximum: 1000)!, reps: try r.int("reps_min"), repCeiling: try r.int("reps_max"), seconds: try r.double("seconds"), meters: try r.double("meters"), rpe: try r.double("rpe", maximum: 10), amrap: try r.bool("amrap"), restSeconds: try r.int("set_rest_seconds"))
+            plan.weightOverride = try r.double("weight_override_kg", minimum: -10_000_000)
             var typed = plan
             typed.customTypeID = data.csvSetType(name: r.text("set_type_name"), badge: r.text("set_type_badge"), color: r.text("set_type_color"), countsAs: kind)
             let position = try r.int("set_order", default: (setOrder[variantID]?.keys.max() ?? 0) + 1)!

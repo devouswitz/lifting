@@ -80,13 +80,13 @@ struct NextDayCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .firstTextBaseline) {
-                NavigationLink { DayView(dayID: day.id) } label: {
+                NavigationLink { RoutineEditor(routineID: day.id, showsStart: true) } label: {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(day.name).font(.title2.weight(.bold)).foregroundStyle(.primary)
                         if let index = program.dayIDs.firstIndex(of: day.id) { Text("Day \(index + 1) of \(program.dayIDs.count)").font(.subheadline).foregroundStyle(.secondary) }
                     }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
                 }.buttonStyle(.plain)
-                DayMenu(day: day, program: program, includeEdit: true)
+                DayMenu(day: day, program: program)
             }
             if !day.slots.isEmpty { ExerciseTargets(day: day) }
             StartDayButton(day: day)
@@ -170,7 +170,7 @@ struct DayList: View {
         VStack(spacing: 0) {
             ForEach(Array(days.enumerated()), id: \.element.id) { index, day in
                 HStack(spacing: 8) {
-                    NavigationLink { DayView(dayID: day.id) } label: {
+                    NavigationLink { RoutineEditor(routineID: day.id, showsStart: true) } label: {
                         HStack(spacing: 12) {
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(day.name).font(.headline).foregroundStyle(.primary)
@@ -180,7 +180,7 @@ struct DayList: View {
                             if !showsMenu { Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary) }
                         }.padding(.vertical, 12).contentShape(Rectangle())
                     }.buttonStyle(.plain).accessibilityIdentifier("train.day.\(day.id)")
-                    if showsMenu { DayMenu(day: day, program: program, includeEdit: true) }
+                    if showsMenu { DayMenu(day: day, program: program) }
                 }.padding(.leading, 16).padding(.trailing, showsMenu ? 8 : 16)
                 if index < days.count - 1 { Divider().padding(.leading, 16) }
             }
@@ -188,24 +188,11 @@ struct DayList: View {
     }
 }
 
-/// One day or template: what it prescribes, and the actions that apply to it.
-struct DayView: View {
-    @EnvironmentObject var store: AppStore
-    @Environment(\.palette) var palette
-    @Environment(\.dismiss) var dismiss
-    let dayID: UUID
-    var day: Routine? { store.data.routine(dayID) }
-    var program: TrainingProgram? { store.data.programForDay(dayID) }
-    var body: some View { RoutineEditor(routineID: dayID, showsStart: true) }
-
-}
-
 /// Every action for a day or template, in one menu.
 struct DayMenu: View {
     @EnvironmentObject var store: AppStore
     let day: Routine
     let program: TrainingProgram?
-    var includeEdit: Bool
     var onDelete: (() -> Void)? = nil
     var onRename: (() -> Void)? = nil
     var onWarmups: (() -> Void)? = nil
@@ -219,7 +206,6 @@ struct DayMenu: View {
         Menu {
             if let onRename { Button("Rename Day", systemImage: "pencil", action: onRename) }
             if let onWarmups { Button("Warm-ups for Day", systemImage: "flame", action: onWarmups).disabled(day.slots.isEmpty) }
-            if includeEdit { NavigationLink { RoutineEditor(routineID: day.id) } label: { Label(program == nil ? "Edit Saved Day" : "Edit Day", systemImage: "pencil") } }
             if let program {
                 if isNext {
                     Button("Skip Workout", systemImage: "forward") { skipping = true }.disabled(store.data.activeSession?.routineID == day.id)

@@ -142,11 +142,11 @@ struct TemplateExerciseCard: View {
                 }.accessibilityLabel("\(palette.title(plan)), set \(index + 1), change set type")
                 if plan.load == .percent {
                     Button("\(number(plan.percent))%") { numberEdit = numericEdit(plan.id, field: .percent) }
-                        .font(.caption).frame(minWidth: 44, minHeight: 44)
+                        .font(.caption).frame(minWidth: 44, minHeight: 20)
                         .longPress("Weight settings") { loadEdit = plan }
                 }
             }
-            field(mode == .cardio ? plan.seconds.map(clockText) ?? "Time" : loadText(weight, mode: mode, unit: unit) ?? "–", label: "Set \(index + 1), \(mode == .cardio ? "time" : "weight")") {
+            field(mode == .cardio ? plan.seconds.map(clockText) ?? "Time" : loadText(weight.flatMap { $0 == 0 && plan.load != .fixed && mode != .bodyweight ? nil : $0 }, mode: mode, unit: unit) ?? "–", label: "Set \(index + 1), \(mode == .cardio ? "time" : "weight")") {
                 numberEdit = numericEdit(plan.id, field: mode == .cardio ? .time : .weight)
             }
             .longPress("Weight settings") { loadEdit = plan }

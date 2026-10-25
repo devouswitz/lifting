@@ -36,7 +36,27 @@ public extension TrainingData {
         } else {
             activeSession!.exercises[e].sets[s].completedAt = nil
             restDeadline = nil
+            resumeMyoCluster(exercise: e, set: s)
         }
+    }
+
+    /// Unchecking the mini-set that ended a cluster brings the cluster back to its planned size,
+    /// so a mistyped count can be corrected and logged again.
+    private mutating func resumeMyoCluster(exercise e: Int, set s: Int) {
+        let sets = activeSession!.exercises[e].sets
+        guard sets[s].plan.kind == .myoMini, !(sets.indices.contains(s + 1) && sets[s + 1].plan.kind == .myoMini),
+              let start = sets.prefix(s).lastIndex(where: { $0.plan.kind != .myoMini }), sets[start].plan.kind == .myoActivation else { return }
+        let missing = techniqueDefaults(for: activeSession!.exercises[e].exerciseID).miniCount - (s - start)
+        guard missing > 0 else { return }
+        let rest = sets[start].plan.restSeconds
+        activeSession!.exercises[e].sets[s].plan.restSeconds = rest
+        let added = (0..<missing).map { index -> LoggedSet in
+            var set = sets[s]
+            set.id = UUID(); set.plan.id = UUID(); set.completedAt = nil; set.reps = set.plan.initialReps
+            set.plan.restSeconds = index == missing - 1 ? nil : rest
+            return set
+        }
+        activeSession!.exercises[e].sets.insert(contentsOf: added, at: s + 1)
     }
 
     /// MYO mini-sets continue until one misses its target. The miss ends the cluster: the pending
@@ -75,7 +95,8 @@ public extension TrainingData {
                 variants[v].progression.failures = 0
             } else {
                 // Double progression is successful within its rep range, but does not add weight yet.
-                let failed = sets.contains { !$0.plan.amrap && ($0.reps ?? 0) < ($0.plan.reps ?? 1) }
+                // An AMRAP set fails only when a logged count falls short of its goal.
+                let failed = sets.contains { set in set.plan.amrap ? (set.reps ?? .max) < (set.plan.reps ?? 0) : (set.reps ?? 0) < (set.plan.reps ?? 1) }
                 if failed { variants[v].progression.failures += 1 }
                 else { variants[v].progression.failures = 0 }
                 let limit = variants[v].progression.deloadAfter
