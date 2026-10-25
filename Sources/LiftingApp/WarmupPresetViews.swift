@@ -48,7 +48,6 @@ struct WarmupsSheet: View {
     @State private var loaded = false
     @State private var selected: Set<UUID> = []
     @State private var replacing = true
-    @State private var saveToDay = false
     @State private var presetID: UUID?
     @State private var presetName = ""
     @State private var naming = false
@@ -170,7 +169,6 @@ struct WarmupsSheet: View {
                 Text("Replace warm-ups").tag(true)
                 Text("Add to existing").tag(false)
             }.pickerStyle(.segmented).padding(.top, 4)
-            if isLive { Toggle("Also save to the day", isOn: $saveToDay).padding(.horizontal, 16).padding(.vertical, 10).card(padding: 0) }
             if removable {
                 Button("Remove Warm-ups", role: .destructive, action: removeWarmups).frame(maxWidth: .infinity).padding(.top, 4)
             }
@@ -303,11 +301,11 @@ struct WarmupsSheet: View {
         let plans = rows
         // The menu's one-tap repeat offers exactly what was applied.
         let last = !edited && sourceName != nil ? WarmupPreset(id: presetIDForSource ?? UUID(), name: sourceName!, sets: plans) : WarmupPreset(name: "Last Warm-ups", sets: plans)
-        let ids = selected, replacing = replacing, saveToDay = saveToDay
+        let ids = selected, replacing = replacing
         let live = isLive
         guard store.perform({ data in
             data.settings.lastWarmups = last
-            if live { try data.applyWarmups(plans, toSessionExercises: ids, replacing: replacing, saveFuture: saveToDay) }
+            if live { try data.applyWarmups(plans, toSessionExercises: ids, replacing: replacing) }
             else { try data.applyWarmups(plans, toVariants: ids, replacing: replacing) }
         }) else { return }
         if live {

@@ -325,16 +325,17 @@ private struct NumericDisplay: View {
     let title: String
     var placeholder: String? = nil
     var body: some View {
-        HStack {
-            if entry.allowsSign {
-                Button("±") { entry.press(.sign) }.font(.title2.weight(.medium)).frame(minWidth: 44, minHeight: 44).accessibilityLabel("Change sign")
+        // The value stays centered; the side buttons sit over equal margins instead of pushing it over.
+        Text(entry.text.isEmpty ? placeholder ?? "–" : entry.text).font(.system(size: 44, weight: .semibold, design: .rounded).monospacedDigit())
+            .foregroundStyle(entry.text.isEmpty && placeholder != nil ? .secondary : .primary)
+            .lineLimit(1).minimumScaleFactor(0.5).frame(maxWidth: .infinity, minHeight: 56).padding(.horizontal, 64)
+            .accessibilityLabel("\(title), \(entry.text.isEmpty ? "not set" : entry.text)").accessibilityIdentifier("number.value")
+            .overlay(alignment: .leading) {
+                if entry.allowsSign {
+                    Button("±") { entry.press(.sign) }.font(.title2.weight(.medium)).frame(minWidth: 44, minHeight: 44).accessibilityLabel("Change sign")
+                }
             }
-            Text(entry.text.isEmpty ? placeholder ?? "–" : entry.text).font(.system(size: 44, weight: .semibold, design: .rounded).monospacedDigit())
-                .foregroundStyle(entry.text.isEmpty && placeholder != nil ? .secondary : .primary)
-                .lineLimit(1).minimumScaleFactor(0.5).frame(maxWidth: .infinity, minHeight: 56)
-                .accessibilityLabel("\(title), \(entry.text.isEmpty ? "not set" : entry.text)").accessibilityIdentifier("number.value")
-            Button("Clear") { entry.press(.clear) }.frame(minWidth: 44, minHeight: 44)
-        }
+            .overlay(alignment: .trailing) { Button("Clear") { entry.press(.clear) }.frame(minWidth: 44, minHeight: 44) }
     }
 }
 

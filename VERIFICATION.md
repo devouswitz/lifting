@@ -274,3 +274,12 @@ Observed on the iPhone 17 simulator (iOS 27):
 - In a live workout, holding W1 opened the same trimmed details with 97.5 lb under 50%; Delete Set removed it with no error.
 
 Not verified: a physical iPhone, VoiceOver, accessibility text sizes, iPad, and scrolling that starts on the Warm-up label.
+
+## Build 12 (October 25, 2026)
+
+111 core test cases, zero failures.
+
+- The live Warm-ups sheet no longer has "Also save to the day". It did save to the day, but nothing on screen showed it, and Save Changes to Plan in the exercise menu already copies the live sets, warm-ups included, back to the day.
+- Keypads center their value. The Clear button (and ± on signed values) shared the value's row and pushed it left; they now sit over equal side margins. Observed on the iPhone 17 simulator: the Percent of Working Set keypad shows 50 centered.
+
+Not verified: a physical iPhone.
