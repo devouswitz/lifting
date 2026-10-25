@@ -87,13 +87,10 @@ struct LiveSetRow: View {
         }
     }
     func cell(title: String, value: String?, field: SetField, labeled: Bool = false, placeholder: String? = nil) -> some View {
-        Button { open(field) } label: {
-            VStack(spacing: 3) {
-                if labeled { Text(title).font(.caption2).foregroundStyle(.secondary) }
-                Text(value ?? placeholder ?? "–").font(labeled ? .title3.monospacedDigit() : .figure(17)).foregroundStyle(value == nil || (field == .weight && self.set?.weightIsEdited != true && self.set?.completedAt == nil) ? .secondary : .primary).lineLimit(1).minimumScaleFactor(0.7)
-            }.frame(maxWidth: .infinity, minHeight: 44).background(self.set?.completedAt == nil ? palette.field : Color.clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        }.buttonStyle(.plain)
-        .accessibilityLabel("Set \(index + 1), \(title), \(value ?? "not set")\(placeholder.map { ", target \($0)" } ?? "")").accessibilityIdentifier("workout.\(exerciseID).\(setID).\(field.rawValue)")
+        let set = self.set
+        return SetValueCell(title: title, value: value ?? placeholder ?? "–", labeled: labeled, filled: set?.completedAt == nil,
+                            dimmed: value == nil || (field == .weight && set?.weightIsEdited != true && set?.completedAt == nil)) { open(field) }
+            .accessibilityLabel("Set \(index + 1), \(title), \(value ?? "not set")\(placeholder.map { ", target \($0)" } ?? "")").accessibilityIdentifier("workout.\(exerciseID).\(setID).\(field.rawValue)")
     }
     func previousValue(_ set: LoggedSet, mode: ExerciseMode) -> String {
         let unit = store.data.settings.unit
