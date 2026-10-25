@@ -208,12 +208,14 @@ struct Chip: View {
 struct ChipStyle: ButtonStyle {
     let selected: Bool
     var role: ColorRole = .action
+    /// Inside a card, unselected chips take the field color so they stand off the card.
+    var onCard = false
     @Environment(\.palette) var palette
     func makeBody(configuration: Configuration) -> some View {
         configuration.label.font(.subheadline.weight(selected ? .semibold : .regular)).lineLimit(1)
             .foregroundStyle(selected ? palette.color(role) : Color.primary)
             .padding(.horizontal, 14).frame(minHeight: 36)
-            .background(selected ? palette.wash(role) : palette.card, in: Capsule())
+            .background(selected ? palette.wash(role) : onCard ? palette.field : palette.card, in: Capsule())
             .overlay { if selected { Capsule().strokeBorder(palette.color(role), lineWidth: 1.5) } }
             .opacity(configuration.isPressed ? 0.6 : 1).contentShape(Capsule())
     }

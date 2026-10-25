@@ -2252,4 +2252,39 @@ final class TrainingTests: XCTestCase {
         data.moveSessionExercise(items[0].id, relativeTo: items[1].id, after: true)
         XCTAssertEqual(data.activeSession!.exercises.prefix(3).map(\.id), [items[1].id, items[2].id, items[0].id])
     }
+
+    func testProgressAnalytics() throws {
+        // A deload at 60% stays off the trend; a normal dip does not.
+        let day = Date(timeIntervalSince1970: 0)
+        let tops = [100.0, 105, 110, 66, 110, 100].enumerated().map { TopSet(sessionID: UUID(), date: day.addingTimeInterval(Double($0.offset) * 86_400), weight: $0.element, reps: 5) }
+        XCTAssertEqual(TrainingData.lightSessions(tops), [tops[3].sessionID])
+
+        // Rep records: the heaviest weight for at least each rep count, only up to the most reps logged.
+        var data = TrainingData.starter()
+        data.settings.autoOrder = false
+        let start = Date(timeIntervalSince1970: 1_000_000)
+        try data.start(routineID: data.routines[0].id, now: start)
+        let item = data.activeSession!.exercises[0]
+        let work = item.sets.indices.filter { item.sets[$0].plan.kind != .warmup }
+        for (n, (weight, reps)) in zip(work, [(100.0, 3), (90.0, 6), (80.0, 9)]) {
+            data.activeSession!.exercises[0].sets[n].weight = weight
+            data.activeSession!.exercises[0].sets[n].reps = reps
+            try data.toggleSet(exerciseID: item.id, setID: item.sets[n].id, now: start)
+        }
+        try data.finish(now: start.addingTimeInterval(3600))
+        let records = data.repRecords(exerciseID: item.exerciseID)
+        XCTAssertEqual(records.map(\.reps), [3, 5, 8])
+        XCTAssertEqual(records.map(\.weight), [100, 90, 80])
+        XCTAssertEqual(data.topSets(exerciseID: item.exerciseID).map(\.weight), [100])
+
+        // Weekly volume keeps empty weeks and adds up to the muscle totals.
+        let weeks = data.volumeBuckets(since: start.addingTimeInterval(-14 * 86_400), until: start.addingTimeInterval(7 * 86_400), monthly: false)
+        XCTAssertTrue(weeks.count >= 3)
+        XCTAssertEqual(weeks.reduce(0) { $0 + $1.volume }, 100 * 3 + 90 * 6 + 80 * 9, accuracy: 0.001)
+        XCTAssertTrue(weeks.contains { $0.volume == 0 })
+
+        // The body-weight trend averages the week up to each weigh-in.
+        data.bodyWeights = [80, 82, 81].enumerated().map { BodyWeightEntry(date: start.addingTimeInterval(Double($0.offset) * 86_400), kilograms: $0.element) }
+        XCTAssertEqual(data.bodyWeightTrend().map(\.average), [80, 81, 81])
+    }
 }

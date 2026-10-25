@@ -176,6 +176,14 @@ public extension TrainingData {
         for (routine, max) in [(press, 110.0), (pullDay, 335), (bench, 195), (squat, 275)] {
             if let id = routine.slots.first?.variantID, let v = data.variants.firstIndex(where: { $0.id == id }) { data.variants[v].workingWeight = lb(max) }
         }
+        // Morning weigh-ins most days, drifting from 184 to 181 lb with day-to-day noise. Added after the
+        // workouts so the logged bodyweight loads stay as they were.
+        data.bodyWeights = (0..<112).compactMap { daysAgo -> BodyWeightEntry? in
+            guard daysAgo % 7 != 3, daysAgo % 11 != 5, let date = calendar.date(byAdding: .day, value: -daysAgo, to: today)?.addingTimeInterval(7 * 3600) else { return nil }
+            let trend = 181.2 + 2.8 * Double(daysAgo) / 111
+            let noise = sin(Double(daysAgo) * 1.7) * 0.7 + cos(Double(daysAgo) * 0.6) * 0.4
+            return BodyWeightEntry(date: date, kilograms: lb(((trend + noise) * 10).rounded() / 10))
+        }.reversed()
         return data
     }
 }

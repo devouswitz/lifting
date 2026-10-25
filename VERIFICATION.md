@@ -283,3 +283,16 @@ Not verified: a physical iPhone, VoiceOver, accessibility text sizes, iPad, and 
 - Keypads center their value. The Clear button (and ± on signed values) shared the value's row and pushed it left; they now sit over equal side margins. Observed on the iPhone 17 simulator: the Percent of Working Set keypad shows 50 centered.
 
 Not verified: a physical iPhone.
+
+## Build 13 (October 25, 2026)
+
+112 core test cases, zero failures. The new case covers light-day detection (a 60% deload is flagged, a normal dip is not), rep records (only counts that add information), weekly volume buckets (empty weeks kept, totals match the muscle summary), and the 7-day body-weight average.
+
+The Progress redesign, kept in the existing layout. Observed on the iPhone 17 simulator (iOS 27) with showcase data, which now includes 16 weeks of weigh-ins:
+- Exercises: "4 of 6 lifts" charts Leg curl, Squat, Bench press, and Overhead press, with Calf raise and Leg press available but off. End labels 265, 190, 110, and 100 sit at their lines, the close pair nudged apart. Tapping Leg curl in the legend hid it and left the other three colors unchanged. Bench and Squat 5/3/1 deload sessions show as hollow rings off their lines.
+- Records: Deadlift reads "195 lb × 5, Best 305 lb × 3"; current records read "★ Record" instead of repeating the number.
+- Bench press detail: the Bench track's two 110 lb deloads are off the line, and Latest/Best/Change read 180/180/+25 (previously 110/180/−45). Volume shows vertical bars with the light days faded. Rep records show only counts that add information.
+- Muscles: average sets a week as rows with the previous period's mark (1M: Legs 27.8, before 23.8). The first attempt compared against a period that was mostly before the showcase history began and read "before 6.5"; previous periods now count only weeks with history and are dropped under two weeks. Volume opens on the last full week (116k lb, up 15%), with a 69k weekly average that leaves out the week in progress; an earlier attempt opened on today's empty week and read "0 lb, down 100%".
+- Body Weight: 181.6 lb, 7-day average 181.4 lb, down 0.2 lb a week, with weigh-ins and the average line for 1M and All.
+
+Not verified: a physical iPhone, dark mode on device, VoiceOver, accessibility text sizes, and iPad.
