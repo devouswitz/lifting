@@ -246,7 +246,7 @@ Not verified: a physical iPhone, VoiceOver, accessibility text sizes, and iPad.
 
 ## Build 10 (October 25, 2026)
 
-110 core test cases, zero failures.
+111 core test cases, zero failures.
 
 Observed on the iPhone 17 simulator (iOS 27) through real touch paths:
 - Scrolling: in the Push day editor, a swipe that started on a collapsed exercise header did not scroll, while one that started on a set row did. With the header's hold-to-drag turned off, the same swipe scrolled, so the cause was SwiftUI's LongPressGesture inside a scroll view (making it simultaneous, or delaying the drag, did not help). On iOS 18 and later the hold now uses UIKit's long press recognizer, which runs alongside scrolling; scrolling pauses only while a row is lifted. After the change: header swipes scroll, a header hold-and-drag moved Incline dumbbell press below Cable lateral raise and back without the page moving, a header tap still expands, a badge drag moved a warm-up into the working sets and back, and holding a badge without moving opened Set Details with no type menu.
@@ -254,5 +254,6 @@ Observed on the iPhone 17 simulator (iOS 27) through real touch paths:
 - Workout menu: Cancel Workout opens "Cancel this workout?" with Discard Workout and Keep Workout.
 - Warm-ups: after applying Standard to Bench press from Apply Warm-up Preset, Overhead press's menu offered Apply Standard: 50%, 70%, 85%, and one tap took it from 3 sets to 6.
 - Plan Settings names the off state None instead of Manual.
+- Supersets move as a block. Found during testing: dragging Incline dumbbell press between Cable lateral raise and Triceps pressdown split their superset. Now a drag on either member lifts both, a drop on a member lands before or after the whole group, Move Up and Move Down step past a group, and members that drifted apart are gathered when the group moves; a new core test covers each case for days and the live workout. Observed: the same drag now put Incline press after the pair, and dragging Cable lateral raise to the top carried Triceps pressdown with it.
 
 Not verified: a physical iPhone (scrolling and drag feel), VoiceOver, accessibility text sizes, iPad, and the iOS 17 fallback path.

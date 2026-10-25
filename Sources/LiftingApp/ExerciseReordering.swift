@@ -20,6 +20,8 @@ struct Reordering {
     let space: String
     @Binding var lifted: LiftedRow?
     let rows: RowFrames
+    /// A row and the rows linked to it, in order. Linked rows lift together and are dropped around, never between.
+    var linked: (UUID) -> [UUID] = { [$0] }
     let place: (_ source: UUID, _ target: UUID, _ after: Bool) -> Void
 
     /// For a card shown alone, with nothing to reorder against.
@@ -27,8 +29,11 @@ struct Reordering {
 
     /// The row under the finger, and whether the lifted row goes after it.
     func target(for lifted: LiftedRow) -> (id: UUID, after: Bool)? {
-        guard let hit = rows.frames.first(where: { $0.key != lifted.id && ($0.value.minY...$0.value.maxY).contains(lifted.location.y) }) else { return nil }
-        return (hit.key, lifted.location.y > hit.value.midY)
+        let moving = linked(lifted.id)
+        guard let hit = rows.frames.first(where: { !moving.contains($0.key) && ($0.value.minY...$0.value.maxY).contains(lifted.location.y) }) else { return nil }
+        let after = lifted.location.y > hit.value.midY
+        let group = linked(hit.key)
+        return ((after ? group.last : group.first) ?? hit.key, after)
     }
 }
 
@@ -69,7 +74,7 @@ private struct ReorderRow: ViewModifier {
     let reordering: Reordering
     func body(content: Content) -> some View {
         let lifted = reordering.lifted
-        let isLifted = lifted?.id == id
+        let isLifted = lifted.map { reordering.linked($0.id).contains(id) } ?? false
         let target = lifted.flatMap { reordering.target(for: $0) }
         content
             .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(reordering.space)) } action: { reordering.rows.frames[id] = $0 }

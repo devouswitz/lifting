@@ -96,7 +96,11 @@ struct WorkoutView: View {
         }
     }
     private var reordering: Reordering {
-        Reordering(space: "workout", lifted: $lifted, rows: rows) { source, target, after in
+        let exercises = store.data.activeSession?.exercises ?? []
+        return Reordering(space: "workout", lifted: $lifted, rows: rows, linked: { id in
+            guard let group = exercises.first(where: { $0.id == id })?.group, !group.isEmpty else { return [id] }
+            return exercises.filter { $0.group == group }.map(\.id)
+        }) { source, target, after in
             store.perform { $0.moveSessionExercise(source, relativeTo: target, after: after) }
         }
     }

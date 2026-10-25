@@ -84,10 +84,6 @@ public extension TrainingData {
         }
     }
 
-    mutating func moveSessionExercise(_ exerciseID: UUID, offset: Int) {
-        guard let index = activeSession?.exercises.firstIndex(where: { $0.id == exerciseID }), activeSession!.exercises.indices.contains(index + offset) else { return }
-        activeSession!.exercises.swapAt(index, index + offset)
-    }
 }
 
 public extension Variant {

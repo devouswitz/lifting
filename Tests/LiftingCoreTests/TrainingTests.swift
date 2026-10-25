@@ -2218,4 +2218,38 @@ final class TrainingTests: XCTestCase {
         try data.toggleSet(exerciseID: last.id, setID: last.sets[0].id)
         XCTAssertEqual(data.activeSession!.exercises.map(\.id), ids)
     }
+
+    func testSupersetsMoveAsOneBlock() throws {
+        var data = TrainingData.starter()
+        let day = data.routines[0].id
+        let variant = data.routines[0].slots[0].variantID
+        let a = RoutineSlot(variantID: variant), b = RoutineSlot(variantID: variant, group: "g"), c = RoutineSlot(variantID: variant, group: "g"), d = RoutineSlot(variantID: variant)
+        let order = { data.routines[0].slots.map(\.id) }
+        data.routines[0].slots = [a, b, c, d]
+        // Dragging one member carries its partner.
+        data.moveSlot(b.id, routineID: day, relativeTo: d.id, after: true)
+        XCTAssertEqual(order(), [a.id, d.id, b.id, c.id])
+        // A drop on a member lands outside the group, never between its members.
+        data.moveSlot(a.id, routineID: day, relativeTo: c.id, after: false)
+        XCTAssertEqual(order(), [d.id, a.id, b.id, c.id])
+        data.moveSlot(d.id, routineID: day, relativeTo: b.id, after: true)
+        XCTAssertEqual(order(), [a.id, b.id, c.id, d.id])
+        // Move Up and Move Down step past a whole group.
+        data.moveSlot(d.id, routineID: day, offset: -1)
+        XCTAssertEqual(order(), [a.id, d.id, b.id, c.id])
+        data.moveSlot(c.id, routineID: day, offset: -1)
+        XCTAssertEqual(order(), [a.id, b.id, c.id, d.id])
+        // Members that drifted apart are gathered when the group moves.
+        data.routines[0].slots = [b, a, c, d]
+        data.moveSlot(b.id, routineID: day, relativeTo: d.id, after: true)
+        XCTAssertEqual(order(), [a.id, d.id, b.id, c.id])
+        // The live workout follows the same rule.
+        try data.start(routineID: data.routines[1].id)
+        var items = data.activeSession!.exercises
+        XCTAssertTrue(items.count >= 3)
+        data.activeSession!.exercises[1].group = "g"; data.activeSession!.exercises[2].group = "g"
+        items = data.activeSession!.exercises
+        data.moveSessionExercise(items[0].id, relativeTo: items[1].id, after: true)
+        XCTAssertEqual(data.activeSession!.exercises.prefix(3).map(\.id), [items[1].id, items[2].id, items[0].id])
+    }
 }

@@ -68,13 +68,12 @@ struct RoutineEditor: View {
     }
 
     private var reordering: Reordering {
-        Reordering(space: "day", lifted: $lifted, rows: rows) { source, target, after in
-            update { day in
-                guard let from = day.slots.firstIndex(where: { $0.id == source }) else { return }
-                let item = day.slots.remove(at: from)
-                guard let to = day.slots.firstIndex(where: { $0.id == target }) else { day.slots.insert(item, at: from); return }
-                day.slots.insert(item, at: to + (after ? 1 : 0))
-            }
+        let slots = routine?.slots ?? []
+        return Reordering(space: "day", lifted: $lifted, rows: rows, linked: { id in
+            guard let group = slots.first(where: { $0.id == id })?.group, !group.isEmpty else { return [id] }
+            return slots.filter { $0.group == group }.map(\.id)
+        }) { source, target, after in
+            store.perform { $0.moveSlot(source, routineID: routineID, relativeTo: target, after: after) }
         }
     }
     private func groupTitle(_ slot: RoutineSlot, in routine: Routine) -> String? {
@@ -89,12 +88,7 @@ struct RoutineEditor: View {
             change(&data.routines[index])
         }
     }
-    private func move(_ id: UUID, by offset: Int) {
-        update { day in
-            guard let index = day.slots.firstIndex(where: { $0.id == id }), day.slots.indices.contains(index + offset) else { return }
-            day.slots.swapAt(index, index + offset)
-        }
-    }
+    private func move(_ id: UUID, by offset: Int) { store.perform { $0.moveSlot(id, routineID: routineID, offset: offset) } }
 }
 
 struct ExercisePicker: View {
