@@ -88,6 +88,27 @@ public extension TrainingData {
         return buckets
     }
 
+    /// Cardio time in seconds, or distance in meters, per week (or month), from completed sets of cardio
+    /// exercises. Empty periods are kept so gaps show. `exerciseID` limits it to one exercise.
+    func cardioBuckets(programID: UUID? = nil, since: Date, until: Date = .now, exerciseID: UUID? = nil, distance: Bool, monthly: Bool, calendar: Calendar = .current) -> [VolumeBucket] {
+        let cardio = sessions(inProgram: programID).filter { $0.skipped != true }.map { session in
+            (date: session.startedAt, amount: session.exercises.filter { $0.mode == .cardio && (exerciseID == nil || $0.exerciseID == exerciseID) }
+                .flatMap(\.sets).filter { $0.completedAt != nil && $0.plan.kind != .warmup }
+                .reduce(0.0) { $0 + ((distance ? $1.meters : $1.seconds) ?? 0) })
+        }.filter { $0.amount > 0 }
+        let first = since == .distantPast ? cardio.map(\.date).min() ?? until : since
+        let unit: Calendar.Component = monthly ? .month : .weekOfYear
+        guard var start = calendar.dateInterval(of: unit, for: first)?.start else { return [] }
+        var buckets: [VolumeBucket] = []
+        while start < until, buckets.count < 520 {
+            guard let end = calendar.date(byAdding: unit, value: 1, to: start) else { break }
+            let amount = cardio.filter { $0.date >= max(start, since) && $0.date < min(end, until) }.reduce(0) { $0 + $1.amount }
+            buckets.append(VolumeBucket(start: start, volume: amount))
+            start = end
+        }
+        return buckets
+    }
+
     /// The seven-day average at each weigh-in from `since`, so one heavy morning doesn't swing the trend.
     func bodyWeightTrend(since: Date = .distantPast) -> [BodyWeightTrend] {
         let entries = bodyWeights.sorted { $0.date < $1.date }

@@ -30,6 +30,11 @@ struct SettingsView: View {
                 LabeledContent {
                     Picker("Weight unit", selection: setting(\.unit)) { ForEach(WeightUnit.allCases) { Text($0.rawValue).tag($0) } }.pickerStyle(.segmented).labelsHidden().frame(width: 110)
                 } label: { TileLabel(title: "Weight Unit", symbol: "scalemass.fill", color: .gray) }
+                LabeledContent {
+                    Picker("Distance unit", selection: Binding(get: { store.data.settings.distance }, set: { value in store.perform { $0.settings.distanceUnit = value } })) {
+                        ForEach(DistanceUnit.allCases) { Text($0.rawValue).tag($0) }
+                    }.pickerStyle(.segmented).labelsHidden().frame(width: 110)
+                } label: { TileLabel(title: "Distance Unit", symbol: "figure.run", color: palette.rest) }
                 Picker(selection: setting(\.theme)) { Text("System").tag("system"); Text("Light").tag("light"); Text("Dark").tag("dark") } label: { TileLabel(title: "Appearance", symbol: "circle.lefthalf.filled", color: .indigo) }
                 NavigationLink { ColorSettingsView() } label: { HStack { TileLabel(title: "Colors", symbol: "paintpalette.fill", color: palette.technique); Spacer(); ColorSwatches() } }.accessibilityIdentifier("settings.colors")
             }

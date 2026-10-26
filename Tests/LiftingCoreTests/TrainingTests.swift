@@ -1589,7 +1589,15 @@ final class TrainingTests: XCTestCase {
         XCTAssertEqual(data.activeProgram?.nextDayID.flatMap(data.routine)?.name, "Push")
         XCTAssertGreaterThan(data.sessions.count, 60)
         XCTAssertEqual(data.sessions.filter { $0.skipped == true }.count, 1)
-        XCTAssertEqual(data.programs.count, 2); XCTAssertEqual(data.dayTemplates.map(\.name), ["Arms", "Conditioning"])
+        XCTAssertEqual(data.programs.count, 2); XCTAssertEqual(data.dayTemplates.map(\.name), ["Arms", "Conditioning", "Easy run"])
+        // Cardio history: pace in seconds per km, getting quicker over the weeks.
+        let run = data.exercises.first { $0.name == "Run" }!
+        let pace = data.points(exerciseID: run.id, metric: .pace)
+        XCTAssertGreaterThan(pace.count, 10)
+        XCTAssertLessThan(pace.last!.value, pace.first!.value)
+        let kilometers = data.cardioBuckets(since: .distantPast, until: Date(timeIntervalSince1970: 1_792_300_000), exerciseID: run.id, distance: true, monthly: false).reduce(0) { $0 + $1.volume } / 1000
+        let logged = data.sessions.flatMap(\.exercises).filter { $0.exerciseID == run.id }.flatMap(\.sets).compactMap(\.meters).reduce(0, +) / 1000
+        XCTAssertEqual(kilometers, logged, accuracy: 0.001)
         XCTAssertTrue(data.sessions.flatMap(\.exercises).flatMap(\.sets).contains { $0.plan.customTypeID != nil && $0.completedAt != nil })
         let bench = data.exercises.first { $0.name == "Bench press" }!
         XCTAssertGreaterThan(data.points(exerciseID: bench.id, metric: .weight).count, 15)

@@ -325,7 +325,7 @@ private enum HistorySetColumn: CaseIterable, Identifiable, Hashable {
         case .weight: return mode == .bodyweight ? "+\(unit.rawValue)" : unit.rawValue
         case .reps: return "Reps"
         case .time: return "Time"
-        case .distance: return "Meters"
+        case .distance: return DistanceDisplay.unit.rawValue
         case .rpe: return "RPE"
         }
     }
@@ -334,7 +334,7 @@ private enum HistorySetColumn: CaseIterable, Identifiable, Hashable {
         case .weight: return set.weight == nil && mode == .bodyweight ? nil : loadText(set.weight, mode: mode, unit: unit)
         case .reps: return set.reps.map(String.init) ?? (set.plan.repRange != nil || set.plan.amrap ? set.plan.repTarget.map(displayTarget) : nil)
         case .time: return set.seconds.map(clockText)
-        case .distance: return set.meters.map { number($0) }
+        case .distance: return set.meters.map { number(DistanceDisplay.value($0), decimals: 2) }
         case .rpe: return set.rpe.map { number($0) }
         }
     }
@@ -350,7 +350,7 @@ struct LoggedSetEditor: View {
             NumberRow("Weight (\(unit.rawValue))", value: $set.weight, factor: unit.kilograms(1))
             NumberRow("Reps", value: Binding(get: { set.reps.map(Double.init) }, set: { set.reps = $0.map(Int.init) }), integer: true)
             DurationRow(title: "Time", seconds: $set.seconds)
-            NumberRow("Distance (meters)", value: $set.meters)
+            NumberRow("Distance (\(DistanceDisplay.unit.rawValue))", value: $set.meters, factor: DistanceDisplay.unit.meters)
             NumberRow("RPE", value: $set.rpe)
         }.formStyle(.grouped).navigationTitle("Edit set").inlineTitle()
     }

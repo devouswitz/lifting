@@ -214,11 +214,16 @@ public extension TrainingData {
             case .reps: values = sets.compactMap { $0.reps.map(Double.init) }
             case .duration: values = sets.compactMap { $0.seconds.map { $0 / 60 } }
             case .distance: values = sets.compactMap { $0.meters.map { $0 / 1000 } }
+            // Seconds per kilometer over the sets that logged both time and distance.
+            case .pace:
+                let timed = sets.filter { ($0.seconds ?? 0) > 0 && ($0.meters ?? 0) > 0 }
+                let meters = timed.reduce(0) { $0 + ($1.meters ?? 0) }
+                values = meters > 0 ? [timed.reduce(0) { $0 + ($1.seconds ?? 0) } / meters * 1000] : []
             case .rpe: values = sets.compactMap(\.rpe)
             }
             guard !values.isEmpty else { return nil }
             let sum: Bool = [.volume, .reps, .duration, .distance].contains(metric)
-            let value = sum ? values.reduce(0, +) : metric == .rpe ? values.reduce(0, +) / Double(values.count) : values.max()!
+            let value = sum ? values.reduce(0, +) : metric == .rpe || metric == .pace ? values.reduce(0, +) / Double(values.count) : values.max()!
             return ProgressPoint(id: session.id, date: session.startedAt, value: value)
         }
     }

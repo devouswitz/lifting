@@ -401,7 +401,7 @@ struct WorkoutExerciseCard: View {
                     if columns.weight { Text(item.mode == .bodyweight ? "+\(unit)" : unit).frame(maxWidth: .infinity) }
                     if columns.reps { Text("Reps").frame(maxWidth: .infinity) }
                     if columns.time { Text("Time").frame(maxWidth: .infinity) }
-                    if columns.distance { Text("Meters").frame(maxWidth: .infinity) }
+                    if columns.distance { Text(DistanceDisplay.unit.rawValue).frame(maxWidth: .infinity) }
                     Text("RPE").frame(maxWidth: columns.hasMeasurements ? 44 : .infinity)
                     Color.clear.frame(width: 40, height: 1)
                 }.font(.caption.weight(.medium)).foregroundStyle(.secondary).padding(.horizontal, 2)

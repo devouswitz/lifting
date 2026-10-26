@@ -33,7 +33,7 @@ struct ProgressView: View {
                         HStack {
                             liftMenu(lifts, history: history)
                             Spacer(minLength: 8)
-                            ProgressMetricPicker(metric: $metric, metrics: Metric.allCases)
+                            ProgressMetricPicker(metric: $metric, metrics: ProgressHistory.metrics(for: .strength))
                         }
                     }
                     ProgressRangePicker(range: $range)
@@ -43,6 +43,7 @@ struct ProgressView: View {
                                           emptyText: lifts.isEmpty ? "Choose lifts to chart from the menu above." : "Turn on a lift below to chart it.")
                         liftLegend(lifts, showsLightDays: tracks.contains { track in track.points.contains { track.light.contains($0.id) } })
                     case .muscles: MuscleAnalyticsView(programID: selectedProgramID, since: range.since, days: range.rawValue)
+                    case .cardio: CardioProgressView(programID: selectedProgramID, since: range.since, days: range.rawValue)
                     case .body: BodyWeightView(since: range.since)
                     }
                 }
@@ -281,7 +282,7 @@ struct ExerciseProgress: View {
                         Text(progressUnit(metric, weightUnit: store.data.settings.unit)).font(.subheadline).foregroundStyle(.secondary)
                     }
                     ProgressRangePicker(range: $range)
-                    ProgressLineChart(tracks: tracks, metric: metric, unit: store.data.settings.unit, height: 260, barsForVolume: true)
+                    ProgressLineChart(tracks: tracks, metric: metric, unit: store.data.settings.unit, height: 260, barMetrics: [.volume, .duration, .distance])
                     if !tracks.isEmpty {
                         Divider()
                         ProgressStatistics(tracks: tracks, metric: metric, unit: store.data.settings.unit)
@@ -315,7 +316,7 @@ struct ExerciseProgress: View {
             guard !initialized else { return }
             initialized = true
             if let exercise {
-                metric = history.preferredMetric(for: exercise, variantID: selectedVariant, preferred: exercise.mode == .cardio ? .duration : .weight)
+                metric = history.preferredMetric(for: exercise, variantID: selectedVariant, preferred: exercise.mode == .cardio ? .distance : .weight)
             }
             validateTrack()
         }
@@ -465,7 +466,7 @@ private enum ProgressRange: Int, CaseIterable, Identifiable {
 }
 
 private enum ProgressMode: String, CaseIterable, Identifiable {
-    case exercises = "Exercises", muscles = "Muscles", body = "Body Weight"
+    case exercises = "Exercises", muscles = "Muscles", cardio = "Cardio", body = "Body Weight"
     var id: Self { self }
 }
 
@@ -525,11 +526,11 @@ private struct ProgressLineChart: View {
     var showsLegend = true
     /// Labels each line's latest value at its end, for up to four lines.
     var labelsLineEnds = false
-    /// Volume reads as bars: an amount per session rather than a level that carries over.
-    var barsForVolume = false
+    /// Metrics drawn as bars: amounts per session (volume, time, distance) rather than levels that carry over.
+    var barMetrics: Set<Metric> = []
     var emptyText = "No logged values in this range."
     @State private var selectedDate: Date?
-    private var bars: Bool { barsForVolume && metric == .volume }
+    private var bars: Bool { barMetrics.contains(metric) }
     private var endLabels: Bool { labelsLineEnds && !bars && tracks.count <= 4 }
 
     private var data: [ProgressChartDatum] { tracks.flatMap(\.data) }
@@ -637,7 +638,7 @@ private struct ProgressLineChart: View {
         .chartForegroundStyleScale(domain: domain, range: colors)
         .chartLegend(.hidden)
         .chartXScale(domain: dateDomain)
-        .chartYScale(domain: valueDomain)
+        .chartYScale(domain: metric.lowerIsBetter ? [valueDomain.upperBound, valueDomain.lowerBound] : [valueDomain.lowerBound, valueDomain.upperBound])
         .chartXAxis {
             AxisMarks(values: .automatic(desiredCount: 4)) {
                 AxisGridLine().foregroundStyle(.primary.opacity(0.06))
@@ -646,9 +647,9 @@ private struct ProgressLineChart: View {
             }
         }
         .chartYAxis {
-            AxisMarks(position: .leading, values: .automatic(desiredCount: 5)) {
+            AxisMarks(position: .leading, values: .automatic(desiredCount: 5)) { mark in
                 AxisGridLine().foregroundStyle(.primary.opacity(0.1))
-                AxisValueLabel(format: FloatingPointFormatStyle<Double>.number.precision(.fractionLength(0...1)))
+                AxisValueLabel { if let value = mark.as(Double.self) { Text(metric == .pace ? clockText(value) : number(value)) } }
             }
         }
         .chartYAxisLabel(progressUnit(metric, weightUnit: unit), position: .topLeading)
@@ -742,7 +743,7 @@ private struct ProgressStatistics: View {
         if tracks.count == 1, let track = tracks.first {
             HStack(alignment: .top, spacing: 12) {
                 stat("Latest", value: track.regularPoints.last?.value ?? 0)
-                stat(metric == .rpe ? "Peak" : "Best", value: track.regularPoints.map(\.value).max() ?? 0, color: palette.best)
+                stat(metric == .rpe ? "Peak" : "Best", value: best(track), color: palette.best)
                 stat("Change", value: change(track), signed: true)
             }
         } else {
@@ -757,9 +758,9 @@ private struct ProgressStatistics: View {
                 ForEach(tracks) { track in
                     GridRow(alignment: .firstTextBaseline) {
                         Text(track.shortLabel).font(.caption.weight(.medium))
-                        Text(number(track.regularPoints.last?.value ?? 0))
-                        Text(number(track.regularPoints.map(\.value).max() ?? 0)).foregroundStyle(palette.best)
-                        Text(signedNumber(change(track)))
+                        Text(format(track.regularPoints.last?.value ?? 0))
+                        Text(format(best(track))).foregroundStyle(palette.best)
+                        Text(format(change(track), signed: true))
                     }
                     .font(.subheadline).monospacedDigit()
                 }
@@ -770,9 +771,22 @@ private struct ProgressStatistics: View {
 
     /// Light days are left out, so a deload is never the latest result or the change.
     private func change(_ track: ProgressTrack) -> Double { (track.regularPoints.last?.value ?? 0) - (track.regularPoints.first?.value ?? 0) }
+    private func best(_ track: ProgressTrack) -> Double {
+        let values = track.regularPoints.map(\.value)
+        return (metric.lowerIsBetter ? values.min() : values.max()) ?? 0
+    }
+    /// Pace reads as m:ss, a faster change shown with a minus sign.
+    private func format(_ value: Double, signed: Bool = false) -> String {
+        guard metric == .pace else {
+            let decimals = metric == .distance ? 2 : 1
+            return signed && value > 0 ? "+\(number(value, decimals: decimals))" : number(value, decimals: decimals)
+        }
+        let text = clockText(abs(value))
+        return signed ? (value > 0 ? "+\(text)" : value < 0 ? "−\(text)" : text) : text
+    }
     private func stat(_ title: String, value: Double, signed: Bool = false, color: Color = .primary) -> some View {
         VStack(alignment: .leading, spacing: 5) {
-            Text(signed ? signedNumber(value) : number(value)).font(.title3.weight(.semibold)).monospacedDigit().foregroundStyle(color)
+            Text(format(value, signed: signed)).font(.title3.weight(.semibold)).monospacedDigit().foregroundStyle(color)
                 .minimumScaleFactor(0.75).lineLimit(1)
             Text(title).font(.caption).foregroundStyle(.secondary)
         }
@@ -875,7 +889,7 @@ private struct ProgressHistory {
     }
 
     static func metrics(for mode: ExerciseMode) -> [Metric] {
-        mode == .cardio ? [.duration, .distance, .rpe] : [.weight, .volume, .estimatedMax, .reps, .duration, .distance, .rpe]
+        mode == .cardio ? [.duration, .distance, .pace, .rpe] : [.weight, .volume, .estimatedMax, .reps, .duration, .distance, .rpe]
     }
 
     func trackLabel(_ id: UUID, fallback: String) -> String {
@@ -886,14 +900,16 @@ private struct ProgressHistory {
     }
 
     func tracks(exerciseID: UUID? = nil, variantID: UUID? = nil, metric: Metric, since: Date = .distantPast) -> [ProgressTrack] {
-        descriptors.enumerated().compactMap { index, descriptor in
+        // Within one exercise, colors start from the first slot in track order.
+        let scoped = exerciseID.map { id in descriptors.filter { $0.exercise.id == id } } ?? descriptors
+        return scoped.enumerated().compactMap { index, descriptor in
             guard exerciseID == nil || descriptor.exercise.id == exerciseID,
                   variantID == nil || descriptor.id == variantID,
                   Self.metrics(for: descriptor.exercise.mode).contains(metric) else { return nil }
             let points = data.points(exerciseID: descriptor.exercise.id, variantID: descriptor.id, metric: metric, since: since).map { point in
-                var displayed = point
-                if [.weight, .volume, .estimatedMax].contains(metric) { displayed.value = data.settings.unit.display(point.value) }
-                return displayed
+                var shown = point
+                shown.value = displayed(point.value, metric: metric, unit: data.settings.unit)
+                return shown
             }.filter { $0.value.isFinite }
             guard !points.isEmpty else { return nil }
             let shortLabel = trackLabel(descriptor.id, fallback: descriptor.label)
@@ -907,9 +923,9 @@ private struct ProgressHistory {
     /// An exercise's points across all its tracks, in the display unit.
     func points(exerciseID: UUID, metric: Metric, since: Date) -> [ProgressPoint] {
         data.points(exerciseID: exerciseID, metric: metric, since: since).map { point in
-            var displayed = point
-            if [.weight, .volume, .estimatedMax].contains(metric) { displayed.value = data.settings.unit.display(point.value) }
-            return displayed
+            var shown = point
+            shown.value = displayed(point.value, metric: metric, unit: data.settings.unit)
+            return shown
         }.filter { $0.value.isFinite }
     }
 
@@ -920,7 +936,7 @@ private struct ProgressHistory {
     }
 
     func preferredMetric(for exercise: Exercise, variantID: UUID? = nil, preferred: Metric) -> Metric {
-        let choices: [Metric] = exercise.mode == .cardio ? [preferred, .duration, .distance, .rpe] : [preferred, .weight, .reps, .duration, .distance, .rpe]
+        let choices: [Metric] = exercise.mode == .cardio ? [preferred, .distance, .duration, .rpe] : [preferred, .weight, .reps, .duration, .distance, .rpe]
         for choice in choices where Self.metrics(for: exercise.mode).contains(choice) {
             if !tracks(exerciseID: exercise.id, variantID: variantID, metric: choice).isEmpty { return choice }
         }
@@ -929,7 +945,8 @@ private struct ProgressHistory {
 
     func records(preferredMetric: Metric) -> [ProgressRecord] {
         exercises.map { exercise in
-            let metric = self.preferredMetric(for: exercise, preferred: preferredMetric)
+            // Cardio lists its distance (or time), whatever the lifts' metric.
+            let metric = self.preferredMetric(for: exercise, preferred: exercise.mode == .cardio ? .distance : preferredMetric)
             return ProgressRecord(exercise: exercise, metric: metric, tracks: tracks(exerciseID: exercise.id, metric: metric),
                                   tops: exercise.mode == .strength ? data.topSets(exerciseID: exercise.id) : [])
         }
@@ -949,13 +966,25 @@ private func progressUnit(_ metric: Metric, weightUnit: WeightUnit) -> String {
     case .weight, .volume, .estimatedMax: return metric == .volume ? "\(weightUnit.rawValue) × reps" : weightUnit.rawValue
     case .reps: return "reps"
     case .duration: return "min"
-    case .distance: return "km"
+    case .distance: return DistanceDisplay.unit.rawValue
+    case .pace: return "min/\(DistanceDisplay.unit.rawValue)"
     case .rpe: return "RPE"
     }
 }
 
 private func progressValue(_ value: Double, metric: Metric, unit: WeightUnit) -> String {
-    "\(number(value)) \(progressUnit(metric, weightUnit: unit))"
+    metric == .pace ? "\(clockText(value)) /\(DistanceDisplay.unit.rawValue)" : "\(number(value)) \(progressUnit(metric, weightUnit: unit))"
+}
+
+/// A core point value in the units shown: weights in the weight unit, distance in the distance unit,
+/// pace in seconds per distance unit.
+private func displayed(_ value: Double, metric: Metric, unit: WeightUnit) -> Double {
+    switch metric {
+    case .weight, .volume, .estimatedMax: return unit.display(value)
+    case .distance: return DistanceDisplay.value(value * 1000)
+    case .pace: return value * DistanceDisplay.unit.meters / 1000
+    default: return value
+    }
 }
 
 private func signedNumber(_ value: Double) -> String { value > 0 ? "+\(number(value))" : number(value) }

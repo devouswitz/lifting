@@ -95,7 +95,7 @@ struct PlanEditor: View {
             if let loggedSet {
                 Section("Logged Values") {
                     DurationRow(title: "Time", seconds: loggedSet.seconds)
-                    NumberRow("Distance (meters)", value: loggedSet.meters)
+                    NumberRow("Distance (\(DistanceDisplay.unit.rawValue))", value: loggedSet.meters, factor: DistanceDisplay.unit.meters)
                 }
             }
         }.formStyle(.grouped).navigationTitle(palette.title(plan)).inlineTitle()
@@ -162,7 +162,7 @@ struct SetTargetFields: View {
             RepTargetFields(plan: $plan)
                 NumberRow("RPE", value: $plan.rpe).accessibilityIdentifier("plan.rpe")
                 DurationRow(title: "Time", seconds: $plan.seconds).accessibilityIdentifier("plan.seconds")
-                NumberRow("Distance (meters)", value: $plan.meters).accessibilityIdentifier("plan.meters")
+                NumberRow("Distance (\(DistanceDisplay.unit.rawValue))", value: $plan.meters, factor: DistanceDisplay.unit.meters).accessibilityIdentifier("plan.meters")
         }
     }
 }
@@ -178,7 +178,7 @@ func setPlanSummary(_ plan: SetPlan, unit: WeightUnit) -> String {
     switch plan.load { case .percent: parts.append("\(number(plan.percent))% of working set"); case .fixed: parts.append("\(number(unit.display(plan.fixedWeight))) \(unit.rawValue)"); case .working: parts.append("Working weight"); case .none: break }
     if let target = plan.repTarget { parts.append(plan.amrap && plan.reps == nil ? target : "\(displayTarget(target)) reps") }
     if let seconds = plan.seconds { parts.append(clockText(seconds)) }
-    if let meters = plan.meters { parts.append("\(number(meters)) m") }
+    if let meters = plan.meters { parts.append(distanceText(meters)) }
     if let rpe = plan.rpe { parts.append("RPE \(number(rpe))") }
     if let rest = plan.restSeconds { parts.append(rest == 0 ? "no rest" : "\(clockText(Double(rest))) rest") }
     return parts.joined(separator: " · ")
@@ -195,7 +195,7 @@ func prescribedSetSummary(_ plan: SetPlan, weight: Double?, unit: WeightUnit) ->
     if let target = plan.repTarget.map(displayTarget) { parts.append(load.isEmpty ? (plan.amrap && plan.reps == nil ? target : "\(target) reps") : "\(load) × \(target)") }
     else if !load.isEmpty { parts.append(load) }
     if let seconds = plan.seconds { parts.append(clockText(seconds)) }
-    if let meters = plan.meters { parts.append("\(number(meters)) m") }
+    if let meters = plan.meters { parts.append(distanceText(meters)) }
     if let rpe = plan.rpe { parts.append("RPE \(number(rpe))") }
     if let rest = plan.restSeconds { parts.append(rest == 0 ? "no rest" : "\(clockText(Double(rest))) rest") }
     return parts.isEmpty ? "No targets" : parts.joined(separator: " · ")

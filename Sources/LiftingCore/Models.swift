@@ -292,6 +292,8 @@ public struct Session: Identifiable, Codable, Equatable, Sendable {
 
 public struct Settings: Codable, Equatable, Sendable {
     public var unit: WeightUnit = .lb
+    /// Nil follows the region: miles in the US, kilometers elsewhere.
+    public var distanceUnit: DistanceUnit?
     public var theme: String = "system"
     public var autoRest: Bool = true
     public var haptics: Bool = true
@@ -383,11 +385,21 @@ public enum TrainingError: LocalizedError, Equatable {
 }
 
 public enum Metric: String, CaseIterable, Identifiable, Sendable {
-    case weight, volume, estimatedMax, reps, duration, distance, rpe
+    case weight, volume, estimatedMax, reps, duration, distance, pace, rpe
     public var id: String { rawValue }
     public var title: String {
-        switch self { case .weight: return "Top weight"; case .volume: return "Volume"; case .estimatedMax: return "Estimated 1RM"; case .reps: return "Reps"; case .duration: return "Minutes"; case .distance: return "Distance (km)"; case .rpe: return "RPE" }
+        switch self { case .weight: return "Top weight"; case .volume: return "Volume"; case .estimatedMax: return "Estimated 1RM"; case .reps: return "Reps"; case .duration: return "Time"; case .distance: return "Distance"; case .pace: return "Pace"; case .rpe: return "RPE" }
     }
+    /// Pace improves as it falls.
+    public var lowerIsBetter: Bool { self == .pace }
+}
+
+/// How distances are shown and entered. They are always stored in meters.
+public enum DistanceUnit: String, Codable, CaseIterable, Identifiable, Sendable {
+    case km, mi
+    public var id: String { rawValue }
+    public var title: String { self == .km ? "Kilometers" : "Miles" }
+    public var meters: Double { self == .km ? 1000 : 1609.344 }
 }
 
 public struct ProgressPoint: Identifiable, Equatable, Sendable {

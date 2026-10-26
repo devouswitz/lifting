@@ -49,10 +49,10 @@ struct WarmupSetEditor: View {
                 DisclosureGroup(isExpanded: $more) {
                     NumberRow("RPE", value: $plan.rpe).accessibilityIdentifier("plan.rpe")
                     DurationRow(title: "Time", seconds: $plan.seconds).accessibilityIdentifier("plan.seconds")
-                    NumberRow("Distance (meters)", value: $plan.meters).accessibilityIdentifier("plan.meters")
+                    NumberRow("Distance (\(DistanceDisplay.unit.rawValue))", value: $plan.meters, factor: DistanceDisplay.unit.meters).accessibilityIdentifier("plan.meters")
                     if let loggedSet {
                         DurationRow(title: "Logged time", seconds: loggedSet.seconds)
-                        NumberRow("Logged distance (meters)", value: loggedSet.meters)
+                        NumberRow("Logged distance (\(DistanceDisplay.unit.rawValue))", value: loggedSet.meters, factor: DistanceDisplay.unit.meters)
                     }
                 } label: {
                     LabeledContent("RPE, time, distance") { Text(extras).foregroundStyle(.secondary) }
@@ -110,7 +110,7 @@ struct WarmupSetEditor: View {
         switch RepTargetMode(plan) { case .exact: return "exact"; case .range: return "range"; case .amrap: return "AMRAP"; case .none: return "no count" }
     }
     private var extras: String {
-        let parts = [plan.rpe.map { "RPE \(number($0))" }, plan.seconds.map(clockText), plan.meters.map { "\(number($0)) m" }].compactMap { $0 }
+        let parts = [plan.rpe.map { "RPE \(number($0))" }, plan.seconds.map(clockText), plan.meters.map(distanceText)].compactMap { $0 }
         return parts.isEmpty ? "None" : parts.joined(separator: " · ")
     }
 }

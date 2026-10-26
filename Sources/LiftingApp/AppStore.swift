@@ -9,7 +9,10 @@ import UserNotifications
 @MainActor
 final class AppStore: ObservableObject {
     @Published var data: TrainingData {
-        didSet { if oldValue.sessions != data.sessions { previousByVariant = nil } }
+        didSet {
+            if oldValue.sessions != data.sessions { previousByVariant = nil }
+            DistanceDisplay.unit = data.settings.distance
+        }
     }
     private var previousByVariant: [UUID: [LoggedSet]]?
     @Published var error: String?
@@ -49,6 +52,7 @@ final class AppStore: ObservableObject {
     let demo: Bool
 
     init() {
+        defer { DistanceDisplay.unit = data.settings.distance }
         let arguments = ProcessInfo.processInfo.arguments
         let showcase = arguments.contains("--showcase")
         demo = arguments.contains("--demo") || showcase
@@ -247,6 +251,25 @@ struct BackupDocument: FileDocument {
 func number(_ value: Double, decimals: Int = 1) -> String {
     value.formatted(.number.precision(.fractionLength(0...decimals)).grouping(.never))
 }
+/// The unit distances are shown and typed in, kept in step with Settings. Distances are stored in meters.
+enum DistanceDisplay {
+    nonisolated(unsafe) static var unit: DistanceUnit = .km
+    /// A stored distance in the display unit, e.g. 5000 m as 5 (km) or 3.11 (mi).
+    static func value(_ meters: Double) -> Double { meters / unit.meters }
+    static func meters(_ value: Double) -> Double { value * unit.meters }
+}
+/// "5.2 km" or "3.11 mi".
+func distanceText(_ meters: Double) -> String {
+    let value = DistanceDisplay.value(meters)
+    return "\(number(value, decimals: value < 10 ? 2 : 1)) \(DistanceDisplay.unit.rawValue)"
+}
+/// Minutes and seconds per display unit, from seconds per kilometer: "5:24 /km".
+func paceText(_ secondsPerKilometer: Double) -> String { "\(clockText(secondsPerKilometer * DistanceDisplay.unit.meters / 1000)) /\(DistanceDisplay.unit.rawValue)" }
+
+extension Settings {
+    var distance: DistanceUnit { distanceUnit ?? (Locale.current.measurementSystem == .us ? .mi : .km) }
+}
+
 func counted(_ count: Int, _ noun: String) -> String { "\(count) \(noun)\(count == 1 ? "" : "s")" }
 func clockText(_ seconds: Double) -> String {
     let value = max(0, Int(seconds.rounded(.up)))
@@ -296,7 +319,7 @@ func loggedExerciseSummary(_ exercise: SessionExercise, unit: WeightUnit) -> Str
         else if group.count > 1 || (set.seconds == nil && set.meters == nil && set.weight == nil) { parts.append(counted(group.count, "set")) }
         if let weight = set.weight, let load = loadText(weight, mode: exercise.mode, unit: unit), load != "BW" { parts.append("\(load) \(unit.rawValue)") }
         if let seconds = set.seconds { parts.append(clockText(seconds)) }
-        if let meters = set.meters { parts.append("\(number(meters)) m") }
+        if let meters = set.meters { parts.append(distanceText(meters)) }
         if let rpe = set.rpe { parts.append("RPE \(number(rpe))") }
         switch set.plan.kind {
         case .working: break

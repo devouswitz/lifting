@@ -296,3 +296,15 @@ The Progress redesign, kept in the existing layout. Observed on the iPhone 17 si
 - Body Weight: 181.6 lb, 7-day average 181.4 lb, down 0.2 lb a week, with weigh-ins and the average line for 1M and All.
 
 Not verified: a physical iPhone, dark mode on device, VoiceOver, accessibility text sizes, and iPad.
+
+## Build 14 (October 26, 2026)
+
+112 core test cases, zero failures. The showcase test now checks that run pace gets quicker over the weeks and that weekly cardio distance adds up to the logged distance.
+
+- Distance unit: Settings > Distance Unit (km / mi), independent of the weight unit, following the region until set (miles on the US simulator). Distances stay stored in meters; the workout column, keypad, set details, history, summaries, and Progress all read and type in the chosen unit. Switching to km in the simulator changed the Run detail from 4.97 mi and 8:50 /mi to 8 km and 5:29 /km at once.
+- Pace: a new metric for cardio, in minutes per km or mile, drawn with faster higher. Best is the fastest session, and change reads −0:36 /mi for the showcase runs.
+- Progress > Cardio: weekly or monthly time or distance bars with the average and the week in progress left out of it, chips for All cardio, Run, Row, and Bike, and each exercise's latest session (4.97 mi · 43:52, 8:50 /mi) with totals. A cardio exercise's screen opens on distance, drawn as bars per session.
+- Exercise screens color their tracks from the first color (Run was pink, taken from its position across the whole app).
+- Showcase data gains 16 weeks of Sunday runs and conditioning every other Wednesday; the program's next day is unchanged.
+
+Not verified: a physical iPhone, logging a new cardio set in miles on device, VoiceOver, and iPad.

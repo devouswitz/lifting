@@ -90,8 +90,12 @@ public extension TrainingData {
         let biking = Variant(exerciseID: bike.id, label: "Conditioning", restSeconds: 0, sets: [SetPlan(load: .none, reps: nil, repCeiling: nil, seconds: 1200, rpe: 6)])
         data.variants += [rowing, biking]
         let conditioning = Routine(name: "Conditioning", slots: [RoutineSlot(variantID: rowing.id), RoutineSlot(variantID: biking.id)])
+        let run = exercise("Run")
+        let running = Variant(exerciseID: run.id, label: "Easy run", restSeconds: 0, sets: [SetPlan(load: .none, reps: nil, repCeiling: nil, seconds: 1800, meters: 5000)])
+        data.variants.append(running)
+        let easyRun = Routine(name: "Easy run", slots: [RoutineSlot(variantID: running.id)])
 
-        data.routines = [press, pullDay, bench, squat, push, pull, legs, arms, conditioning]
+        data.routines = [press, pullDay, bench, squat, push, pull, legs, arms, conditioning, easyRun]
         let block = TrainingProgram(name: "5/3/1 Boring But Big", notes: "Four-week waves. Raise the training max after each wave.", dayIDs: [press.id, pullDay.id, bench.id, squat.id])
         let ppl = TrainingProgram(name: "Push Pull Legs", notes: "Five days a week. Add weight once every set reaches the top of the range.", dayIDs: [push.id, pull.id, legs.id])
         data.programs = [ppl, block]
@@ -171,6 +175,29 @@ public extension TrainingData {
             let routine = [push, pull, legs][index % 3]
             let note = index == 0 ? "First week of Push Pull Legs." : index == dates.count - 4 ? "Gym was packed, did leg press before RDLs." : ""
             log(routine, on: date, note: note)
+        }
+        // Cardio off the programs: a Sunday run that gets longer and quicker, and conditioning every other Wednesday.
+        for week in 0..<16 {
+            let sunday = day(weeksAgo: 15 - week, offset: 6)
+            if sunday < today {
+                log(easyRun, on: sunday) { session, extra in
+                    let kilometers = [5.0, 5.0, 6.0, 5.0, 6.5, 5.0, 7.0, 6.0][week % 8] + (week >= 8 ? 1 : 0)
+                    let pace = 360 - Double(week) * 2 - Double(extra) * 3
+                    session.exercises[0].sets[0].meters = kilometers * 1000
+                    session.exercises[0].sets[0].seconds = (kilometers * pace).rounded()
+                    session.exercises[0].sets[0].rpe = [5, 6, 6, 7][extra]
+                }
+            }
+            let wednesday = day(weeksAgo: 15 - week, offset: 2)
+            if week % 2 == 0, wednesday < today {
+                log(conditioning, on: wednesday) { session, extra in
+                    session.exercises[0].sets[0].meters = 2000
+                    session.exercises[0].sets[0].seconds = 500 - Double(week) * 1.5 - Double(extra) * 2
+                    session.exercises[1].sets[0].seconds = 1200
+                    session.exercises[1].sets[0].meters = 9000 + Double(week) * 80
+                    session.exercises[1].sets[0].rpe = 6
+                }
+            }
         }
         for (id, plan) in plans { if let v = data.variants.firstIndex(where: { $0.id == id }) { data.variants[v].workingWeight = lb(plan.weight) } }
         for (routine, max) in [(press, 110.0), (pullDay, 335), (bench, 195), (squat, 275)] {

@@ -61,7 +61,7 @@ struct LiveSetRow: View {
                                 .longPress("Edit rep target") { present(.reps(setID)) }
                         }
                         if columns.time { cell(title: "TIME", value: set.seconds.map(clockText), field: .time, labeled: stacked) }
-                        if columns.distance { cell(title: "METERS", value: set.meters.map { number($0) }, field: .distance, labeled: stacked) }
+                        if columns.distance { cell(title: DistanceDisplay.unit.rawValue.uppercased(), value: set.meters.map { number(DistanceDisplay.value($0), decimals: 2) }, field: .distance, labeled: stacked) }
                         cell(title: "RPE", value: set.rpe.map { number($0) }, field: .rpe, labeled: stacked).frame(maxWidth: stacked || !columns.hasMeasurements ? .infinity : 44)
                         Button { withAnimation(.snappy(duration: 0.2)) { store.toggle(exerciseID, setID) } } label: {
                             let done = set.completedAt != nil
@@ -125,7 +125,7 @@ struct LiveSetRow: View {
         case .weight: value = set.weight.map(unit.display)
         case .reps: value = set.reps.map(Double.init)
         case .time: value = set.seconds
-        case .distance: value = set.meters
+        case .distance: value = set.meters.map(DistanceDisplay.value)
         case .rpe: value = set.rpe
         case .rest: value = set.plan.restSeconds.map(Double.init)
         }
@@ -148,7 +148,7 @@ struct LiveSetRow: View {
                     switch field {
                     case .reps: data.activeSession!.exercises[e].sets[s].reps = newValue.map(Int.init)
                     case .time: data.activeSession!.exercises[e].sets[s].seconds = newValue
-                    case .distance: data.activeSession!.exercises[e].sets[s].meters = newValue
+                    case .distance: data.activeSession!.exercises[e].sets[s].meters = newValue.map(DistanceDisplay.meters)
                     case .rpe: data.activeSession!.exercises[e].sets[s].rpe = newValue
                     case .rest: data.activeSession!.exercises[e].sets[s].plan.restSeconds = newValue.map(Int.init)
                     case .weight, .percent: break
@@ -182,7 +182,7 @@ enum SetField: String {
             if mode == .bodyweight { format = .signed }
         case .reps: title = "Reps"; step = 1; maximum = 10000
         case .time: title = "Time"; step = 60; maximum = 359999; format = .duration
-        case .distance: title = "Distance (meters)"; step = 100; maximum = 10000000
+        case .distance: title = "Distance (\(DistanceDisplay.unit.rawValue))"; step = 0.1; maximum = 10000
         case .rpe: title = "RPE"; step = 0.5; maximum = 10
         case .rest: title = "Rest After Set"; step = 15; maximum = 86400; format = .duration
         case .percent: title = "Percent of Working Set"; step = 5; maximum = 1000
@@ -217,7 +217,7 @@ func loggedSetSummary(_ set: LoggedSet, mode: ExerciseMode = .strength, unit: We
     if let reps = set.reps { parts.append("\(reps) reps") }
     else if let range = set.plan.repRange { parts.append("\(range.lowerBound)-\(range.upperBound) reps") }
     if let seconds = set.seconds { parts.append(clockText(seconds)) }
-    if let meters = set.meters { parts.append("\(number(meters)) m") }
+    if let meters = set.meters { parts.append(distanceText(meters)) }
     if let rpe = set.rpe { parts.append("RPE \(number(rpe))") }
     return parts.joined(separator: " · ")
 }
