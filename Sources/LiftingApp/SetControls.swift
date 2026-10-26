@@ -3,10 +3,43 @@ import LiftingCore
 
 extension View {
     /// A hold that opens a value's extra settings, also offered as a named accessibility action.
-    func longPress(_ label: String, perform action: @escaping () -> Void) -> some View {
+    @ViewBuilder func longPress(_ label: String, perform action: @escaping () -> Void) -> some View {
+        #if os(iOS)
+        if #available(iOS 18, *) {
+            // UIKit's long press gives way once the finger moves, so a swipe that starts on the value still scrolls.
+            // SwiftUI's LongPressGesture held the touch and the scroll never started.
+            gesture(PressRecognizer(action: action)).accessibilityAction(named: label, action)
+        } else {
+            highPriorityGesture(LongPressGesture().onEnded { _ in action() }).accessibilityAction(named: label, action)
+        }
+        #else
         highPriorityGesture(LongPressGesture().onEnded { _ in action() }).accessibilityAction(named: label, action)
+        #endif
     }
 }
+
+#if os(iOS)
+@available(iOS 18, *)
+private struct PressRecognizer: UIGestureRecognizerRepresentable {
+    let action: () -> Void
+    /// The value's own tap waits for the hold to fail, so a hold doesn't also fire the tap on release.
+    /// Scrolling doesn't wait; it starts as soon as the finger moves.
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        func gestureRecognizer(_ recognizer: UIGestureRecognizer, shouldBeRequiredToFailBy other: UIGestureRecognizer) -> Bool {
+            !(other is UIPanGestureRecognizer)
+        }
+    }
+    func makeCoordinator(converter: CoordinateSpaceConverter) -> Coordinator { Coordinator() }
+    func makeUIGestureRecognizer(context: Context) -> UILongPressGestureRecognizer {
+        let recognizer = UILongPressGestureRecognizer()
+        recognizer.delegate = context.coordinator
+        return recognizer
+    }
+    func handleUIGestureRecognizerAction(_ recognizer: UILongPressGestureRecognizer, context: Context) {
+        if recognizer.state == .began { action() }
+    }
+}
+#endif
 
 /// The set badge. Tap to change the set's type, hold for Set Details. Drop and MYO convert the set
 /// into a working drop or MYO activation set, with the lifter's Drop and MYO setup.

@@ -308,3 +308,9 @@ Not verified: a physical iPhone, dark mode on device, VoiceOver, accessibility t
 - Showcase data gains 16 weeks of Sunday runs and conditioning every other Wednesday; the program's next day is unchanged.
 
 Not verified: a physical iPhone, logging a new cardio set in miles on device, VoiceOver, and iPad.
+
+## Build 15 (October 26, 2026)
+
+- Swipes that start on a value box scroll. Every hold-for-settings spot (weight, reps, percent, rest, the set badge, a warm-up label) used SwiftUI's long press, which held the touch so the list never scrolled. On iOS 18 and later it is now a UIKit long press that gives way once the finger moves; iOS 17 keeps the old gesture. In the simulator a swipe from a reps box and from a weight box each scrolled the full distance, holding a reps box opened Rep Target and not the keypad, and a tap still opened the keypad.
+
+Not verified: a physical iPhone and iOS 17.
