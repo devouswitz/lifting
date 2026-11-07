@@ -314,3 +314,13 @@ Not verified: a physical iPhone, logging a new cardio set in miles on device, Vo
 - Swipes that start on a value box scroll. Every hold-for-settings spot (weight, reps, percent, rest, the set badge, a warm-up label) used SwiftUI's long press, which held the touch so the list never scrolled. On iOS 18 and later it is now a UIKit long press that gives way once the finger moves; iOS 17 keeps the old gesture. In the simulator a swipe from a reps box and from a weight box each scrolled the full distance, holding a reps box opened Rep Target and not the keypad, and a tap still opened the keypad.
 
 Not verified: a physical iPhone and iOS 17.
+
+## Build 16 (November 6, 2026)
+
+112 core test cases, zero failures. The showcase test now checks that per-session cardio totals match the logged distance and the charted pace.
+
+- Expanded exercise cards: swipes that start anywhere on a set row scroll. Each row's swipe-to-delete was a SwiftUI drag running alongside the scroll view; on iOS 18 and later it is now a UIKit pan that only starts for a sideways move, the same approach as the exercise-card headers. In the simulator, slow finger-paced drags starting on a row's previous column and on a reps box scrolled the workout up and down, a sideways drag starting on a reps box revealed Delete without opening the keypad, and the trash removed the set.
+- Charts: the Exercises line chart and the Muscles and Cardio bar charts select by tap or a sideways slide; a vertical drag that starts on a chart scrolls the page with the selection kept.
+- Cardio: All cardio stacks each exercise's time or distance in a fixed color (Run, Bike, Row in the showcase) with a matching dot on its row; one exercise keeps its color. A cardio exercise's screen adds Bests (longest 4.97 mi, longest time 43:52, fastest pace 8:50 /mi for the showcase run). Records list Bike as 6.29 mi · 20:00 with Longest.
+
+Not verified: a physical iPhone, iOS 17, the day editor's swipe-to-delete (same component as the workout), and dark mode for the stacked colors.

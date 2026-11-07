@@ -125,7 +125,7 @@ struct MuscleAnalyticsView: View {
                 }
                 RuleMark(y: .value("Average", average)).foregroundStyle(Color.secondary).lineStyle(StrokeStyle(lineWidth: 1))
             }
-            .chartXSelection(value: $selectedDate)
+            .chartOverlay { proxy in GeometryReader { ChartScrub(proxy: proxy, geometry: $0, date: $selectedDate) } }
             .chartYAxis {
                 AxisMarks(position: .leading, values: .automatic(desiredCount: 4)) { value in
                     AxisGridLine().foregroundStyle(.primary.opacity(0.08))

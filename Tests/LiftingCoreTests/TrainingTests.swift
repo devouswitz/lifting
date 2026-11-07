@@ -1596,6 +1596,10 @@ final class TrainingTests: XCTestCase {
         XCTAssertGreaterThan(pace.count, 10)
         XCTAssertLessThan(pace.last!.value, pace.first!.value)
         let kilometers = data.cardioBuckets(since: .distantPast, until: Date(timeIntervalSince1970: 1_792_300_000), exerciseID: run.id, distance: true, monthly: false).reduce(0) { $0 + $1.volume } / 1000
+        let efforts = data.cardioEfforts(exerciseID: run.id)
+        XCTAssertEqual(efforts.count, pace.count)
+        XCTAssertEqual(efforts.reduce(0) { $0 + $1.meters } / 1000, kilometers, accuracy: 0.001)
+        XCTAssertEqual(efforts.last!.pace!, pace.last!.value, accuracy: 0.001)
         let logged = data.sessions.flatMap(\.exercises).filter { $0.exerciseID == run.id }.flatMap(\.sets).compactMap(\.meters).reduce(0, +) / 1000
         XCTAssertEqual(kilometers, logged, accuracy: 0.001)
         XCTAssertTrue(data.sessions.flatMap(\.exercises).flatMap(\.sets).contains { $0.plan.customTypeID != nil && $0.completedAt != nil })

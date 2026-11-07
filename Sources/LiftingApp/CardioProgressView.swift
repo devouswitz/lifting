@@ -17,37 +17,49 @@ struct CardioProgressView: View {
 
     private struct Summary: Identifiable {
         let exercise: Exercise
-        let sessions: Int
-        let seconds: Double
-        let meters: Double
-        let latest: (date: Date, seconds: Double, meters: Double)
+        let efforts: [CardioEffort]
+        /// The exercise's place in the cardio palette, fixed so a run keeps its color across ranges.
+        let colorIndex: Int
         var id: UUID { exercise.id }
+        var latest: CardioEffort { efforts[efforts.count - 1] }
+        var seconds: Double { efforts.reduce(0) { $0 + $1.seconds } }
+        var meters: Double { efforts.reduce(0) { $0 + $1.meters } }
     }
 
     /// Cardio exercises logged in the range, most recent first.
     private var summaries: [Summary] {
-        let sessions = store.data.sessions(inProgram: programID).filter { $0.startedAt >= since && $0.skipped != true }.sorted { $0.startedAt < $1.startedAt }
-        var totals: [UUID: (count: Int, seconds: Double, meters: Double, latest: (Date, Double, Double))] = [:]
-        for session in sessions {
-            for item in session.exercises where item.mode == .cardio {
-                let sets = item.sets.filter { $0.completedAt != nil && $0.plan.kind != .warmup }
-                let seconds = sets.compactMap(\.seconds).reduce(0, +), meters = sets.compactMap(\.meters).reduce(0, +)
-                guard seconds > 0 || meters > 0 else { continue }
-                let previous = totals[item.exerciseID]
-                totals[item.exerciseID] = ((previous?.count ?? 0) + 1, (previous?.seconds ?? 0) + seconds, (previous?.meters ?? 0) + meters, (session.startedAt, seconds, meters))
-            }
-        }
-        return totals.compactMap { id, total in
-            store.data.exercise(id).map { Summary(exercise: $0, sessions: total.count, seconds: total.seconds, meters: total.meters, latest: total.latest) }
+        let order = store.data.exercises.filter { $0.mode == .cardio }.sorted { $0.name < $1.name }.map(\.id)
+        return order.enumerated().compactMap { index, id in
+            guard let exercise = store.data.exercise(id) else { return nil }
+            let efforts = store.data.cardioEfforts(exerciseID: id, programID: programID, since: since)
+            return efforts.isEmpty ? nil : Summary(exercise: exercise, efforts: efforts, colorIndex: index)
         }.sorted { $0.latest.date > $1.latest.date }
+    }
+
+    /// One bar segment: an exercise's time or distance in one week or month.
+    private struct Segment: Identifiable {
+        let index: Int
+        let start: Date
+        let name: String
+        let value: Double
+        var id: String { "\(index).\(name)" }
     }
 
     var body: some View {
         let monthly = days == 0 || days > 120
         let all = summaries
-        let buckets = store.data.cardioBuckets(programID: programID, since: since, exerciseID: exerciseID, distance: distance, monthly: monthly)
-        let values = buckets.map { distance ? DistanceDisplay.value($0.volume) : $0.volume / 60 }
-        let color = progressColor(0, scheme: scheme)
+        let shown = all.filter { exerciseID == nil || $0.id == exerciseID }
+        // Every exercise's buckets start on the same week or month, so they stack.
+        let first = since == .distantPast ? all.map { $0.efforts[0].date }.min() ?? since : since
+        let series = shown.map { row in
+            (row, store.data.cardioBuckets(programID: programID, since: first, exerciseID: row.id, distance: distance, monthly: monthly)
+                .map { distance ? DistanceDisplay.value($0.volume) : $0.volume / 60 })
+        }
+        let buckets = store.data.cardioBuckets(programID: programID, since: first, exerciseID: exerciseID, distance: distance, monthly: monthly)
+        let values = buckets.indices.map { index in series.reduce(0) { $0 + ($1.1.indices.contains(index) ? $1.1[index] : 0) } }
+        let segments = series.flatMap { row, amounts in
+            amounts.enumerated().map { Segment(index: $0.offset, start: buckets.indices.contains($0.offset) ? buckets[$0.offset].start : .now, name: row.exercise.name, value: $0.element) }
+        }
         VStack(alignment: .leading, spacing: 16) {
             Picker("Measure", selection: $distance) { Text("Time").tag(false); Text("Distance").tag(true) }
                 .pickerStyle(.segmented).labelsHidden().accessibilityIdentifier("cardio.measure")
@@ -66,11 +78,11 @@ struct CardioProgressView: View {
                 if values.allSatisfy({ $0 == 0 }) {
                     Text(distance ? "No distance logged in this range." : "No time logged in this range.").foregroundStyle(.secondary).padding(.vertical, 24)
                 } else {
-                    chart(buckets, values: values, monthly: monthly, color: color)
+                    chart(buckets, values: values, segments: segments, rows: shown, monthly: monthly)
                 }
                 VStack(spacing: 0) {
                     ForEach(all) { row in
-                        NavigationLink { ExerciseProgress(exerciseID: row.id, programID: programID) } label: { summaryRow(row) }.buttonStyle(.plain)
+                        NavigationLink { ExerciseProgress(exerciseID: row.id, programID: programID) } label: { summaryRow(row, dot: all.count > 1) }.buttonStyle(.plain)
                         if row.id != all.last?.id { Divider() }
                     }
                 }
@@ -78,7 +90,7 @@ struct CardioProgressView: View {
         }
     }
 
-    @ViewBuilder private func chart(_ buckets: [VolumeBucket], values: [Double], monthly: Bool, color: Color) -> some View {
+    @ViewBuilder private func chart(_ buckets: [VolumeBucket], values: [Double], segments: [Segment], rows: [Summary], monthly: Bool) -> some View {
         // The period in progress is shown but left out of the average, and the headline starts on the last full one.
         let complete = buckets.count > 1 ? Array(values.dropLast()) : values
         let average = complete.reduce(0, +) / Double(max(complete.count, 1))
@@ -89,13 +101,16 @@ struct CardioProgressView: View {
             Text("Average \(amount(average)) a \(monthly ? "month" : "week")").font(.caption).foregroundStyle(.secondary)
         }
         Chart {
-            ForEach(Array(buckets.enumerated()), id: \.offset) { index, bucket in
-                BarMark(x: .value(monthly ? "Month" : "Week", bucket.start, unit: monthly ? .month : .weekOfYear), y: .value(distance ? "Distance" : "Minutes", values[index]))
-                    .foregroundStyle(color).opacity(selectedDate == nil || index == selected ? 1 : 0.45).cornerRadius(3)
+            ForEach(segments) { segment in
+                BarMark(x: .value(monthly ? "Month" : "Week", segment.start, unit: monthly ? .month : .weekOfYear), y: .value(distance ? "Distance" : "Minutes", segment.value))
+                    .foregroundStyle(by: .value("Exercise", segment.name))
+                    .opacity(selectedDate == nil || segment.index == selected ? 1 : 0.45).cornerRadius(3)
             }
             RuleMark(y: .value("Average", average)).foregroundStyle(Color.secondary).lineStyle(StrokeStyle(lineWidth: 1))
         }
-        .chartXSelection(value: $selectedDate)
+        .chartForegroundStyleScale(domain: rows.map(\.exercise.name), range: rows.map { progressColor($0.colorIndex, scheme: scheme) })
+        .chartLegend(.hidden)
+        .chartOverlay { proxy in GeometryReader { ChartScrub(proxy: proxy, geometry: $0, date: $selectedDate) } }
         .chartYAxis {
             AxisMarks(position: .leading, values: .automatic(desiredCount: 4)) { value in
                 AxisGridLine().foregroundStyle(.primary.opacity(0.08))
@@ -108,19 +123,22 @@ struct CardioProgressView: View {
         .accessibilityLabel("\(monthly ? "Monthly" : "Weekly") cardio \(distance ? "distance" : "time"), average \(amount(average))")
     }
 
-    private func summaryRow(_ row: Summary) -> some View {
-        let latest = [row.latest.meters > 0 ? distanceText(row.latest.meters) : nil, row.latest.seconds > 0 ? clockText(row.latest.seconds) : nil,
-                      row.latest.meters > 0 && row.latest.seconds > 0 ? paceText(row.latest.seconds / row.latest.meters * 1000) : nil].compactMap { $0 }
-        let totals = [counted(row.sessions, "session"), row.meters > 0 ? distanceText(row.meters) : nil, row.seconds > 0 ? hours(row.seconds) : nil].compactMap { $0 }
+    private func summaryRow(_ row: Summary, dot: Bool) -> some View {
+        let latest = row.latest
+        let measured = [latest.meters > 0 ? distanceText(latest.meters) : nil, latest.seconds > 0 ? clockText(latest.seconds) : nil].compactMap { $0 }
+        let date = latest.date.formatted(.dateTime.month(.abbreviated).day())
+        let totals = [counted(row.efforts.count, "session"), row.meters > 0 ? distanceText(row.meters) : nil, row.seconds > 0 ? hours(row.seconds) : nil].compactMap { $0 }
         return HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
-                Text(row.exercise.name).font(.headline).foregroundStyle(.primary)
+                HStack(spacing: 7) {
+                    if dot { Circle().fill(progressColor(row.colorIndex, scheme: scheme)).frame(width: 8, height: 8) }
+                    Text(row.exercise.name).font(.headline).foregroundStyle(.primary)
+                }
                 Text(totals.joined(separator: " · ")).font(.caption).foregroundStyle(.secondary)
             }.frame(maxWidth: .infinity, alignment: .leading)
             VStack(alignment: .trailing, spacing: 4) {
-                Text(latest.prefix(2).joined(separator: " · ")).font(.subheadline.weight(.semibold)).monospacedDigit()
-                Text(latest.count > 2 ? "\(latest[2]) · \(row.latest.date.formatted(.dateTime.month(.abbreviated).day()))" : row.latest.date.formatted(.dateTime.month(.abbreviated).day()))
-                    .font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                Text(measured.joined(separator: " · ")).font(.subheadline.weight(.semibold)).monospacedDigit()
+                Text(latest.pace.map { "\(paceText($0)) · \(date)" } ?? date).font(.caption).foregroundStyle(.secondary).monospacedDigit()
             }
             Image(systemName: "chevron.right").font(.caption2.weight(.semibold)).foregroundStyle(.tertiary)
         }

@@ -291,6 +291,7 @@ struct ExerciseProgress: View {
                 .card()
 
                 repRecords(history)
+                cardioBests(history)
 
                 SectionTitle(title: "Results")
                 VStack(alignment: .leading, spacing: 16) {
@@ -361,6 +362,33 @@ struct ExerciseProgress: View {
                         Text("\(number(unit.display(record.weight))) \(unit.rawValue)").font(.headline).lineLimit(1).minimumScaleFactor(0.8)
                         Text(record.date.formatted(Calendar.current.isDate(record.date, equalTo: .now, toGranularity: .year)
                                                    ? .dateTime.month(.abbreviated).day() : .dateTime.month(.abbreviated).year()))
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(12)
+                    .background(palette.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .accessibilityElement(children: .combine)
+                }
+            }
+        }
+    }
+
+    /// A cardio exercise's longest distance, longest time, and fastest pace, each with its session's date.
+    @ViewBuilder private func cardioBests(_ history: ProgressHistory) -> some View {
+        let efforts = exercise?.mode == .cardio ? history.data.cardioEfforts(exerciseID: exerciseID, variantID: selectedVariant) : []
+        let bests: [(title: String, value: String, effort: CardioEffort)] = [
+            efforts.filter { $0.meters > 0 }.max { $0.meters < $1.meters }.map { ("Longest", distanceText($0.meters), $0) },
+            efforts.filter { $0.seconds > 0 }.max { $0.seconds < $1.seconds }.map { ("Longest time", clockText($0.seconds), $0) },
+            efforts.filter { $0.pace != nil }.min { $0.pace! < $1.pace! }.map { ("Fastest pace", paceText($0.pace!), $0) },
+        ].compactMap { $0 }
+        if !bests.isEmpty {
+            SectionTitle(title: "Bests")
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 3), spacing: 10) {
+                ForEach(bests, id: \.title) { best in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(best.title).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        Text(best.value).font(.headline).monospacedDigit().lineLimit(1).minimumScaleFactor(0.7)
+                        Text(best.effort.date.formatted(Calendar.current.isDate(best.effort.date, equalTo: .now, toGranularity: .year)
+                                                        ? .dateTime.month(.abbreviated).day() : .dateTime.month(.abbreviated).year()))
                             .font(.caption2).foregroundStyle(.secondary)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading).padding(12)
@@ -654,6 +682,9 @@ private struct ProgressLineChart: View {
         }
         .chartYAxisLabel(progressUnit(metric, weightUnit: unit), position: .topLeading)
         .chartOverlay { proxy in
+            GeometryReader { geometry in
+                ChartScrub(proxy: proxy, geometry: geometry, date: $selectedDate)
+            }
             if endLabels {
                 GeometryReader { geometry in
                     if let frame = proxy.plotFrame {
@@ -667,12 +698,6 @@ private struct ProgressLineChart: View {
                     }
                 }.allowsHitTesting(false)
             }
-        }
-        .chartXSelection(value: $selectedDate)
-        .chartGesture { proxy in
-            DragGesture(minimumDistance: 0)
-                .onChanged { proxy.selectXValue(at: $0.location.x) }
-                .onEnded { proxy.selectXValue(at: $0.location.x) }
         }
         .frame(height: height)
         .accessibilityLabel("\(metric.title) by date")
@@ -801,6 +826,8 @@ private struct ProgressRecord: Identifiable {
     let tracks: [ProgressTrack]
     /// Each session's heaviest set, for lifts with logged weights.
     var tops: [TopSet] = []
+    /// Each session's cardio, for cardio exercises.
+    var efforts: [CardioEffort] = []
     var id: UUID { exercise.id }
     /// The heaviest set ever, more reps breaking a tie.
     var bestTop: TopSet? { tops.max { $0.weight == $1.weight ? $0.reps < $1.reps : $0.weight < $1.weight } }
@@ -831,6 +858,18 @@ private struct ProgressRecordRow: View {
                         Text("Best \(setText(best))").font(.caption.weight(.medium)).foregroundStyle(.secondary).monospacedDigit()
                     } else {
                         Label("Record", systemImage: "star.fill").labelStyle(TightLabelStyle()).font(.caption.weight(.medium)).foregroundStyle(palette.best)
+                    }
+                } else if let latest = record.efforts.last {
+                    // The latest session's distance and time, then either that it is the longest or what the longest is.
+                    let byDistance = record.efforts.contains { $0.meters > 0 }
+                    let length: (CardioEffort) -> Double = { byDistance ? $0.meters : $0.seconds }
+                    let longest = record.efforts.max { length($0) < length($1) } ?? latest
+                    Text([latest.meters > 0 ? distanceText(latest.meters) : nil, latest.seconds > 0 ? clockText(latest.seconds) : nil].compactMap { $0 }.joined(separator: " · "))
+                        .font(.subheadline.weight(.semibold)).foregroundStyle(.primary).monospacedDigit()
+                    if length(longest) > length(latest) {
+                        Text("Longest \(byDistance ? distanceText(longest.meters) : clockText(longest.seconds))").font(.caption.weight(.medium)).foregroundStyle(.secondary).monospacedDigit()
+                    } else {
+                        Label("Longest", systemImage: "star.fill").labelStyle(TightLabelStyle()).font(.caption.weight(.medium)).foregroundStyle(palette.best)
                     }
                 } else {
                     let latest = record.latest?.value ?? 0
@@ -948,7 +987,8 @@ private struct ProgressHistory {
             // Cardio lists its distance (or time), whatever the lifts' metric.
             let metric = self.preferredMetric(for: exercise, preferred: exercise.mode == .cardio ? .distance : preferredMetric)
             return ProgressRecord(exercise: exercise, metric: metric, tracks: tracks(exerciseID: exercise.id, metric: metric),
-                                  tops: exercise.mode == .strength ? data.topSets(exerciseID: exercise.id) : [])
+                                  tops: exercise.mode == .strength ? data.topSets(exerciseID: exercise.id) : [],
+                                  efforts: exercise.mode == .cardio ? data.cardioEfforts(exerciseID: exercise.id) : [])
         }
     }
 }

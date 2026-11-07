@@ -22,6 +22,16 @@ public struct VolumeBucket: Equatable, Sendable {
 }
 
 /// Body weight smoothed over the seven days up to each weigh-in.
+/// One session's cardio for an exercise: its completed, non-warm-up sets' time and distance added up.
+public struct CardioEffort: Equatable, Sendable {
+    public var sessionID: UUID
+    public var date: Date
+    public var seconds: Double
+    public var meters: Double
+    /// Seconds per kilometer, when both time and distance were logged.
+    public var pace: Double? { seconds > 0 && meters > 0 ? seconds / meters * 1000 : nil }
+}
+
 public struct BodyWeightTrend: Equatable, Sendable {
     public var date: Date
     public var average: Double
@@ -38,6 +48,17 @@ public extension TrainingData {
                     return TopSet(sessionID: session.id, date: session.startedAt, weight: weight, reps: reps)
                 }
                 .max { $0.weight == $1.weight ? $0.reps < $1.reps : $0.weight < $1.weight }
+        }
+    }
+
+    /// Each session's cardio for an exercise, oldest first; sessions with no time or distance are left out.
+    func cardioEfforts(exerciseID: UUID, variantID: UUID? = nil, programID: UUID? = nil, since: Date = .distantPast) -> [CardioEffort] {
+        sessions(inProgram: programID).filter { $0.startedAt >= since && $0.skipped != true }.sorted { $0.startedAt < $1.startedAt }.compactMap { session in
+            let sets = session.exercises.filter { $0.exerciseID == exerciseID && (variantID == nil || $0.variantID == variantID) }
+                .flatMap(\.sets).filter { $0.completedAt != nil && $0.plan.kind != .warmup }
+            let seconds = sets.compactMap(\.seconds).reduce(0, +), meters = sets.compactMap(\.meters).reduce(0, +)
+            guard seconds > 0 || meters > 0 else { return nil }
+            return CardioEffort(sessionID: session.id, date: session.startedAt, seconds: seconds, meters: meters)
         }
     }
 
