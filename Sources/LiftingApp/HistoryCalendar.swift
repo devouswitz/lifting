@@ -1,6 +1,26 @@
 import SwiftUI
 import LiftingCore
 
+/// A day of the month as the calendar draws it: filled when trained, a dashed ring when skipped,
+/// outlined for today or the selected day.
+struct CalendarDay: View {
+    @Environment(\.palette) private var palette
+    let date: Date
+    var trained = false
+    var skipped = false
+    var selected = false
+    var body: some View {
+        let today = Calendar.current.isDateInToday(date)
+        Text("\(Calendar.current.component(.day, from: date))")
+            .font(.subheadline.weight(trained || today ? .semibold : .regular)).monospacedDigit()
+            .foregroundStyle(trained ? palette.on(.completed) : .primary)
+            .frame(width: 34, height: 34)
+            .background(trained ? palette.completed : .clear, in: Circle())
+            .overlay(Circle().strokeBorder(skipped ? Color.secondary.opacity(0.6) : .clear, style: StrokeStyle(lineWidth: 1.5, dash: [3, 3])))
+            .overlay(Circle().strokeBorder(selected ? Color.primary : today ? palette.action : .clear, lineWidth: selected ? 2 : 1).padding(-3))
+    }
+}
+
 struct HistoryCalendar: View {
     @Environment(\.colorScheme) private var scheme
     @Environment(\.palette) private var palette
@@ -17,7 +37,8 @@ struct HistoryCalendar: View {
         let dates = range.compactMap { calendar.date(byAdding: .day, value: $0 - 1, to: monthStart) }
         return Array(repeating: nil, count: offset) + dates.map(Optional.some)
     }
-    private var workoutDays: Set<Date> { Set(sessions.filter { $0.skipped != true }.map { calendar.startOfDay(for: $0.startedAt) }) }
+    /// Workouts on each day that has any.
+    private var workoutDays: [Date: Int] { sessions.filter { $0.skipped != true }.reduce(into: [:]) { $0[calendar.startOfDay(for: $1.startedAt), default: 0] += 1 } }
     private var skippedDays: Set<Date> { Set(sessions.filter { $0.skipped == true }.map { calendar.startOfDay(for: $0.startedAt) }) }
     private var weekdaySymbols: [String] {
         let symbols = calendar.shortStandaloneWeekdaySymbols
@@ -62,25 +83,29 @@ struct HistoryCalendar: View {
                 }.compactMenu().font(.subheadline.weight(.semibold)).accessibilityIdentifier("history.period")
                 Text("\(rangeLabel(ranges.current)) compared with \(rangeLabel(ranges.previous))")
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                Grid(alignment: .leading, horizontalSpacing: 20, verticalSpacing: 14) {
-                    GridRow {
-                        statistic("Workouts", value: "\(stats.workouts)", delta: delta(Double(stats.workouts - previousStats.workouts)))
-                        statistic("Rest days", value: stats.restDays.map(String.init) ?? "No data", delta: restDelta(stats, previousStats))
+                if stats.workouts == 0 && previousStats.workouts == 0 {
+                    Text("No workouts in either period.").font(.subheadline).foregroundStyle(.secondary).padding(.vertical, 8)
+                } else {
+                    Grid(alignment: .leading, horizontalSpacing: 20, verticalSpacing: 14) {
+                        GridRow {
+                            statistic("Workouts", value: "\(stats.workouts)", delta: delta(Double(stats.workouts - previousStats.workouts)))
+                            statistic("Rest days", value: stats.restDays.map(String.init) ?? "No data", delta: restDelta(stats, previousStats))
+                        }
+                        GridRow {
+                            statistic("Sets", value: "\(stats.sets)", delta: delta(Double(stats.sets - previousStats.sets)))
+                            statistic("Reps", value: "\(stats.reps)", delta: delta(Double(stats.reps - previousStats.reps)))
+                        }
+                        GridRow {
+                            statistic("Duration", value: clockText(stats.duration), delta: timeDelta(stats.duration - previousStats.duration))
+                            statistic("Average duration", value: clockText(stats.averageDuration), delta: timeDelta(stats.averageDuration - previousStats.averageDuration))
+                        }
+                        GridRow {
+                            statistic("Volume (\(unit.rawValue))", value: grouped(unit.display(stats.volume)), delta: delta(unit.display(stats.volume - previousStats.volume)))
+                            statistic("Average volume", value: grouped(unit.display(stats.averageVolume)), delta: delta(unit.display(stats.averageVolume - previousStats.averageVolume)))
+                        }
                     }
-                    GridRow {
-                        statistic("Sets", value: "\(stats.sets)", delta: delta(Double(stats.sets - previousStats.sets)))
-                        statistic("Reps", value: "\(stats.reps)", delta: delta(Double(stats.reps - previousStats.reps)))
-                    }
-                    GridRow {
-                        statistic("Duration", value: clockText(stats.duration), delta: timeDelta(stats.duration - previousStats.duration))
-                        statistic("Average duration", value: clockText(stats.averageDuration), delta: timeDelta(stats.averageDuration - previousStats.averageDuration))
-                    }
-                    GridRow {
-                        statistic("Volume (\(unit.rawValue))", value: number(unit.display(stats.volume), decimals: 0), delta: delta(unit.display(stats.volume - previousStats.volume)))
-                        statistic("Average volume", value: number(unit.display(stats.averageVolume), decimals: 0), delta: delta(unit.display(stats.averageVolume - previousStats.averageVolume)))
-                    }
+                    muscleAverages(ranges: ranges, stats: stats, previousStats: previousStats)
                 }
-                muscleAverages(ranges: ranges, stats: stats, previousStats: previousStats)
             }
         }
         .card(padding: 16)
@@ -107,7 +132,7 @@ struct HistoryCalendar: View {
                                 Capsule().fill(palette.action.opacity(0.35)).frame(width: max(2, proxy.size.width * (current[name] ?? 0) / top), height: 6)
                                     .frame(maxHeight: .infinity, alignment: .center)
                             }.frame(height: 18).accessibilityHidden(true)
-                            Text(number(unit.display(current[name] ?? 0), decimals: 0)).font(.figure(15)).gridColumnAlignment(.trailing)
+                            Text(grouped(unit.display(current[name] ?? 0))).font(.figure(15)).gridColumnAlignment(.trailing)
                             Text(delta(unit.display((current[name] ?? 0) - (previous[name] ?? 0)))).font(.caption.weight(.medium).monospacedDigit()).foregroundStyle(.secondary)
                                 .frame(minWidth: 44, alignment: .leading)
                         }.accessibilityElement(children: .combine)
@@ -128,25 +153,17 @@ struct HistoryCalendar: View {
         selectedDay = nil
     }
 
-    private func dayButton(_ date: Date, workoutDays: Set<Date>, skippedDays: Set<Date>) -> some View {
-        let hasWorkout = workoutDays.contains(date)
+    private func dayButton(_ date: Date, workoutDays: [Date: Int], skippedDays: Set<Date>) -> some View {
+        let hasWorkout = workoutDays[date] != nil
         let skipped = !hasWorkout && skippedDays.contains(date)
         let selected = selectedDay.map { calendar.isDate($0, inSameDayAs: date) } ?? false
-        let today = calendar.isDateInToday(date)
-        let ink = palette.completed
         return Button { selectedDay = selected ? nil : date } label: {
-            Text("\(calendar.component(.day, from: date))")
-                .font(.subheadline.weight(hasWorkout || today ? .semibold : .regular)).monospacedDigit()
-                .foregroundStyle(hasWorkout ? palette.on(.completed) : .primary)
-                .frame(width: 34, height: 34)
-                .background(hasWorkout ? ink : .clear, in: Circle())
-                .overlay(Circle().strokeBorder(skipped ? Color.secondary.opacity(0.6) : .clear, style: StrokeStyle(lineWidth: 1.5, dash: [3, 3])))
-                .overlay(Circle().strokeBorder(selected ? Color.primary : today ? palette.action : .clear, lineWidth: selected ? 2 : 1).padding(-3))
+            CalendarDay(date: date, trained: hasWorkout, skipped: skipped, selected: selected)
                 .frame(maxWidth: .infinity, minHeight: 36)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain).disabled(!hasWorkout && !skipped)
-        .accessibilityLabel("\(date.formatted(.dateTime.weekday(.wide).month(.wide).day().year())), \(skipped ? "skipped" : counted(sessions.filter { calendar.isDate($0.startedAt, inSameDayAs: date) && $0.skipped != true }.count, "workout"))")
+        .accessibilityLabel("\(date.formatted(.dateTime.weekday(.wide).month(.wide).day().year())), \(skipped ? "skipped" : counted(workoutDays[date] ?? 0, "workout"))")
         .accessibilityAddTraits(selected ? .isSelected : [])
         .accessibilityIdentifier("history.day.\(calendar.component(.year, from: date))-\(calendar.component(.month, from: date))-\(calendar.component(.day, from: date))")
     }
@@ -168,14 +185,15 @@ struct HistoryCalendar: View {
     }
     private func rangeLabel(_ interval: DateInterval) -> String {
         guard interval.duration > 0 else { return "No data" }
+        // "Nov 1 – 9", with the year only when it isn't this one.
         let last = calendar.date(byAdding: .day, value: -1, to: interval.end) ?? interval.end
-        let style: Date.FormatStyle = .dateTime.month(.abbreviated).day().year()
-        return "\(interval.start.formatted(style))–\(last.formatted(style))"
+        let style = Date.IntervalFormatStyle().month(.abbreviated).day()
+        return (interval.start..<last).formatted(calendar.isDate(last, equalTo: .now, toGranularity: .year) ? style : style.year())
     }
 
     private func delta(_ value: Double) -> String {
         let rounded = value.rounded()
-        return rounded == 0 ? "same" : "\(rounded > 0 ? "+" : "−")\(number(abs(rounded), decimals: 0))"
+        return rounded == 0 ? "same" : "\(rounded > 0 ? "+" : "−")\(grouped(abs(rounded)))"
     }
     private func timeDelta(_ value: Double) -> String { abs(value) < 1 ? "same" : "\(value > 0 ? "+" : "−")\(clockText(abs(value)))" }
 }

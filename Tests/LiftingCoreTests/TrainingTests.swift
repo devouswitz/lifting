@@ -28,6 +28,11 @@ final class TrainingTests: XCTestCase {
         decimal.insert("."); XCTAssertEqual(decimal.text, "0.")
         decimal.insert("."); XCTAssertEqual(decimal.text, "0.")
         decimal.insert("25"); XCTAssertEqual(decimal.value, 0.25)
+        // A load converted between units opens with two decimals at most, and is not an edit until a key is pressed.
+        let converted = NumericEntry(value: WeightUnit.kg.display(WeightUnit.lb.kilograms(95)), maximum: 1000, integer: false)
+        XCTAssertEqual(converted.text, "43.09"); XCTAssertFalse(converted.changed)
+        XCTAssertEqual(NumericEntry(value: 61.25, maximum: 1000, integer: false).text, "61.25")
+        XCTAssertEqual(NumericEntry(value: 190, maximum: 1000, integer: false).text, "190")
     }
 
     func testCategoryChoicesReuseSpellingAndKeepCustomAndImportedLabels() throws {
@@ -514,7 +519,7 @@ final class TrainingTests: XCTestCase {
         try data.substitute(sessionExerciseID: item.id, with: target.id, future: true)
         let replacement = data.activeSession!.exercises.last!
         XCTAssertNotEqual(replacement.variantID, foreign.id)
-        XCTAssertEqual(replacement.sets[0].weight, 0)
+        XCTAssertNil(replacement.sets[0].weight)
         try editFirstWorkingWeight(&data, weight: 10, exerciseID: replacement.id, saveFuture: true)
         XCTAssertEqual(data.variant(foreign.id), foreign)
         let storedID = replacement.variantID
@@ -1286,6 +1291,8 @@ final class TrainingTests: XCTestCase {
         XCTAssertNotNil(data.activeSession!.exercises[0].sets[0].completedAt)
         XCTAssertEqual(data.activeSession!.exercises[1].exerciseID, target.id)
         XCTAssertEqual(data.activeSession!.exercises[1].sets.count, 4)
+        // The substitute has no working weight yet, so its loads are unknown rather than zero.
+        XCTAssertTrue(data.activeSession!.exercises[1].sets.allSatisfy { $0.weight == nil })
         XCTAssertFalse(data.activeSession!.exercises[0].progressionEligible)
         XCTAssertFalse(data.activeSession!.exercises[1].progressionEligible)
         XCTAssertEqual(data.routines[0], routine)
@@ -1302,7 +1309,7 @@ final class TrainingTests: XCTestCase {
         XCTAssertNotEqual(data.routines[0].slots.last!.variantID, original[0].slots.last!.variantID)
         XCTAssertEqual(data.routines[2], original[2])
         XCTAssertNotEqual(data.activeSession!.exercises.last!.variantID, item.variantID)
-        XCTAssertEqual(data.activeSession!.exercises.last!.sets[0].weight, 0)
+        XCTAssertNil(data.activeSession!.exercises.last!.sets[0].weight)
     }
 
     func testCardioCanLiveAlongsideStrength() throws {

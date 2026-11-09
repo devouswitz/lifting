@@ -100,7 +100,7 @@ struct SettingsView: View {
                 Link(destination: URL(string: "https://ko-fi.com/devouswitz")!) {
                     HStack { TileLabel(title: "Support Setform on Ko-fi", symbol: "heart.fill", color: .pink); Spacer(); Image(systemName: "arrow.up.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary) }
                 }.accessibilityIdentifier("settings.kofi")
-                LabeledContent("Version", value: "1.0")
+                LabeledContent("Version", value: appVersion)
             }
         }.formStyle(.grouped).navigationTitle("Settings")
         .fileExporter(isPresented: $exporting, document: document, contentType: contentType, defaultFilename: exportName) { result in
@@ -131,6 +131,13 @@ struct SettingsView: View {
                 do { if let url = try result.get().first { store.chooseSyncFolder(url) } } catch { store.syncStatus = error.localizedDescription }
             }
         }
+    }
+
+    /// "1.0 (17)": the version and build the bundle was made with.
+    private var appVersion: String {
+        let info = Bundle.main.infoDictionary
+        let version = info?["CFBundleShortVersionString"] as? String ?? "1.0"
+        return (info?["CFBundleVersion"] as? String).map { "\(version) (\($0))" } ?? version
     }
 
     #if os(iOS)

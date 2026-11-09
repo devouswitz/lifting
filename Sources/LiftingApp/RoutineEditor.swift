@@ -11,8 +11,8 @@ struct RoutineEditor: View {
     @State private var lifted: LiftedRow?
     @State private var rows = RowFrames()
     @State private var expanded: UUID?
-    @State private var linking = false
-    @State private var linkedSlotID: UUID?
+    /// The slot whose superset or circuit is being edited. The sheet is keyed on it, so it always opens on that exercise.
+    @State private var linking: LinkTarget?
     @State private var warmups = false
     @State private var renaming = false
     @State private var name = ""
@@ -31,7 +31,7 @@ struct RoutineEditor: View {
                                 expanded: expanded == slot.id,
                                 groupTitle: groupTitle(slot, in: routine),
                                 toggle: { withAnimation(.snappy) { expanded = expanded == slot.id ? nil : slot.id } },
-                                link: { linkedSlotID = slot.id; linking = true },
+                                link: { linking = LinkTarget(id: slot.id) },
                                 move: { offset in move(slot.id, by: offset) },
                                 canMoveUp: routine.slots.first?.id != slot.id,
                                 canMoveDown: routine.slots.last?.id != slot.id,
@@ -43,7 +43,7 @@ struct RoutineEditor: View {
                     }
                     Button { picker = true } label: { Label("Add Exercises", systemImage: "plus") }.buttonStyle(FieldButtonStyle()).accessibilityIdentifier("routine.addExercises")
                     if showsStart && !routine.slots.isEmpty { StartDayButton(day: routine) }
-                }.padding(16).reorderingStack("day")
+                }.padding(16).readableWidth().reorderingStack("day")
             }
         }
         .reorderingScroll().background(palette.background).navigationTitle(routine?.name ?? "Day").inlineTitle()
@@ -63,7 +63,7 @@ struct RoutineEditor: View {
         }
         .onAppear { if expanded == nil { expanded = routine?.slots.first?.id } }
         .sheet(isPresented: $picker) { ExercisePicker(title: "Add Exercises", onAdd: { store.add($0, to: routineID) }).sheetSize() }
-        .sheet(isPresented: $linking) { LinkedExerciseEditor(routineID: routineID, exerciseID: linkedSlotID).sheetSize() }
+        .sheet(item: $linking) { LinkedExerciseEditor(routineID: routineID, exerciseID: $0.id).sheetSize() }
         .sheet(isPresented: $warmups) { WarmupsSheet(routineID: routineID).sheetSize() }
     }
 
@@ -90,6 +90,8 @@ struct RoutineEditor: View {
     }
     private func move(_ id: UUID, by offset: Int) { store.perform { $0.moveSlot(id, routineID: routineID, offset: offset) } }
 }
+
+struct LinkTarget: Identifiable { let id: UUID }
 
 struct ExercisePicker: View {
     @EnvironmentObject var store: AppStore

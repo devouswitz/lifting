@@ -13,7 +13,11 @@ struct SetformApp: App {
                 #endif
                 .task { store.prepareNotifications(); await store.startHealth() }
                 .task { await store.runSyncLoop() }
-                .onChange(of: phase) { _, value in if value == .active { Task { await store.syncNow(); await store.refreshHealth() } } }
+                .onChange(of: phase) { _, value in
+                    if value == .active { Task { await store.syncNow(); await store.refreshHealth() } }
+                    // Edits are written in the background; finish before the app can be suspended.
+                    else { store.saver?.flush() }
+                }
         }
         #if os(macOS)
         .defaultSize(width: 440, height: 840)

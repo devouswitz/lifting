@@ -64,8 +64,7 @@ struct CardioProgressView: View {
             Picker("Measure", selection: $distance) { Text("Time").tag(false); Text("Distance").tag(true) }
                 .pickerStyle(.segmented).labelsHidden().accessibilityIdentifier("cardio.measure")
             if all.isEmpty {
-                Text("No cardio logged in this range. Log time or distance on a cardio exercise to see it here.")
-                    .foregroundStyle(.secondary).padding(.vertical, 24)
+                EmptyState(symbol: "figure.run", text: "No cardio logged in this range.", compact: true)
             } else {
                 if all.count > 1 {
                     ScrollView(.horizontal, showsIndicators: false) {
@@ -76,7 +75,7 @@ struct CardioProgressView: View {
                     }
                 }
                 if values.allSatisfy({ $0 == 0 }) {
-                    Text(distance ? "No distance logged in this range." : "No time logged in this range.").foregroundStyle(.secondary).padding(.vertical, 24)
+                    EmptyState(symbol: "figure.run", text: distance ? "No distance logged in this range." : "No time logged in this range.", compact: true)
                 } else {
                     chart(buckets, values: values, segments: segments, rows: shown, monthly: monthly)
                 }

@@ -27,7 +27,7 @@ public enum SetTechniques {
 public enum Technique: String, Identifiable, Sendable {
     case drop, myo
     public var id: String { rawValue }
-    public var title: String { self == .drop ? "Drop sets" : "MYO reps" }
+    public var title: String { self == .drop ? "Drop Setup" : "MYO Setup" }
 }
 
 /// How a lifter runs drop sets and MYO reps. Set app-wide, and optionally per exercise.

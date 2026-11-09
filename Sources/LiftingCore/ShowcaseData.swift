@@ -127,7 +127,9 @@ public extension TrainingData {
             adjust(&session, roll(0...3))
             session.notes = note
             data.activeSession = session
-            try? data.finish(now: clock.addingTimeInterval(60))
+            // A run lasts as long as its logged time.
+            let cardio = session.exercises.filter { $0.mode == .cardio }.flatMap(\.sets).compactMap(\.seconds).reduce(0, +)
+            try? data.finish(now: clock.addingTimeInterval(60 + cardio))
             for item in session.exercises {
                 guard var plan = plans[item.variantID] else { continue }
                 plan.count += 1

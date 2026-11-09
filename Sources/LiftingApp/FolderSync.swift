@@ -155,7 +155,7 @@ extension AppStore {
                     recovery = try LocalRepository.encode(data.withoutHealthData)
                     if let repository {
                         try LocalRepository.encode(data).write(to: repository.url.appendingPathExtension("before-sync"), options: .atomic)
-                        try repository.save(merged)
+                        try saver?.write(merged)
                     }
                     data = merged
                 }

@@ -2,6 +2,30 @@
 
 Entries below are dated records. Earlier toolchain and distribution limitations describe the environment at that time; see the newest pass for current evidence.
 
+## Launch polish pass, build 17 (November 9, 2026)
+
+Run on the iPhone 18 Pro simulator (iOS 27.0, Xcode 27.1) with a scripted UI walker: an XCUITest that taps, types, drags, and screenshots from a steps file. Data sets: a fresh install, the showcase library, and a generated library of 440 workouts (about three years, a 4.3 MB file).
+
+- Speed with long history, Release build, frame gaps logged by a display link:
+  - Every edit used to encode, re-read, and write the whole library on the main thread: 85 to 117 ms per logged set or typed character with 440 workouts. Saves now run on a background queue; the same edits measure 0 to 5 ms, and the file and its `.previous` copy were confirmed on disk afterwards.
+  - With Progress on screen or under the workout, every edit recomputed every record and chart: 370 ms to 1.5 s stalls. Progress history is now built once per change to history and each exercise reads only its own sessions; the same run measures about 100 ms a change against a 50 ms baseline that a fresh library also shows.
+  - History under the workout stays at the baseline. The calendar counted workouts per day by scanning all sessions for each day; it now counts once.
+- Fixes found by walking the flows:
+  - The superset sheet in a day opened without its exercise selected, and on an already linked exercise offered Link instead of the group with Unlink. The sheet is now keyed on the exercise. Checked: preselected on first open, linked both, reopened to the group with Unlink Exercises.
+  - Swapping to an exercise or equipment version with no working weight filled its sets with 0; they are now empty, as a new exercise's are (core test updated).
+  - A day or Train row showed "0 lb" for an exercise with no working weight; it is now blank.
+  - "Deload after 2 misss" in Plan Settings now reads "misses".
+  - In kg, the rest row under an exercise wrapped "Warm-up" across two lines; the row now stays on one line.
+  - A converted load opened on the keypad as 43.091; it opens as 43.09 (core test added).
+  - A chart with one session labelled the same date twice; short spans now mark each day once.
+  - Delete Workout at the end of a workout's screen sat under the minimized tab bar; it is centered.
+  - Showcase runs lasted 8 minutes while logging 43; a session now covers its logged cardio time.
+- Polish checked in light and in the app's Dark appearance: grouped volumes (39,360 lb), distance in place of "0 lb" for cardio workouts, set badges and Record marks in workout detail, the saved workout opening after Finish, the week strip and "Last done" on Train, one empty-state style across History, Progress, Muscles, and Cardio on a fresh install, keypad sheets sized to their keys, Swap Exercise and Drop Setup titles matching the menu items that open them, version and build read from the bundle.
+- iPad (iPad Air 11-inch simulator): Train and Progress checked; pages keep a readable width instead of stretching.
+- The Mac preview had stopped compiling when the distance unit was added: on macOS `extension Settings` extended SwiftUI's Settings scene. It names the core type now and `swift build --product Setform` completes.
+- 112 core test cases, zero failures.
+- Not verified: a physical iPhone; the system dark setting (the simulator ignored `simctl ui appearance dark`, so dark was checked through Settings > Appearance); Dynamic Type at accessibility sizes; VoiceOver; Apple Health and iCloud folder sync, which need a device; drag to reorder (the scripted drag did not start on a header); the save flush when iOS suspends the app, which was exercised only through the home button in the simulator.
+
 Verified on October 18, 2026.
 
 ## Structural redesign (iPhone simulator)

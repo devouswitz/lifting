@@ -80,14 +80,15 @@ struct ExerciseInfoRow: View {
     /// Rest between sets, after warm-ups, and after a missed target, together. Opened by holding Rest.
     var restSettings: () -> Void = {}
     var body: some View {
-        let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8)) : AnyLayout(HStackLayout(spacing: 16))
+        let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8)) : AnyLayout(HStackLayout(spacing: 14))
         layout {
-            if let swap { EquipmentMenu(exerciseID: exerciseID, choose: swap).disabled(swapDisabled) }
-            if let load { Text(load).font(.subheadline.weight(.medium)).foregroundStyle(.secondary).accessibilityLabel("Working sets, " + load) }
+            if let swap { EquipmentMenu(exerciseID: exerciseID, choose: swap).disabled(swapDisabled).fixedSize() }
+            // The working load gives way first, so the row stays on one line in either unit.
+            if let load { Text(load).font(.subheadline.weight(.medium)).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.7).accessibilityLabel("Working sets, " + load) }
             HStack(spacing: 12) {
                 token("Rest", rest, action: editRest).accessibilityLabel("Rest between sets, \(clockText(Double(rest)))")
                 if let warmupRest { token("Warm-up", warmupRest, action: editWarmupRest).accessibilityLabel("Rest after warm-ups, \(clockText(Double(warmupRest)))") }
-            }.longPress("Rest settings", perform: restSettings)
+            }.fixedSize().longPress("Rest settings", perform: restSettings)
             if !typeSize.isAccessibilitySize { Spacer(minLength: 0) }
         }.buttonStyle(.plain)
     }

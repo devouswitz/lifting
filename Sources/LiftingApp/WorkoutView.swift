@@ -30,7 +30,7 @@ struct WorkoutView: View {
                         }
                         ForEach(session.exercises) { exercise in WorkoutExerciseCard(exerciseID: exercise.id, reordering: reordering).id(exercise.id) }
                         Button { adding = true } label: { Label("Add Exercise", systemImage: "plus") }.buttonStyle(FieldButtonStyle()).padding(.top, 4)
-                    }.padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 24)
+                    }.padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 24).readableWidth()
                     .reorderingStack("workout")
                 }
             }.reorderingScroll().background(palette.background)
@@ -131,8 +131,8 @@ struct WorkoutView: View {
                         layout {
                             MetricTile(value: "\(session.completedSets)", label: "Sets")
                             MetricTile(value: clockText(session.duration()), label: "Duration")
-                            let volume = volumeText(session, settings: store.data.settings)
-                            MetricTile(value: volume.total, label: volume.warmup.map { "Volume, \($0)" } ?? "Volume")
+                            let total = WorkTotal(session, settings: store.data.settings)
+                            MetricTile(value: total.value, label: total.caption)
                         }.padding(.vertical, 4)
                     } footer: {
                         if session.completedSets == 0 { Text("Log at least one set to save this workout.") }
@@ -166,8 +166,8 @@ struct WorkoutSummaryHeader: View {
             let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(spacing: 12)) : AnyLayout(HStackLayout(alignment: .top, spacing: 0))
             layout {
                 TimelineView(.periodic(from: .now, by: 1)) { context in stat("Duration", clockText(session.duration(at: context.date))) }
-                let volume = volumeText(session, settings: store.data.settings)
-                stat("Volume", volume.total, note: volume.warmup)
+                let total = WorkTotal(session, settings: store.data.settings)
+                stat(total.title, total.value, note: total.note)
                 stat("Sets", "\(session.completedSets) of \(session.totalSets)")
             }
             CapsuleProgress(value: session.totalSets == 0 ? 0 : Double(session.completedSets) / Double(session.totalSets))
@@ -355,7 +355,7 @@ struct WorkoutExerciseCard: View {
         let set = { (id: UUID) in item.sets.first { $0.id == id } }
         switch sheet {
         case .substitute:
-            ExercisePicker(title: "Substitute", similarMuscle: store.data.exercise(item.exerciseID)?.muscle, substitution: true, onSubstitute: { exercise, future in
+            ExercisePicker(title: "Swap Exercise", similarMuscle: store.data.exercise(item.exerciseID)?.muscle, substitution: true, onSubstitute: { exercise, future in
                 store.perform { try $0.substitute(sessionExerciseID: exerciseID, with: exercise.id, future: future) }
             }).sheetSize()
         case .technique(let technique):

@@ -112,7 +112,7 @@ struct NumberEditor: View {
             let changed = entry.changed
             if commit(), changed { edit.confirm?() }
         }
-        .modifier(KeypadPresentation())
+        .modifier(KeypadPresentation(height: edit.presets.isEmpty ? 540 : 590))
     }
     private func commit() -> Bool {
         guard entry.isValid else { return false }
@@ -231,7 +231,7 @@ struct RepValuesEditor: View {
                     StoreErrorRow()
                 }.padding(20)
             }.navigationTitle("Rep Target").inlineTitle()
-        }.modifier(KeypadPresentation(height: mode == .range ? 660 : 600))
+        }.modifier(KeypadPresentation(height: (mode == .range ? 580 : 500) + (adjacent == nil ? 0 : 44)))
     }
     private func commit() -> Bool {
         guard valid else { return false }
@@ -306,7 +306,7 @@ struct LoadRuleEditor: View {
                 }.padding(20)
             }.navigationTitle("Weight Settings").inlineTitle()
         }
-        .modifier(KeypadPresentation(height: 600))
+        .modifier(KeypadPresentation(height: 510))
         .onAppear { if original == nil { original = plan; reload() } }
     }
     private func reload() {
@@ -394,7 +394,7 @@ private struct NumericKeys: View {
 private struct KeypadPresentation: ViewModifier {
     @Environment(\.palette) private var palette
     @Environment(\.dynamicTypeSize) private var typeSize
-    var height: CGFloat = 580
+    let height: CGFloat
     func body(content: Content) -> some View {
         content.frame(idealWidth: 420, idealHeight: height)
             .presentationDetents(typeSize.isAccessibilitySize ? [.large] : [.height(height), .large])

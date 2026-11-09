@@ -78,6 +78,8 @@ extension View {
             .contentMargins(.top, 0, for: .scrollContent)
             .toolbar { ToolbarItem(placement: .principal) { Color.clear.frame(width: 1, height: 1).accessibilityHidden(true) } }
     }
+    /// Keeps a scrolling page at a comfortable width on iPad and Mac, centered. No effect on iPhone.
+    func readableWidth() -> some View { frame(maxWidth: 700).frame(maxWidth: .infinity) }
     func sheetSize() -> some View { self.frame(idealWidth: 480, idealHeight: 700).presentationDetents([.large]) }
 }
 
@@ -245,10 +247,15 @@ struct FlowLayout: Layout {
     }
 }
 
+/// Nothing to show yet: a symbol and one line, centered. Compact inside a card.
 struct EmptyState: View {
     let symbol: String
     let text: String
-    var body: some View { VStack(spacing: 12) { Image(systemName: symbol).font(.largeTitle); Text(text).font(.body) }.foregroundStyle(.secondary).frame(maxWidth: .infinity).padding(.vertical, 64) }
+    var compact = false
+    var body: some View {
+        VStack(spacing: 12) { Image(systemName: symbol).font(compact ? .title : .largeTitle); Text(text).font(compact ? .subheadline : .body).multilineTextAlignment(.center) }
+            .foregroundStyle(.secondary).frame(maxWidth: .infinity).padding(.vertical, compact ? 28 : 64)
+    }
 }
 
 struct MetricTile: View {

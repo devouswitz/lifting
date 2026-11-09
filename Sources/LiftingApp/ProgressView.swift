@@ -18,26 +18,29 @@ struct ProgressView: View {
     @State private var view = ProgressMode.exercises
 
     var body: some View {
-        let history = ProgressHistory(data: store.data, programID: selectedProgramID, includeHidden: false)
-        let hidden = ProgressHistory(data: store.data, programID: selectedProgramID).exercises.filter { $0.hiddenFromProgress == true }
+        let history = ProgressHistory.current(store.data, programID: selectedProgramID, includeHidden: false)
+        let hidden = ProgressHistory.current(store.data, programID: selectedProgramID).exercises.filter { $0.hiddenFromProgress == true }
         let lifts = chartedLifts(history)
-        let tracks = liftTracks(lifts, history: history)
+        let tracks = history.liftTracks(lifts, metric: metric, range: range)
         let records = history.records(preferredMetric: metric).filter {
             search.isEmpty || $0.exercise.name.localizedCaseInsensitiveContains(search)
         }
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 20) {
                 Picker("View", selection: $view) { ForEach(ProgressMode.allCases) { Text($0.rawValue).tag($0) } }.pickerStyle(.segmented).labelsHidden().accessibilityIdentifier("progress.view")
+                let unlogged = view == .exercises && history.exercises.isEmpty
                 VStack(alignment: .leading, spacing: 14) {
-                    if view == .exercises {
+                    if view == .exercises && !unlogged {
                         HStack {
                             liftMenu(lifts, history: history)
                             Spacer(minLength: 8)
                             ProgressMetricPicker(metric: $metric, metrics: ProgressHistory.metrics(for: .strength))
                         }
                     }
-                    ProgressRangePicker(range: $range)
+                    if !unlogged { ProgressRangePicker(range: $range) }
                     switch view {
+                    case .exercises where unlogged:
+                        EmptyState(symbol: "chart.xyaxis.line", text: selectedProgramID == nil ? "No lifts logged." : "No lifts logged in this program.", compact: true)
                     case .exercises:
                         ProgressLineChart(tracks: tracks, metric: metric, unit: store.data.settings.unit, height: 270, showsLegend: false, labelsLineEnds: true,
                                           emptyText: lifts.isEmpty ? "Choose lifts to chart from the menu above." : "Turn on a lift below to chart it.")
@@ -49,26 +52,9 @@ struct ProgressView: View {
                 }
                 .card()
 
-                if view == .exercises { SectionTitle(title: "Records").padding(.top, 4); VStack(alignment: .leading, spacing: 10) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                        TextField("Search logged exercises", text: $search)
-                            .textFieldStyle(.plain)
-                            .accessibilityIdentifier("progress.search")
-                        if !search.isEmpty {
-                            Button { search = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
-                                .buttonStyle(.plain)
-                                .accessibilityLabel("Clear search")
-                        }
-                    }
-                    .padding(.horizontal, 12).padding(.vertical, 9)
-                    .background(palette.field, in: Capsule())
-
-                    if records.isEmpty {
-                        Text(history.exercises.isEmpty ? "No exercises logged." : "No matching exercises.")
-                            .foregroundStyle(.secondary)
-                            .padding(.vertical, 20)
-                    }
+                if view == .exercises, !unlogged || !hidden.isEmpty { SectionTitle(title: "Records").padding(.top, 4); VStack(alignment: .leading, spacing: 10) {
+                    if !unlogged { recordSearch }
+                    if records.isEmpty && !unlogged { EmptyState(symbol: "magnifyingglass", text: "No matching exercises.", compact: true) }
                     ForEach(records) { record in
                         NavigationLink { ExerciseProgress(exerciseID: record.exercise.id, programID: selectedProgramID) } label: {
                             ProgressRecordRow(record: record, unit: store.data.settings.unit)
@@ -92,7 +78,7 @@ struct ProgressView: View {
                 .card(padding: 16)
                 }
             }
-            .padding(16)
+            .padding(16).readableWidth()
         }
         .background(palette.background)
         .navigationTitle("Progress")
@@ -107,7 +93,7 @@ struct ProgressView: View {
         }
         .onChange(of: selectedProgramID) { _, _ in
             search = ""; range = .all; metric = .weight
-            let scoped = ProgressHistory(data: store.data, programID: selectedProgramID, includeHidden: false)
+            let scoped = ProgressHistory.current(store.data, programID: selectedProgramID, includeHidden: false)
             if scoped.tracks(metric: metric).isEmpty, let exercise = scoped.exercises.first { metric = scoped.preferredMetric(for: exercise, preferred: metric) }
         }
         .toolbar {
@@ -125,6 +111,21 @@ struct ProgressView: View {
                 }.accessibilityLabel("Program filter").accessibilityIdentifier("progress.program")
             }
         }
+    }
+}
+
+extension ProgressView {
+    private var recordSearch: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+            TextField("Search logged exercises", text: $search).textFieldStyle(.plain).accessibilityIdentifier("progress.search")
+            if !search.isEmpty {
+                Button { search = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
+                    .buttonStyle(.plain).accessibilityLabel("Clear search")
+            }
+        }
+        .padding(.horizontal, 12).padding(.vertical, 9)
+        .background(palette.field, in: Capsule())
     }
 }
 
@@ -192,15 +193,6 @@ extension ProgressView {
         save(slots, hidden: hidden)
     }
 
-    private func liftTracks(_ lifts: [ChartedLift], history: ProgressHistory) -> [ProgressTrack] {
-        lifts.filter(\.on).compactMap { lift in
-            let points = history.points(exerciseID: lift.exercise.id, metric: metric, since: range.since)
-            guard !points.isEmpty else { return nil }
-            return ProgressTrack(id: lift.exercise.id, exerciseID: lift.exercise.id, label: lift.exercise.name, shortLabel: lift.exercise.name,
-                                 colorIndex: lift.slot, points: points, light: history.lightSessions(exerciseID: lift.exercise.id))
-        }
-    }
-
     private func liftMenu(_ lifts: [ChartedLift], history: ProgressHistory) -> some View {
         let charted = Set(lifts.map(\.exercise.id))
         let full = slots.compactMap { $0 }.count >= Self.liftLimit
@@ -266,10 +258,10 @@ struct ExerciseProgress: View {
     private var variants: [Variant] { store.data.variants.filter { $0.exerciseID == exerciseID } }
 
     var body: some View {
-        let history = ProgressHistory(data: store.data, programID: programID)
+        let history = ProgressHistory.current(store.data, programID: programID)
         let availableTracks = history.tracks(exerciseID: exerciseID, metric: metric)
-        let tracks = history.tracks(exerciseID: exerciseID, variantID: selectedVariant, metric: metric, since: range.since)
-        let sessions = resultSessions
+        let tracks = history.tracks(exerciseID: exerciseID, variantID: selectedVariant, metric: metric, range: range)
+        let sessions = resultSessions(history)
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 VStack(alignment: .leading, spacing: 16) {
@@ -295,9 +287,7 @@ struct ExerciseProgress: View {
 
                 SectionTitle(title: "Results")
                 VStack(alignment: .leading, spacing: 16) {
-                    if sessions.isEmpty {
-                        Text("No logged sets in this range.").foregroundStyle(.secondary).padding(.vertical, 16)
-                    }
+                    if sessions.isEmpty { EmptyState(symbol: "clock", text: "No logged sets in this range.", compact: true) }
                     ForEach(sessions) { session in
                         NavigationLink { SessionDetail(sessionID: session.id) } label: {
                             resultRow(session, history: history)
@@ -308,7 +298,7 @@ struct ExerciseProgress: View {
                 }
                 .card()
             }
-            .padding(16)
+            .padding(16).readableWidth()
         }
         .background(palette.background)
         .navigationTitle(exercise?.name ?? "Progress")
@@ -352,7 +342,7 @@ struct ExerciseProgress: View {
     /// The heaviest weight lifted for at least 1, 3, 5, 8, 10, and 12 reps, up to the most reps logged.
     @ViewBuilder private func repRecords(_ history: ProgressHistory) -> some View {
         let unit = store.data.settings.unit
-        let records = exercise?.mode == .strength ? history.data.repRecords(exerciseID: exerciseID, variantID: selectedVariant) : []
+        let records = exercise?.mode == .strength ? history.data(for: exerciseID).repRecords(exerciseID: exerciseID, variantID: selectedVariant) : []
         if !records.isEmpty {
             SectionTitle(title: "Rep records")
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 3), spacing: 10) {
@@ -374,7 +364,7 @@ struct ExerciseProgress: View {
 
     /// A cardio exercise's longest distance, longest time, and fastest pace, each with its session's date.
     @ViewBuilder private func cardioBests(_ history: ProgressHistory) -> some View {
-        let efforts = exercise?.mode == .cardio ? history.data.cardioEfforts(exerciseID: exerciseID, variantID: selectedVariant) : []
+        let efforts = exercise?.mode == .cardio ? history.data(for: exerciseID).cardioEfforts(exerciseID: exerciseID, variantID: selectedVariant) : []
         let bests: [(title: String, value: String, effort: CardioEffort)] = [
             efforts.filter { $0.meters > 0 }.max { $0.meters < $1.meters }.map { ("Longest", distanceText($0.meters), $0) },
             efforts.filter { $0.seconds > 0 }.max { $0.seconds < $1.seconds }.map { ("Longest time", clockText($0.seconds), $0) },
@@ -419,12 +409,11 @@ struct ExerciseProgress: View {
 
     private func validateTrack() {
         guard let id = selectedVariant else { return }
-        let history = ProgressHistory(data: store.data, programID: programID)
-        if history.tracks(exerciseID: exerciseID, variantID: id, metric: metric).isEmpty { selectedVariant = nil }
+        if ProgressHistory.current(store.data, programID: programID).tracks(exerciseID: exerciseID, variantID: id, metric: metric).isEmpty { selectedVariant = nil }
     }
 
-    private var resultSessions: [Session] {
-        store.data.sessions(inProgram: programID).filter { session in
+    private func resultSessions(_ history: ProgressHistory) -> [Session] {
+        history.data(for: exerciseID).sessions.filter { session in
             session.startedAt >= range.since && session.exercises.contains { item in
                 item.exerciseID == exerciseID && (selectedVariant == nil || item.variantID == selectedVariant)
                     && item.sets.contains { $0.completedAt != nil && $0.plan.kind != .warmup }
@@ -434,7 +423,8 @@ struct ExerciseProgress: View {
     }
 
     private func resultRow(_ session: Session, history: ProgressHistory) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        let severalTracks = history.tracks(exerciseID: exerciseID, metric: metric).count > 1
+        return VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline) {
                 Text(session.startedAt, format: .dateTime.month(.abbreviated).day().year()).font(.headline)
                 Spacer()
@@ -446,7 +436,7 @@ struct ExerciseProgress: View {
                     && item.sets.contains { $0.completedAt != nil && $0.plan.kind != .warmup }
             }) { item in
                 VStack(alignment: .leading, spacing: 5) {
-                    Text(history.trackLabel(item.variantID, fallback: item.label)).font(.caption.weight(.medium)).foregroundStyle(.secondary)
+                    if severalTracks { Text(history.trackLabel(item.variantID, fallback: item.label)).font(.caption.weight(.medium)).foregroundStyle(.secondary) }
                     Text(loggedExerciseSummary(item, unit: store.data.settings.unit))
                         .font(.subheadline).monospacedDigit().fixedSize(horizontal: false, vertical: true)
                     if !item.notes.isEmpty { Text(item.notes).font(.subheadline).foregroundStyle(.secondary) }
@@ -464,7 +454,7 @@ struct ExerciseProgress: View {
 struct HiddenExercisesView: View {
     @EnvironmentObject var store: AppStore
     let programID: UUID?
-    private var exercises: [Exercise] { ProgressHistory(data: store.data, programID: programID).exercises.filter { $0.hiddenFromProgress == true } }
+    private var exercises: [Exercise] { ProgressHistory.current(store.data, programID: programID).exercises.filter { $0.hiddenFromProgress == true } }
     var body: some View {
         ThemedForm {
             Section {
@@ -586,11 +576,19 @@ private struct ProgressLineChart: View {
         let padding = max((high - low) * 0.15, max(high * 0.05, 1))
         return max(0, low - padding)...max(high + padding, 1)
     }
-    private var dateFormat: Date.FormatStyle {
-        if dateDomain.upperBound.timeIntervalSince(dateDomain.lowerBound) < 172_800 { return .dateTime.hour().minute() }
-        return dateDomain.upperBound.timeIntervalSince(dateDomain.lowerBound) > 366 * 86_400
-            ? .dateTime.month(.abbreviated).year(.twoDigits) : .dateTime.month(.abbreviated).day()
+    private var domainLength: TimeInterval { dateDomain.upperBound.timeIntervalSince(dateDomain.lowerBound) }
+    /// Times of day only when every point falls within one day; otherwise days, or months once past a year.
+    private var sameDay: Bool {
+        let dates = data.map(\.date)
+        guard let first = dates.min(), let last = dates.max(), last > first else { return false }
+        return last.timeIntervalSince(first) < 86_400
     }
+    private var dateFormat: Date.FormatStyle {
+        if sameDay { return .dateTime.hour().minute() }
+        return domainLength > 366 * 86_400 ? .dateTime.month(.abbreviated).year(.twoDigits) : .dateTime.month(.abbreviated).day()
+    }
+    /// A chart only a few days wide gets one mark a day, so no date is labelled twice.
+    private var dateMarks: AxisMarkValues { !sameDay && domainLength < 6 * 86_400 ? .stride(by: .day) : .automatic(desiredCount: 4) }
 
     var body: some View {
         let plotted = data
@@ -668,7 +666,7 @@ private struct ProgressLineChart: View {
         .chartXScale(domain: dateDomain)
         .chartYScale(domain: metric.lowerIsBetter ? [valueDomain.upperBound, valueDomain.lowerBound] : [valueDomain.lowerBound, valueDomain.upperBound])
         .chartXAxis {
-            AxisMarks(values: .automatic(desiredCount: 4)) {
+            AxisMarks(values: dateMarks) {
                 AxisGridLine().foregroundStyle(.primary.opacity(0.06))
                 AxisTick().foregroundStyle(.secondary.opacity(0.4))
                 AxisValueLabel(format: dateFormat)
@@ -890,7 +888,10 @@ private struct ProgressRecordRow: View {
     private func setText(_ set: TopSet) -> String { "\(number(unit.display(set.weight))) \(unit.rawValue) × \(set.reps)" }
 }
 
-private struct ProgressHistory {
+/// History as Progress reads it: the logged exercises and their tracks under one program filter.
+/// Built once per change to history and reused. An active workout changes none of what it is made from,
+/// so logging a set with Progress on screen recomputes nothing.
+@MainActor private final class ProgressHistory {
     private struct Descriptor {
         let id: UUID
         let exercise: Exercise
@@ -899,22 +900,52 @@ private struct ProgressHistory {
     let data: TrainingData
     let exercises: [Exercise]
     private let descriptors: [Descriptor]
+    /// Each exercise's own sessions, so its charts and records never scan the rest of history.
+    private let scoped: [UUID: TrainingData]
+    // Results are kept, so an unchanged screen is handed the same values and redraws nothing.
+    private var recordCache: [Metric: [ProgressRecord]] = [:]
+    private var trackCache: [TrackKey: [ProgressTrack]] = [:]
+    private struct TrackKey: Hashable {
+        var exerciseID: UUID? = nil, variantID: UUID? = nil, lifts: [String] = []
+        let metric: Metric, range: ProgressRange
+    }
+
+    private struct Source: Equatable {
+        let sessions: [Session], exercises: [Exercise], variants: [Variant], programs: [TrainingProgram], unit: WeightUnit, distance: DistanceUnit
+    }
+    private struct Scope: Hashable {
+        let programID: UUID?, includeHidden: Bool
+    }
+    private static var cache: (source: Source, histories: [Scope: ProgressHistory])?
 
     /// The overview leaves out exercises hidden from Progress; an exercise's own screen includes them.
-    init(data: TrainingData, programID: UUID? = nil, includeHidden: Bool = true) {
+    static func current(_ data: TrainingData, programID: UUID? = nil, includeHidden: Bool = true) -> ProgressHistory {
+        let source = Source(sessions: data.sessions, exercises: data.exercises, variants: data.variants, programs: data.programs, unit: data.settings.unit, distance: DistanceDisplay.unit)
+        if cache?.source != source { cache = (source, [:]) }
+        let scope = Scope(programID: programID, includeHidden: includeHidden)
+        if let history = cache?.histories[scope] { return history }
+        let history = ProgressHistory(data: data, programID: programID, includeHidden: includeHidden)
+        cache?.histories[scope] = history
+        return history
+    }
+
+    private init(data: TrainingData, programID: UUID?, includeHidden: Bool) {
         var data = data
         if !includeHidden {
             let hidden = Set(data.exercises.filter { $0.hiddenFromProgress == true }.map(\.id))
-            data.sessions = data.sessions.map { session in var copy = session; copy.exercises.removeAll { hidden.contains($0.exerciseID) }; return copy }
+            if !hidden.isEmpty { data.sessions = data.sessions.map { session in var copy = session; copy.exercises.removeAll { hidden.contains($0.exerciseID) }; return copy } }
         }
         data.sessions = data.sessions(inProgram: programID)
         self.data = data
         var observed: [UUID: SessionExercise] = [:]
+        var sessions: [UUID: [Session]] = [:]
         for session in data.sessions {
+            for id in Set(session.exercises.map(\.exerciseID)) { sessions[id, default: []].append(session) }
             for item in session.exercises where item.sets.contains(where: { $0.completedAt != nil && $0.plan.kind != .warmup }) {
                 observed[item.variantID] = item
             }
         }
+        scoped = sessions.mapValues { list in var copy = data; copy.sessions = list; return copy }
         let loggedIDs = Set(observed.values.map(\.exerciseID))
         exercises = data.exercises.filter { loggedIDs.contains($0.id) }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
         descriptors = observed.values.compactMap { item in
@@ -925,6 +956,13 @@ private struct ProgressHistory {
             if $0.label != $1.label { return $0.label.localizedStandardCompare($1.label) == .orderedAscending }
             return $0.id.uuidString < $1.id.uuidString
         }
+    }
+
+    /// The library with only the sessions that include an exercise.
+    func data(for exerciseID: UUID) -> TrainingData {
+        if let found = scoped[exerciseID] { return found }
+        var empty = data; empty.sessions = []
+        return empty
     }
 
     static func metrics(for mode: ExerciseMode) -> [Metric] {
@@ -938,18 +976,15 @@ private struct ProgressHistory {
         return "\(descriptor.label) (\(index + 1))"
     }
 
-    func tracks(exerciseID: UUID? = nil, variantID: UUID? = nil, metric: Metric, since: Date = .distantPast) -> [ProgressTrack] {
+    func tracks(exerciseID: UUID? = nil, variantID: UUID? = nil, metric: Metric, range: ProgressRange = .all) -> [ProgressTrack] {
+        let key = TrackKey(exerciseID: exerciseID, variantID: variantID, metric: metric, range: range)
+        if let cached = trackCache[key] { return cached }
         // Within one exercise, colors start from the first slot in track order.
         let scoped = exerciseID.map { id in descriptors.filter { $0.exercise.id == id } } ?? descriptors
-        return scoped.enumerated().compactMap { index, descriptor in
-            guard exerciseID == nil || descriptor.exercise.id == exerciseID,
-                  variantID == nil || descriptor.id == variantID,
+        let tracks = scoped.enumerated().compactMap { index, descriptor -> ProgressTrack? in
+            guard variantID == nil || descriptor.id == variantID,
                   Self.metrics(for: descriptor.exercise.mode).contains(metric) else { return nil }
-            let points = data.points(exerciseID: descriptor.exercise.id, variantID: descriptor.id, metric: metric, since: since).map { point in
-                var shown = point
-                shown.value = displayed(point.value, metric: metric, unit: data.settings.unit)
-                return shown
-            }.filter { $0.value.isFinite }
+            let points = points(exerciseID: descriptor.exercise.id, variantID: descriptor.id, metric: metric, since: range.since)
             guard !points.isEmpty else { return nil }
             let shortLabel = trackLabel(descriptor.id, fallback: descriptor.label)
             let siblings = descriptors.filter { $0.exercise.id == descriptor.exercise.id }
@@ -957,11 +992,28 @@ private struct ProgressHistory {
             return ProgressTrack(id: descriptor.id, exerciseID: descriptor.exercise.id, label: label, shortLabel: shortLabel, colorIndex: index, points: points,
                                  light: lightSessions(exerciseID: descriptor.exercise.id, variantID: descriptor.id))
         }
+        trackCache[key] = tracks
+        return tracks
     }
 
-    /// An exercise's points across all its tracks, in the display unit.
-    func points(exerciseID: UUID, metric: Metric, since: Date) -> [ProgressPoint] {
-        data.points(exerciseID: exerciseID, metric: metric, since: since).map { point in
+    /// The overview's lines: one for each charted lift that is switched on, across all its tracks, colored by its slot.
+    func liftTracks(_ lifts: [ChartedLift], metric: Metric, range: ProgressRange) -> [ProgressTrack] {
+        let shown = lifts.filter(\.on)
+        let key = TrackKey(lifts: shown.map { "\($0.slot) \($0.exercise.id)" }, metric: metric, range: range)
+        if let cached = trackCache[key] { return cached }
+        let tracks = shown.compactMap { lift -> ProgressTrack? in
+            let points = points(exerciseID: lift.exercise.id, metric: metric, since: range.since)
+            guard !points.isEmpty else { return nil }
+            return ProgressTrack(id: lift.exercise.id, exerciseID: lift.exercise.id, label: lift.exercise.name, shortLabel: lift.exercise.name,
+                                 colorIndex: lift.slot, points: points, light: lightSessions(exerciseID: lift.exercise.id))
+        }
+        trackCache[key] = tracks
+        return tracks
+    }
+
+    /// An exercise's points, across all its tracks or for one, in the display unit.
+    private func points(exerciseID: UUID, variantID: UUID? = nil, metric: Metric, since: Date) -> [ProgressPoint] {
+        data(for: exerciseID).points(exerciseID: exerciseID, variantID: variantID, metric: metric, since: since).map { point in
             var shown = point
             shown.value = displayed(point.value, metric: metric, unit: data.settings.unit)
             return shown
@@ -969,9 +1021,9 @@ private struct ProgressHistory {
     }
 
     /// Judged on the whole history, so the first session in a short range is compared with the ones before it.
-    func lightSessions(exerciseID: UUID, variantID: UUID? = nil) -> Set<UUID> {
+    private func lightSessions(exerciseID: UUID, variantID: UUID? = nil) -> Set<UUID> {
         guard data.exercise(exerciseID)?.mode == .strength else { return [] }
-        return TrainingData.lightSessions(data.topSets(exerciseID: exerciseID, variantID: variantID))
+        return TrainingData.lightSessions(data(for: exerciseID).topSets(exerciseID: exerciseID, variantID: variantID))
     }
 
     func preferredMetric(for exercise: Exercise, variantID: UUID? = nil, preferred: Metric) -> Metric {
@@ -983,13 +1035,17 @@ private struct ProgressHistory {
     }
 
     func records(preferredMetric: Metric) -> [ProgressRecord] {
-        exercises.map { exercise in
+        if let cached = recordCache[preferredMetric] { return cached }
+        let records = exercises.map { exercise in
             // Cardio lists its distance (or time), whatever the lifts' metric.
             let metric = self.preferredMetric(for: exercise, preferred: exercise.mode == .cardio ? .distance : preferredMetric)
+            let own = data(for: exercise.id)
             return ProgressRecord(exercise: exercise, metric: metric, tracks: tracks(exerciseID: exercise.id, metric: metric),
-                                  tops: exercise.mode == .strength ? data.topSets(exerciseID: exercise.id) : [],
-                                  efforts: exercise.mode == .cardio ? data.cardioEfforts(exerciseID: exercise.id) : [])
+                                  tops: exercise.mode == .strength ? own.topSets(exerciseID: exercise.id) : [],
+                                  efforts: exercise.mode == .cardio ? own.cardioEfforts(exerciseID: exercise.id) : [])
         }
+        recordCache[preferredMetric] = records
+        return records
     }
 }
 

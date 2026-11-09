@@ -25,7 +25,7 @@ struct HistoryView: View {
         VStack(spacing: 0) {
             Picker("History view", selection: $mode) {
                 ForEach(HistoryMode.allCases) { Text($0.rawValue).tag($0) }
-            }.pickerStyle(.segmented).labelsHidden().padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 14)
+            }.pickerStyle(.segmented).labelsHidden().padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 14).readableWidth()
                 .accessibilityIdentifier("history.mode")
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 20) {
@@ -47,7 +47,7 @@ struct HistoryView: View {
                             }
                         }
                     }
-                }.padding(.horizontal, 16).padding(.bottom, 24)
+                }.padding(.horizontal, 16).padding(.bottom, 24).readableWidth()
             }
         }
         .background(palette.background)
@@ -98,9 +98,9 @@ private struct HistoryWorkoutRow: View {
                 Text(title).font(.headline).foregroundStyle(session.skipped == true ? .secondary : .primary)
                 if session.skipped == true { Text("Skipped").font(.caption).foregroundStyle(.secondary) }
                 else {
-                    let volume = volumeText(session, settings: settings)
+                    let total = WorkTotal(session, settings: settings)
                     let exercises = session.exercises.filter { $0.sets.contains { $0.completedAt != nil } }.count
-                    Text([counted(exercises, "exercise"), counted(session.completedSets, "set"), clockText(session.duration()), volume.total, volume.warmup, session.health?.activeKcal.map { "\(number($0, decimals: 0)) kcal" }]
+                    Text([counted(exercises, "exercise"), counted(session.completedSets, "set"), clockText(session.duration()), total.empty ? nil : total.value, total.note, session.health?.activeKcal.map { "\(grouped($0)) kcal" }]
                         .compactMap { $0 }.joined(separator: " · "))
                         .font(.caption).foregroundStyle(.secondary).monospacedDigit()
                     if !session.notes.isEmpty { Label(session.notes, systemImage: "note.text").font(.caption).foregroundStyle(.secondary).lineLimit(1) }
@@ -139,15 +139,25 @@ struct SessionDetail: View {
         .navigationTitle(session.map { store.data.title(for: $0) } ?? "Workout").inlineTitle()
         .toolbar { if session != nil { Button(editing ? "Done" : "Edit") { editing.toggle() }.fontWeight(editing ? .semibold : .regular).accessibilityIdentifier("history.edit") } }
         .confirmationDialog("Delete this workout?", isPresented: $deleting) {
-            Button("Delete workout", role: .destructive) {
+            Button("Delete Workout", role: .destructive) {
                 store.deleteSession(sessionID)
                 dismiss()
             }
         }
     }
 
+    /// Lifts whose heaviest set in this workout beat every earlier one (more reps break a tie).
+    private func records(in session: Session) -> Set<UUID> {
+        Set(Set(session.exercises.filter { $0.mode == .strength }.map(\.exerciseID)).filter { id in
+            let tops = store.data.topSets(exerciseID: id)
+            guard let index = tops.firstIndex(where: { $0.sessionID == session.id }), index > 0 else { return false }
+            return tops[..<index].allSatisfy { $0.weight < tops[index].weight || ($0.weight == tops[index].weight && $0.reps < tops[index].reps) }
+        })
+    }
+
     private func workoutDetail(_ session: Session) -> some View {
-        ScrollView {
+        let records = records(in: session)
+        return ScrollView {
             LazyVStack(alignment: .leading, spacing: 20) {
                 VStack(alignment: .leading, spacing: 16) {
                     Text(session.startedAt, format: .dateTime.weekday(.wide).month(.wide).day().year()).font(.subheadline).foregroundStyle(.secondary)
@@ -157,8 +167,8 @@ struct SessionDetail: View {
                         HStack(spacing: 16) {
                             detailMetric("Sets", value: "\(session.completedSets)")
                             detailMetric("Duration", value: clockText(session.duration()))
-                            let volume = volumeText(session, settings: store.data.settings)
-                            detailMetric(volume.warmup.map { "Volume, \($0)" } ?? "Volume", value: volume.total)
+                            let total = WorkTotal(session, settings: store.data.settings)
+                            detailMetric(total.caption, value: total.value)
                         }
                         if let health = session.health, health.hasData {
                             VStack(alignment: .leading, spacing: 6) {
@@ -187,6 +197,9 @@ struct SessionDetail: View {
                                     if !exercise.label.isEmpty && exercise.label != session.name && exercise.label != store.data.title(for: session).replacingOccurrences(of: " - ", with: " · ") && !exercise.label.hasSuffix(" · \(session.name)") { Text(exercise.label).font(.caption).foregroundStyle(.secondary) }
                                 }
                                 Spacer()
+                                if records.contains(exercise.exerciseID) {
+                                    Label("Record", systemImage: "star.fill").labelStyle(TightLabelStyle()).font(.caption.weight(.medium)).foregroundStyle(palette.best)
+                                }
                                 Image(systemName: "chart.xyaxis.line").font(.subheadline).foregroundStyle(palette.action)
                             }.contentShape(Rectangle())
                         }.buttonStyle(.plain)
@@ -196,8 +209,8 @@ struct SessionDetail: View {
                         if !exercise.notes.isEmpty { Text(exercise.notes).font(.subheadline).textSelection(.enabled) }
                     }.card(padding: 16)
                 }
-                Button("Delete workout", role: .destructive) { deleting = true }.font(.subheadline).padding(.horizontal, 4)
-            }.padding(16)
+                Button("Delete Workout", role: .destructive) { deleting = true }.font(.subheadline).frame(maxWidth: .infinity, minHeight: 44)
+            }.padding(16).readableWidth()
         }.background(palette.background)
     }
 
@@ -260,7 +273,7 @@ struct SessionDetail: View {
                     }
                 } footer: { if health.hasData, health.unlinked != true { Text(healthSummary(health)) } }
             }
-            Section { Button("Delete workout", role: .destructive) { deleting = true } }
+            Section { Button("Delete Workout", role: .destructive) { deleting = true } }
         }.formStyle(.grouped)
     }
 
@@ -298,19 +311,16 @@ private struct HistorySetTable: View {
             }.font(.caption).foregroundStyle(.secondary).padding(.bottom, 8)
             Divider()
             ForEach(Array(sets.enumerated()), id: \.element.id) { index, set in
-                HStack(alignment: .firstTextBaseline, spacing: 12) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack(spacing: 5) {
-                            Image(systemName: set.completedAt == nil ? "minus" : "checkmark").font(.caption2.weight(.semibold))
-                                .foregroundStyle(set.completedAt == nil ? Color.secondary : palette.completed)
-                            Text("\(index + 1)")
-                        }
-                        if set.plan.kind != .working || set.plan.customTypeID != nil { Text(palette.title(set.plan)).font(.caption2).foregroundStyle(palette.color(for: set.plan)) }
+                HStack(spacing: 12) {
+                    HStack(spacing: 4) {
+                        Image(systemName: set.completedAt == nil ? "minus" : "checkmark").font(.caption2.weight(.semibold))
+                            .foregroundStyle(set.completedAt == nil ? Color.secondary : palette.completed)
+                        SetBadge(text: setBadge(sets.map(\.plan), index: index, types: palette.setTypes), plan: set.plan)
                     }.frame(maxWidth: .infinity, alignment: .leading)
                     ForEach(columns) { column in Text(column.value(set, mode: mode, unit: unit) ?? "-").frame(maxWidth: .infinity, alignment: .trailing) }
-                }.font(.subheadline).monospacedDigit().padding(.vertical, 9).opacity(set.completedAt == nil ? 0.5 : 1)
+                }.font(.subheadline).monospacedDigit().padding(.vertical, 6).opacity(set.completedAt == nil ? 0.5 : 1)
                     .accessibilityElement(children: .ignore)
-                    .accessibilityLabel("Set \(index + 1), \(palette.title(set.plan)), \(set.completedAt == nil ? "not completed" : "completed"), \(loggedSetSummary(set, mode: mode, unit: unit))")
+                    .accessibilityLabel("\(palette.title(set.plan)) set \(setBadge(sets.map(\.plan), index: index, types: palette.setTypes)), \(set.completedAt == nil ? "not completed" : "completed"), \(loggedSetSummary(set, mode: mode, unit: unit))")
                 if index < sets.count - 1 { Divider().opacity(0.5) }
             }
         }
@@ -341,11 +351,15 @@ private enum HistorySetColumn: CaseIterable, Identifiable, Hashable {
 }
 
 struct LoggedSetEditor: View {
+    @Environment(\.palette) private var palette
     @Binding var set: LoggedSet
     let unit: WeightUnit
     var body: some View {
         ThemedForm {
-            Picker("Type", selection: $set.plan.kind) { ForEach(SetKind.allCases) { Text($0.title).tag($0) } }
+            Picker("Type", selection: setTypeChoice($set.plan, types: palette.setTypes)) {
+                ForEach(SetKind.allCases) { Text($0.title).tag(SetTypeChoice.kind($0)) }
+                ForEach(palette.setTypes) { Text($0.name).tag(SetTypeChoice.custom($0.id)) }
+            }
             Toggle("Completed", isOn: Binding(get: { set.completedAt != nil }, set: { set.completedAt = $0 ? .now : nil }))
             NumberRow("Weight (\(unit.rawValue))", value: $set.weight, factor: unit.kilograms(1))
             NumberRow("Reps", value: Binding(get: { set.reps.map(Double.init) }, set: { set.reps = $0.map(Int.init) }), integer: true)

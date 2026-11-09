@@ -48,6 +48,8 @@ final class AppStore: ObservableObject {
     var syncConfigurationLoaded = false
     var pendingSync: Task<Void, Never>?
     let repository: LocalRepository?
+    /// Writes the library off the main thread. Nil in demo mode, which saves nothing.
+    let saver: SaveQueue?
     let notifications = WorkoutNotifications()
     let demo: Bool
 
@@ -59,10 +61,11 @@ final class AppStore: ObservableObject {
         let directoryIndex = arguments.firstIndex(of: "--data-directory")
         let testDirectory = directoryIndex.flatMap { index in arguments.indices.contains(index + 1) ? URL(fileURLWithPath: arguments[index + 1], isDirectory: true) : nil }
         if demo && testDirectory == nil {
-            repository = nil; data = showcase ? .showcase() : .demo(); return
+            repository = nil; saver = nil; data = showcase ? .showcase() : .demo(); return
         }
         let root = testDirectory ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!.appendingPathComponent("Lifting", isDirectory: true)
         repository = LocalRepository(url: root.appendingPathComponent("training.json"))
+        saver = SaveQueue(repository!)
         do {
             let loaded = try repository!.load()
             data = loaded?.data ?? (demo ? .demo() : .starter())
@@ -83,7 +86,7 @@ final class AppStore: ObservableObject {
             let workoutChanged = next.activeSession != data.activeSession
             if workoutChanged, next.activeSession != nil { next.activeSession?.lastActivityAt = Date() }
             _ = try next.validated()
-            try repository?.save(next)
+            saver?.schedule(next) { [weak self] error in Task { @MainActor in self?.error = "Could not save. \(error.localizedDescription)" } }
             let remindersChanged = next.settings.workoutReminders != data.settings.workoutReminders
             data = next
             if workoutChanged || remindersChanged { refreshWorkoutReminders() }
@@ -105,7 +108,14 @@ final class AppStore: ObservableObject {
 
     func start(_ routine: Routine) { perform { try $0.start(routineID: routine.id) }; if data.activeSession != nil { workoutPresented = true } }
     func emptyWorkout() { perform { d in guard d.activeSession == nil else { return }; d.activeSession = Session(name: "Workout") }; workoutPresented = true }
-    func finish() { perform { try $0.finish() }; if data.activeSession == nil { workoutPresented = false; cancelRestAlert(); trainPath = NavigationPath(); trainRevision += 1; scheduleHealthCheck() } }
+    /// Saves the workout and opens it on Train, where Back returns to the first screen.
+    func finish() {
+        guard let id = data.activeSession?.id, perform({ try $0.finish() }) else { return }
+        workoutPresented = false; cancelRestAlert(); trainPath = NavigationPath([SessionRoute(id: id)]); trainRevision += 1; scheduleHealthCheck()
+        #if os(iOS)
+        if data.settings.haptics { UINotificationFeedbackGenerator().notificationOccurred(.success) }
+        #endif
+    }
     /// Deletes a workout from history, and the copy Lifting saved to Apple Health for it.
     func deleteSession(_ id: UUID) {
         let copies = data.sessions.first { $0.id == id }?.health?.savedWorkoutIDs ?? []
@@ -194,7 +204,7 @@ final class AppStore: ObservableObject {
             } else if storageBlocked, let repository, let raw = try? Data(contentsOf: repository.url) {
                 try raw.write(to: repository.url.appendingPathExtension("before-import"), options: .atomic)
             }
-            try repository?.save(next)
+            try saver?.write(next)
             data = next; storageBlocked = false; error = nil; workoutPresented = false; cancelRestAlert(); refreshWorkoutReminders()
             scheduleFolderSync()
         } catch { self.error = "Import failed. \(error.localizedDescription)" }
@@ -213,6 +223,39 @@ final class AppStore: ObservableObject {
     private let restAlerts = RestAlerts()
     func scheduleRestAlert() { restAlerts.schedule(data.restDeadline) }
     func cancelRestAlert() { restAlerts.schedule(nil) }
+}
+
+/// Saves the library off the main thread, so an edit never waits while years of history are encoded.
+/// Only the newest state is written. `flush` waits for it before the app is suspended; `write` saves at once,
+/// for a restore or merge that replaces the library.
+final class SaveQueue: @unchecked Sendable {
+    private let repository: LocalRepository
+    private let queue = DispatchQueue(label: "training-save", qos: .userInitiated)
+    private let lock = NSLock()
+    private var pending: TrainingData?
+    private var draining = false
+    init(_ repository: LocalRepository) { self.repository = repository }
+
+    func schedule(_ data: TrainingData, failed: @escaping @Sendable (Error) -> Void) {
+        lock.lock(); pending = data; let idle = !draining; draining = true; lock.unlock()
+        guard idle else { return }
+        queue.async {
+            while let next = self.takePending() {
+                do { try self.repository.save(next) } catch { failed(error) }
+            }
+        }
+    }
+    private func takePending() -> TrainingData? {
+        lock.lock(); defer { lock.unlock() }
+        let next = pending; pending = nil
+        if next == nil { draining = false }
+        return next
+    }
+    func write(_ data: TrainingData) throws {
+        lock.lock(); pending = nil; lock.unlock()
+        try queue.sync { try repository.save(data) }
+    }
+    func flush() { queue.sync {} }
 }
 
 final class RestAlerts: @unchecked Sendable {
@@ -266,11 +309,13 @@ func distanceText(_ meters: Double) -> String {
 /// Minutes and seconds per display unit, from seconds per kilometer: "5:24 /km".
 func paceText(_ secondsPerKilometer: Double) -> String { "\(clockText(secondsPerKilometer * DistanceDisplay.unit.meters / 1000)) /\(DistanceDisplay.unit.rawValue)" }
 
-extension Settings {
+extension LiftingCore.Settings {
     var distance: DistanceUnit { distanceUnit ?? (Locale.current.measurementSystem == .us ? .mi : .km) }
 }
 
-func counted(_ count: Int, _ noun: String) -> String { "\(count) \(noun)\(count == 1 ? "" : "s")" }
+func counted(_ count: Int, _ noun: String, plural: String? = nil) -> String { "\(count) \(count == 1 ? noun : plural ?? noun + "s")" }
+/// A whole number with thousands grouping, for totals such as volume: "39,360".
+func grouped(_ value: Double) -> String { value.rounded().formatted(.number.precision(.fractionLength(0))) }
 func clockText(_ seconds: Double) -> String {
     let value = max(0, Int(seconds.rounded(.up)))
     return value >= 3600 ? String(format: "%d:%02d:%02d", value / 3600, (value % 3600) / 60, value % 60) : String(format: "%d:%02d", value / 60, value % 60)
@@ -290,7 +335,8 @@ func planSummary(_ variant: Variant, unit: WeightUnit) -> String {
     if let target = first.repTarget { parts.append("\(work.count) × \(displayTarget(target))") }
     else if let seconds = first.seconds { parts.append(work.count > 1 ? "\(work.count) × \(clockText(seconds))" : clockText(seconds)) }
     else { parts.append(counted(work.count, "set")) }
-    let weights = zip(variant.sets, variant.resolvedWeights).compactMap { $0.kind == .warmup ? nil : $1 }
+    // An unset working weight resolves to zero; that is unknown, so it is left out.
+    let weights = zip(variant.sets, variant.resolvedWeights).compactMap { $0.kind == .warmup ? nil : $1 }.filter { $0 > 0 }
     if !weights.isEmpty { parts.append(weightSummary(weights, unit: unit)) }
     if first.repTarget != nil, let seconds = first.seconds { parts.append(clockText(seconds)) }
     if let rpe = first.rpe { parts.append("RPE \(number(rpe))") }
@@ -333,12 +379,24 @@ func loggedExerciseSummary(_ exercise: SessionExercise, unit: WeightUnit) -> Str
     }.joined(separator: "\n")
 }
 
-/// A workout's volume, with its warm-up volume beside it when Settings asks for it: "6240 lb", "+1940 lb warm-up".
-func volumeText(_ session: Session, settings: LiftingCore.Settings) -> (total: String, warmup: String?) {
-    let unit = settings.unit
-    let warmup = session.warmupVolume
-    return ("\(number(unit.display(session.volume), decimals: 0)) \(unit.rawValue)",
-            settings.showsWarmupVolume == true && warmup > 0 ? "+\(number(unit.display(warmup), decimals: 0)) \(unit.rawValue) warm-up" : nil)
+/// A workout's headline amount: its volume, or its distance when nothing was lifted, as in a run.
+/// The note is the warm-up volume when Settings asks for it: "6,240 lb", "+1,940 lb warm-up".
+struct WorkTotal {
+    let title: String
+    let value: String
+    var note: String? = nil
+    /// Nothing lifted and no distance covered, so lists leave the amount out.
+    let empty: Bool
+    init(_ session: Session, settings: LiftingCore.Settings) {
+        let unit = settings.unit, volume = session.volume, warmup = session.warmupVolume
+        let meters = session.exercises.flatMap(\.sets).filter { $0.completedAt != nil }.compactMap(\.meters).reduce(0, +)
+        empty = volume <= 0 && meters <= 0
+        if volume <= 0, meters > 0 { title = "Distance"; value = distanceText(meters); return }
+        title = "Volume"; value = "\(grouped(unit.display(volume))) \(unit.rawValue)"
+        if settings.showsWarmupVolume == true, warmup > 0 { note = "+\(grouped(unit.display(warmup))) \(unit.rawValue) warm-up" }
+    }
+    /// The title with the warm-up note folded in, for a tile with one caption line.
+    var caption: String { note.map { "\(title), \($0)" } ?? title }
 }
 
 /// "8–12" for display; stored targets use a plain hyphen.

@@ -12,6 +12,7 @@ struct TrainView: View {
             VStack(alignment: .leading, spacing: 24) {
                 if let program = store.data.activeProgram {
                     programRow(program)
+                    WeekStrip()
                     if let next = program.nextDayID.flatMap(store.data.routine) {
                         VStack(alignment: .leading, spacing: 10) {
                             SectionTitle(title: "Next workout")
@@ -34,11 +35,12 @@ struct TrainView: View {
                 Button { store.emptyWorkout() } label: { Label("Start Empty Workout", systemImage: "plus") }
                     .buttonStyle(FieldButtonStyle()).disabled(store.data.activeSession != nil).accessibilityIdentifier("train.empty")
             }
-            .padding(.horizontal, 16).padding(.top, 4).padding(.bottom, 24)
+            .padding(.horizontal, 16).padding(.top, 4).padding(.bottom, 24).readableWidth()
         }
         .background(palette.background)
         .navigationTitle("Train")
         .navigationDestination(for: DayRoute.self) { RoutineEditor(routineID: $0.id, showsStart: true) }
+        .navigationDestination(for: SessionRoute.self) { SessionDetail(sessionID: $0.id) }
     }
 
     private func programRow(_ program: TrainingProgram) -> some View {
@@ -72,9 +74,39 @@ struct TrainView: View {
     }
 }
 
+/// This week's days, drawn as the History calendar draws them. A trained day opens its workout.
+struct WeekStrip: View {
+    @EnvironmentObject var store: AppStore
+    var body: some View {
+        let calendar = Calendar.current
+        let start = calendar.dateInterval(of: .weekOfYear, for: .now)?.start ?? .now
+        let days = (0..<7).compactMap { calendar.date(byAdding: .day, value: $0, to: start) }
+        let sessions = store.data.sessions.filter { $0.skipped != true && $0.startedAt >= start }.sorted { $0.startedAt < $1.startedAt }
+        VStack(alignment: .leading, spacing: 10) {
+            SectionTitle(title: "This week", trailing: sessions.isEmpty ? nil : counted(sessions.count, "workout"))
+            HStack(spacing: 0) {
+                ForEach(days, id: \.self) { day in
+                    let session = sessions.last { calendar.isDate($0.startedAt, inSameDayAs: day) }
+                    VStack(spacing: 6) {
+                        Text(day, format: .dateTime.weekday(.narrow)).font(.caption).foregroundStyle(.secondary)
+                        if let session {
+                            NavigationLink(value: SessionRoute(id: session.id)) { CalendarDay(date: day, trained: true) }.buttonStyle(.plain)
+                        } else { CalendarDay(date: day) }
+                    }
+                    .frame(maxWidth: .infinity)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel("\(day.formatted(.dateTime.weekday(.wide).month(.wide).day()))\(session == nil ? "" : ", workout logged")")
+                }
+            }.card(padding: 12)
+        }
+    }
+}
+
 /// A day opened from Train. A fixed ID, so an open day never turns into another when the next day changes,
 /// and a value the Train path can clear when a workout ends.
 struct DayRoute: Hashable { let id: UUID }
+/// The workout just saved, shown on Train when it finishes.
+struct SessionRoute: Hashable { let id: UUID }
 
 /// The program's next day: its exercises with targets and working weights, and the Start control.
 struct NextDayCard: View {
@@ -88,7 +120,9 @@ struct NextDayCard: View {
                 NavigationLink(value: DayRoute(id: day.id)) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(day.name).font(.title2.weight(.bold)).foregroundStyle(.primary)
-                        if let index = program.dayIDs.firstIndex(of: day.id) { Text("Day \(index + 1) of \(program.dayIDs.count)").font(.subheadline).foregroundStyle(.secondary) }
+                        if let index = program.dayIDs.firstIndex(of: day.id) {
+                            Text(["Day \(index + 1) of \(program.dayIDs.count)", lastDone].compactMap { $0 }.joined(separator: " · ")).font(.subheadline).foregroundStyle(.secondary)
+                        }
                     }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
                 }.buttonStyle(.plain)
                 DayMenu(day: day, program: program)
@@ -96,6 +130,18 @@ struct NextDayCard: View {
             if !day.slots.isEmpty { ExerciseTargets(day: day) }
             StartDayButton(day: day)
         }.card(padding: 16)
+    }
+    /// When this day was last trained: "Last done today", "3 days ago", or its date once it is two weeks back.
+    private var lastDone: String? {
+        guard let date = store.data.sessions.filter({ $0.routineID == day.id && $0.skipped != true }).map(\.startedAt).max() else { return nil }
+        let calendar = Calendar.current
+        let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: date), to: calendar.startOfDay(for: .now)).day ?? 0
+        switch days {
+        case ...0: return "Last done today"
+        case 1: return "Last done yesterday"
+        case 2..<14: return "Last done \(days) days ago"
+        default: return "Last done \(date.formatted(.dateTime.month(.abbreviated).day()))"
+        }
     }
 }
 
@@ -116,7 +162,7 @@ struct ExerciseTargets: View {
                             details(variant: variant, slot: slot)
                         }.frame(maxWidth: .infinity, alignment: .leading)
                         Text(target(variant)).font(.figure(15, weight: .regular)).foregroundStyle(.secondary)
-                        Text(exercise.mode == .strength ? weightSummary(zip(variant.sets, variant.resolvedWeights).compactMap { $0.kind == .warmup ? nil : $1 }, unit: store.data.settings.unit) : "")
+                        Text(loadSummary(zip(variant.sets, variant.resolvedWeights).compactMap { $0.kind == .warmup ? nil : $1 }, mode: exercise.mode, unit: store.data.settings.unit) ?? "")
                             .font(.figure(15)).frame(minWidth: 64, alignment: .trailing)
                     }.padding(.vertical, 9)
                     if index < day.slots.count - 1 { Divider() }

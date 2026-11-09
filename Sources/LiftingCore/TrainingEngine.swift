@@ -154,6 +154,8 @@ public extension TrainingData {
                 if plan.load == .fixed { plan.fixedWeight = 0 }
                 var replacementSet = LoggedSet(plan: plan, variant: replacement)
                 replacementSet.reps = logged.reps
+                // A substitute with no working weight yet has an unknown load, not an empty bar.
+                if replacementSet.weight == 0 { replacementSet.weight = nil }
                 return replacementSet
             }
             item.restSeconds = old.restSeconds

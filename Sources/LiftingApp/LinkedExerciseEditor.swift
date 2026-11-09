@@ -53,7 +53,7 @@ struct LinkedExerciseEditor: View {
                 }
                 if routineID == nil, store.data.activeSession?.routineID != nil { Toggle("Save to this day", isOn: $future) }
                 if let originalGroup {
-                    Button("Unlink exercises", role: .destructive) {
+                    Button("Unlink Exercises", role: .destructive) {
                         if store.perform({ d in
                             if let routineID { d.unlinkRoutineGroup(routineID: routineID, group: originalGroup) }
                             else { d.unlinkSessionGroup(originalGroup, saveFuture: future) }

@@ -53,7 +53,7 @@ struct MuscleAnalyticsView: View {
         }.filter { $0.value > 0 }.sorted { $0.value > $1.value }
         Toggle("Include secondary muscles (½ set)", isOn: $secondary).font(.subheadline)
         if rows.isEmpty {
-            Text("No logged strength sets in this range.").foregroundStyle(.secondary).padding(.vertical, 24)
+            EmptyState(symbol: "figure.strengthtraining.traditional", text: "No strength sets logged in this range.", compact: true)
         } else {
             let scale = max(1, rows.map { max($0.value, $0.previous ?? 0) }.max() ?? 1)
             Text("Average sets a week").font(.caption).foregroundStyle(.secondary)
@@ -104,7 +104,7 @@ struct MuscleAnalyticsView: View {
         let complete = buckets.count > 1 ? Array(values.dropLast()) : values
         let selected = selectedDate.flatMap { date in buckets.lastIndex { $0.start <= date } } ?? (buckets.count > 1 ? buckets.count - 2 : 0)
         if values.allSatisfy({ $0 == 0 }) {
-            Text("No logged weight and reps in this range.").foregroundStyle(.secondary).padding(.vertical, 24)
+            EmptyState(symbol: "scalemass", text: "No weight and reps logged in this range.", compact: true)
         } else {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {

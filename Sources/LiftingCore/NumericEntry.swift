@@ -47,8 +47,9 @@ public struct NumericEntry: Equatable {
         text = Self.format(min(maximum, max(signed ? -maximum : 0, (value ?? 0) + delta)))
         replacing = true; changed = true
     }
+    /// Two decimals at most: a converted load such as 43.091 kg opens as 43.09.
     private static func format(_ value: Double) -> String {
-        String(format: "%.3f", locale: Locale(identifier: "en_US_POSIX"), value)
+        String(format: "%.2f", locale: Locale(identifier: "en_US_POSIX"), value)
             .replacingOccurrences(of: "\\.?0+$", with: "", options: .regularExpression)
     }
 }

@@ -21,7 +21,7 @@ struct WarmupPresetLibrary: View {
                     Button("Delete", role: .destructive) { store.perform { $0.warmupPresets.removeAll { $0.id == preset.id } } }
                 }
             }.onDelete { offsets in store.perform { $0.warmupPresets.remove(atOffsets: offsets) } }
-            Button("New preset", systemImage: "plus") { editing = WarmupPreset(name: "", sets: [WarmupsSheet.newRow()]) }.accessibilityIdentifier("warmups.new")
+            Button("New Preset", systemImage: "plus") { editing = WarmupPreset(name: "", sets: [WarmupsSheet.newRow()]) }.accessibilityIdentifier("warmups.new")
         }.formStyle(.grouped).navigationTitle("Warm-up Presets").inlineTitle()
         .sheet(item: $editing) { WarmupsSheet(preset: $0).environmentObject(store).sheetSize() }
     }
