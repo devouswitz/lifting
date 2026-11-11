@@ -12,6 +12,7 @@ final class AppStore: ObservableObject {
         didSet {
             if oldValue.sessions != data.sessions { previous = nil; bests = nil }
             DistanceDisplay.unit = data.settings.distance
+            if oldValue.activeSession != data.activeSession || oldValue.restDeadline != data.restDeadline || oldValue.settings != data.settings { refreshLiveActivity() }
         }
     }
     /// The latest logged sets of each day track and of each exercise, and every exercise's best set, built on first use.
@@ -25,7 +26,7 @@ final class AppStore: ObservableObject {
     @Published var autoFocusedExerciseID: UUID?
     @Published var autoFocusRevision = 0
     /// When the current rest began, so the rest ring keeps its scale across ±15 and reopening the workout.
-    @Published var restStartedAt: Date?
+    @Published var restStartedAt: Date? { didSet { refreshLiveActivity() } }
     /// Bumped when a workout ends, so Train returns to its first screen.
     @Published var trainRevision = 0
     /// Screens pushed on Train. Cleared when a workout ends.
@@ -55,6 +56,9 @@ final class AppStore: ObservableObject {
     /// Writes the library off the main thread. Nil in demo mode, which saves nothing.
     let saver: SaveQueue?
     let notifications = WorkoutNotifications()
+    #if os(iOS)
+    private let liveActivity = WorkoutActivity()
+    #endif
     let demo: Bool
 
     init() {
@@ -144,7 +148,7 @@ final class AppStore: ObservableObject {
     }
 
     func start(_ routine: Routine) { perform { try $0.start(routineID: routine.id) }; if data.activeSession != nil { workoutPresented = true } }
-    func emptyWorkout() { perform { d in guard d.activeSession == nil else { return }; d.activeSession = Session(name: "Workout") }; workoutPresented = true }
+    func emptyWorkout() { perform { d in guard d.activeSession == nil else { return }; d.activeSession = Session(name: Session.unplannedName) }; workoutPresented = true }
     /// Saves the workout and opens it on Train, where Back returns to the first screen.
     func finish() {
         guard let id = data.activeSession?.id, perform({ try $0.finish() }) else { return }
@@ -221,6 +225,17 @@ final class AppStore: ObservableObject {
             self.workoutPresented = true
         }
         refreshWorkoutReminders()
+        refreshLiveActivity()
+    }
+    /// A tap on the Lock Screen or Dynamic Island opens the workout.
+    func open(_ url: URL) {
+        if url.scheme == "setform", url.host == "workout", data.activeSession != nil { workoutPresented = true }
+    }
+    /// Brings the Lock Screen and Dynamic Island up to date with the workout, or clears them when there is none.
+    func refreshLiveActivity() {
+        #if os(iOS)
+        liveActivity.show(data, restStartedAt: restStartedAt)
+        #endif
     }
     func refreshWorkoutReminders() {
         guard !demo else { return }
@@ -366,6 +381,12 @@ extension LiftingCore.Settings {
 func counted(_ count: Int, _ noun: String, plural: String? = nil) -> String { "\(count) \(count == 1 ? noun : plural ?? noun + "s")" }
 /// A whole number with thousands grouping, for totals such as volume: "39,360".
 func grouped(_ value: Double) -> String { value.rounded().formatted(.number.precision(.fractionLength(0))) }
+/// A change from an earlier period or workout: "+320", "−2", or "same".
+func delta(_ value: Double) -> String {
+    let rounded = value.rounded()
+    return rounded == 0 ? "same" : "\(rounded > 0 ? "+" : "−")\(grouped(abs(rounded)))"
+}
+func timeDelta(_ value: Double) -> String { abs(value) < 1 ? "same" : "\(value > 0 ? "+" : "−")\(clockText(abs(value)))" }
 func clockText(_ seconds: Double) -> String {
     let value = max(0, Int(seconds.rounded(.up)))
     return value >= 3600 ? String(format: "%d:%02d:%02d", value / 3600, (value % 3600) / 60, value % 60) : String(format: "%d:%02d", value / 60, value % 60)
@@ -437,16 +458,30 @@ struct WorkTotal {
     var note: String? = nil
     /// Nothing lifted and no distance covered, so lists leave the amount out.
     let empty: Bool
+    /// The total in the unit it is shown in, for comparing two workouts.
+    private let amount: Double
+    private let unit: String
     init(_ session: Session, settings: LiftingCore.Settings) {
         let unit = settings.unit, volume = session.volume, warmup = session.warmupVolume
         let meters = session.exercises.flatMap(\.sets).filter { $0.completedAt != nil }.compactMap(\.meters).reduce(0, +)
         empty = volume <= 0 && meters <= 0
-        if volume <= 0, meters > 0 { title = "Distance"; value = distanceText(meters); return }
+        if volume <= 0, meters > 0 {
+            title = "Distance"; value = distanceText(meters); amount = DistanceDisplay.value(meters); self.unit = DistanceDisplay.unit.rawValue; return
+        }
+        amount = unit.display(volume); self.unit = unit.rawValue
         title = "Volume"; value = "\(grouped(unit.display(volume))) \(unit.rawValue)"
         if settings.showsWarmupVolume == true, warmup > 0 { note = "+\(grouped(unit.display(warmup))) \(unit.rawValue) warm-up" }
     }
     /// The title with the warm-up note folded in, for a tile with one caption line.
     var caption: String { note.map { "\(title), \($0)" } ?? title }
+    /// How this total differs from an earlier workout's: "+640 lb", "−0.5 km", "same". Nil when one is a
+    /// volume and the other a distance.
+    func change(from earlier: WorkTotal) -> String? {
+        guard title == earlier.title else { return nil }
+        let difference = amount - earlier.amount
+        if title == "Volume" { return difference.rounded() == 0 ? "same" : "\(delta(difference)) \(unit)" }
+        return abs(difference) < 0.005 ? "same" : "\(difference > 0 ? "+" : "−")\(number(abs(difference), decimals: 2)) \(unit)"
+    }
 }
 
 /// "8–12" for display; stored targets use a plain hyphen.

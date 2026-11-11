@@ -44,8 +44,7 @@ public extension TrainingData {
             session.exercises.filter { $0.exerciseID == exerciseID && (variantID == nil || $0.variantID == variantID) }
                 .flatMap(\.sets)
                 .compactMap { set -> TopSet? in
-                    guard set.completedAt != nil, set.plan.kind != .warmup, let weight = set.weight, weight > 0, let reps = set.reps, reps > 0 else { return nil }
-                    return TopSet(sessionID: session.id, date: session.startedAt, weight: weight, reps: reps)
+                    set.lifted.map { TopSet(sessionID: session.id, date: session.startedAt, weight: $0.weight, reps: $0.reps) }
                 }
                 .max { $0.weight == $1.weight ? $0.reps < $1.reps : $0.weight < $1.weight }
         }
@@ -57,7 +56,7 @@ public extension TrainingData {
         for session in sessions where session.skipped != true {
             for item in session.exercises where item.mode == .strength {
                 for set in item.sets {
-                    guard set.completedAt != nil, set.plan.kind != .warmup, let weight = set.weight, weight > 0, let reps = set.reps, reps > 0 else { continue }
+                    guard let (weight, reps) = set.lifted else { continue }
                     if let held = best[item.exerciseID], held.weight > weight || (held.weight == weight && held.reps >= reps) { continue }
                     best[item.exerciseID] = TopSet(sessionID: session.id, date: session.startedAt, weight: weight, reps: reps)
                 }
@@ -95,8 +94,7 @@ public extension TrainingData {
         let sets = sessions.flatMap { session in
             session.exercises.filter { $0.exerciseID == exerciseID && (variantID == nil || $0.variantID == variantID) }.flatMap(\.sets)
                 .compactMap { set -> (weight: Double, reps: Int, date: Date)? in
-                    guard set.completedAt != nil, set.plan.kind != .warmup, let weight = set.weight, weight > 0, let reps = set.reps, reps > 0 else { return nil }
-                    return (weight, reps, session.startedAt)
+                    set.lifted.map { ($0.weight, $0.reps, session.startedAt) }
                 }
         }
         let records = counts.compactMap { count in

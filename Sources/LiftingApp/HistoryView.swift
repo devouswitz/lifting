@@ -149,17 +149,9 @@ struct SessionDetail: View {
         }
     }
 
-    /// Lifts whose heaviest set in this workout beat every earlier one (more reps break a tie).
-    private func records(in session: Session) -> Set<UUID> {
-        Set(Set(session.exercises.filter { $0.mode == .strength }.map(\.exerciseID)).filter { id in
-            let tops = store.data.topSets(exerciseID: id)
-            guard let index = tops.firstIndex(where: { $0.sessionID == session.id }), index > 0 else { return false }
-            return tops[..<index].allSatisfy { $0.weight < tops[index].weight || ($0.weight == tops[index].weight && $0.reps < tops[index].reps) }
-        })
-    }
-
     private func workoutDetail(_ session: Session) -> some View {
-        let records = records(in: session)
+        let records = store.data.records(in: session)
+        let earlier = store.data.previousSession(before: session)
         return ScrollView {
             LazyVStack(alignment: .leading, spacing: 20) {
                 VStack(alignment: .leading, spacing: 16) {
@@ -167,12 +159,18 @@ struct SessionDetail: View {
                     if session.skipped == true {
                         Label("Skipped", systemImage: "forward").font(.headline).foregroundStyle(.secondary)
                     } else {
-                        HStack(spacing: 16) {
-                            detailMetric("Sets", value: "\(session.completedSets)")
-                            detailMetric("Duration", value: clockText(session.duration()))
+                        HStack(alignment: .top, spacing: 16) {
+                            detailMetric("Sets", value: "\(session.completedSets)", change: earlier.map { delta(Double(session.completedSets - $0.completedSets)) })
+                            detailMetric("Duration", value: clockText(session.duration()), change: earlier.map { timeDelta(session.duration() - $0.duration()) })
                             let total = WorkTotal(session, settings: store.data.settings)
-                            detailMetric(total.caption, value: total.value)
+                            detailMetric(total.caption, value: total.value, change: earlier.flatMap { total.change(from: WorkTotal($0, settings: store.data.settings)) })
                         }
+                        if let earlier {
+                            let sameYear = Calendar.current.isDate(earlier.startedAt, equalTo: session.startedAt, toGranularity: .year)
+                            Text("Compared with \(earlier.startedAt.formatted(sameYear ? .dateTime.weekday(.wide).month(.wide).day() : .dateTime.month(.wide).day().year()))")
+                                .font(.caption).foregroundStyle(.secondary).accessibilityIdentifier("history.compared")
+                        }
+                        recordList(records)
                         if let health = session.health, health.hasData {
                             VStack(alignment: .leading, spacing: 6) {
                                 Label { Text(healthSummary(health)).foregroundStyle(.secondary) } icon: { Image(systemName: "heart.fill").foregroundStyle(.pink) }
@@ -201,7 +199,7 @@ struct SessionDetail: View {
                                     if !exercise.label.isEmpty && exercise.label != session.name && exercise.label != store.data.title(for: session).replacingOccurrences(of: " - ", with: " · ") && !exercise.label.hasSuffix(" · \(session.name)") { Text(exercise.label).font(.caption).foregroundStyle(.secondary) }
                                 }
                                 Spacer()
-                                if records.contains(exercise.exerciseID) {
+                                if records.contains(where: { $0.exerciseID == exercise.exerciseID }) {
                                     Label("Record", systemImage: "star.fill").labelStyle(TightLabelStyle()).font(.caption.weight(.medium)).foregroundStyle(palette.best)
                                 }
                                 Image(systemName: "chart.xyaxis.line").font(.subheadline).foregroundStyle(palette.action)
@@ -209,7 +207,7 @@ struct SessionDetail: View {
                         }.buttonStyle(.plain)
                         if let from = exercise.substitutedFrom { Label("Instead of \(from)", systemImage: "arrow.triangle.2.circlepath").font(.caption).foregroundStyle(.secondary) }
                         else if exercise.slotID == nil, session.routineID != nil { Label("Added to this workout", systemImage: "plus").font(.caption).foregroundStyle(.secondary) }
-                        HistorySetTable(sets: exercise.sets, mode: exercise.mode, unit: store.data.settings.unit)
+                        HistorySetTable(sets: exercise.sets, mode: exercise.mode, unit: store.data.settings.unit, records: Set(records.map(\.setID)))
                         if !exercise.recurringNotes.isEmpty { Label(exercise.recurringNotes, systemImage: "pin.fill").font(.caption).foregroundStyle(.secondary) }
                         if !exercise.notes.isEmpty { Text(exercise.notes).font(.subheadline).textSelection(.enabled) }
                     }.card(padding: 16)
@@ -217,6 +215,21 @@ struct SessionDetail: View {
                 Button("Delete Workout", role: .destructive) { deleting = true }.font(.subheadline).frame(maxWidth: .infinity, minHeight: 44)
             }.padding(16).readableWidth()
         }.background(palette.background)
+    }
+
+    /// The lifts that set a best in this workout, with the set that did it and the best it beat.
+    @ViewBuilder private func recordList(_ records: [RecordSet]) -> some View {
+        if !records.isEmpty {
+            let unit = store.data.settings.unit
+            VStack(alignment: .leading, spacing: 5) {
+                Text(counted(records.count, "record")).font(.caption).foregroundStyle(.secondary)
+                ForEach(records) { record in
+                    Label {
+                        Text("\(record.name) \(number(unit.display(record.weight))) \(unit.rawValue) × \(record.reps) \(Text("up from \(number(unit.display(record.previousWeight))) × \(record.previousReps)").foregroundStyle(.secondary))")
+                    } icon: { Image(systemName: "star.fill").foregroundStyle(palette.best) }.font(.subheadline).monospacedDigit()
+                }
+            }.accessibilityElement(children: .combine).accessibilityIdentifier("history.records")
+        }
     }
 
     /// How the workout departed from its day: what was added, swapped, and taken out.
@@ -241,11 +254,13 @@ struct SessionDetail: View {
             .compactMap { $0 }.joined(separator: " · ")
     }
 
-    private func detailMetric(_ title: String, value: String) -> some View {
+    /// A headline figure, with its change from the last time this day was done when there is one.
+    private func detailMetric(_ title: String, value: String, change: String? = nil) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(value).font(.title3.weight(.semibold)).monospacedDigit()
             Text(title).font(.caption).foregroundStyle(.secondary)
-        }.frame(maxWidth: .infinity, alignment: .leading)
+            if let change { Text(change).font(.caption.weight(.medium).monospacedDigit()).foregroundStyle(.secondary) }
+        }.frame(maxWidth: .infinity, alignment: .leading).accessibilityElement(children: .combine)
     }
 
     private func editForm(_ session: Session) -> some View {
@@ -316,6 +331,8 @@ private struct HistorySetTable: View {
     let sets: [LoggedSet]
     let mode: ExerciseMode
     let unit: WeightUnit
+    /// The sets that were a best when logged, starred in their rows.
+    var records: Set<UUID> = []
     private var columns: [HistorySetColumn] { HistorySetColumn.allCases.filter { column in sets.contains { column.value($0, mode: mode, unit: unit) != nil } } }
 
     var body: some View {
@@ -337,11 +354,12 @@ private struct HistorySetTable: View {
                         Image(systemName: set.completedAt == nil ? "minus" : "checkmark").font(.caption2.weight(.semibold))
                             .foregroundStyle(set.completedAt == nil ? Color.secondary : palette.completed)
                         SetBadge(text: setBadge(sets.map(\.plan), index: index, types: palette.setTypes), plan: set.plan)
+                        if records.contains(set.id) { Image(systemName: "star.fill").font(.caption2).foregroundStyle(palette.best) }
                     }.frame(maxWidth: .infinity, alignment: .leading)
                     ForEach(columns) { column in Text(column.value(set, mode: mode, unit: unit) ?? "-").frame(maxWidth: .infinity, alignment: .trailing) }
                 }.font(.subheadline).monospacedDigit().padding(.vertical, 6).opacity(set.completedAt == nil ? 0.5 : 1)
                     .accessibilityElement(children: .ignore)
-                    .accessibilityLabel("\(palette.title(set.plan)) set \(setBadge(sets.map(\.plan), index: index, types: palette.setTypes)), \(set.completedAt == nil ? "not completed" : "completed"), \(loggedSetSummary(set, mode: mode, unit: unit))")
+                    .accessibilityLabel("\(palette.title(set.plan)) set \(setBadge(sets.map(\.plan), index: index, types: palette.setTypes)), \(set.completedAt == nil ? "not completed" : "completed"), \(loggedSetSummary(set, mode: mode, unit: unit))\(records.contains(set.id) ? ", record" : "")")
                 if index < sets.count - 1 { Divider().opacity(0.5) }
             }
         }

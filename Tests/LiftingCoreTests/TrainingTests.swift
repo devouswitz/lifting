@@ -2357,4 +2357,74 @@ final class TrainingTests: XCTestCase {
         data.bodyWeights = [80, 82, 81].enumerated().map { BodyWeightEntry(date: start.addingTimeInterval(Double($0.offset) * 86_400), kilograms: $0.element) }
         XCTAssertEqual(data.bodyWeightTrend().map(\.average), [80, 81, 81])
     }
+
+    func testWorkoutSummaryFindsRecordsAndTheLastTimeOnTheSameDay() throws {
+        var data = TrainingData.starter()
+        let day = data.routines[0].id, start = Date(timeIntervalSince1970: 1_792_300_000)
+        // Logs the first working set of the day's first lift, a week later each time.
+        func workout(week: Int, pounds: Double, reps: Int, change: (inout SessionExercise) -> Void = { _ in }) throws -> Session {
+            let now = start.addingTimeInterval(Double(week) * 604_800)
+            try data.start(routineID: day, now: now)
+            var item = data.activeSession!.exercises[0]
+            item.sets[2].weight = WeightUnit.lb.kilograms(pounds); item.sets[2].reps = reps
+            change(&item)
+            data.activeSession!.exercises[0] = item
+            try data.toggleSet(exerciseID: item.id, setID: item.sets[2].id, now: now)
+            try data.finish(now: now.addingTimeInterval(1800))
+            return data.sessions.last!
+        }
+        let first = try workout(week: 0, pounds: 100, reps: 5)
+        let second = try workout(week: 1, pounds: 100, reps: 6)
+        let third = try workout(week: 2, pounds: 90, reps: 10)
+        // Nothing to beat the first time; more reps at the same weight is a record; a lighter set is not.
+        XCTAssertTrue(data.records(in: first).isEmpty); XCTAssertNil(data.previousSession(before: first))
+        XCTAssertEqual(data.records(in: second).count, 1)
+        let record = try XCTUnwrap(data.records(in: second).first)
+        XCTAssertEqual(record.setID, second.exercises[0].sets[2].id); XCTAssertEqual(record.name, "Bench press")
+        XCTAssertEqual(record.reps, 6); XCTAssertEqual(record.previousReps, 5); XCTAssertEqual(record.weight, record.previousWeight)
+        XCTAssertTrue(data.records(in: third).isEmpty)
+        XCTAssertEqual(data.previousSession(before: third)?.id, second.id)
+        // A heavier warm-up is not a record, and of two equal sets the first is the one marked.
+        let fourth = try workout(week: 3, pounds: 105, reps: 3) { item in
+            item.sets[0].weight = WeightUnit.lb.kilograms(200); item.sets[0].completedAt = start
+            item.sets[3].weight = WeightUnit.lb.kilograms(105); item.sets[3].reps = 3; item.sets[3].completedAt = start
+        }
+        XCTAssertEqual(data.records(in: fourth).map(\.setID), [fourth.exercises[0].sets[2].id])
+        XCTAssertEqual(data.records(in: fourth).first?.previousReps, 6)
+        // Records are judged against earlier workouts only, so a later best does not unmake one.
+        XCTAssertEqual(data.records(in: second).count, 1)
+        // A skipped day is not the last time. A workout with no day has none, unless it was given a name.
+        data.sessions[2].skipped = true
+        XCTAssertEqual(data.previousSession(before: fourth)?.id, second.id)
+        let later = start.addingTimeInterval(3_000_000)
+        XCTAssertNil(data.previousSession(before: Session(name: Session.unplannedName, startedAt: later)))
+        let named = Session(name: "Garage", startedAt: start, endedAt: start.addingTimeInterval(600))
+        data.sessions.append(named)
+        XCTAssertEqual(data.previousSession(before: Session(name: "Garage", startedAt: later))?.id, named.id)
+    }
+
+    func testNextSetFollowsTheLastLoggedSetAndTheOpenExercise() throws {
+        var data = TrainingData.starter()
+        try data.start(routineID: data.routines[0].id)
+        // Bench press opens the day: two warm-ups, then three working sets.
+        var next = try XCTUnwrap(data.activeSession?.nextSet)
+        XCTAssertEqual(next.exercise.name, "Bench press"); XCTAssertEqual(next.set.plan.kind, .warmup)
+        XCTAssertEqual(next.number, 1); XCTAssertEqual(next.count, 2)
+        // Logging the first working set passes over the warm-ups: the second working set is next.
+        let bench = data.activeSession!.exercises[0]
+        try data.toggleSet(exerciseID: bench.id, setID: bench.sets[2].id)
+        next = try XCTUnwrap(data.activeSession?.nextSet)
+        XCTAssertEqual(next.set.id, bench.sets[3].id); XCTAssertEqual(next.number, 2); XCTAssertEqual(next.count, 3)
+        // With the working sets done, the warm-ups are what is left of the exercise.
+        try data.toggleSet(exerciseID: bench.id, setID: bench.sets[3].id)
+        try data.toggleSet(exerciseID: bench.id, setID: bench.sets[4].id)
+        XCTAssertEqual(data.activeSession?.nextSet?.set.id, bench.sets[0].id)
+        // Opening another exercise moves to it. With every set logged there is no next set.
+        data.activeSession!.exercises[0].collapsed = true; data.activeSession!.exercises[1].collapsed = false
+        XCTAssertEqual(data.activeSession?.nextSet?.exercise.name, "Barbell row")
+        for e in data.activeSession!.exercises.indices {
+            for s in data.activeSession!.exercises[e].sets.indices { data.activeSession!.exercises[e].sets[s].completedAt = Date() }
+        }
+        XCTAssertNil(data.activeSession?.nextSet)
+    }
 }

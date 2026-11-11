@@ -13,8 +13,9 @@ struct SetformApp: App {
                 #endif
                 .task { store.prepareNotifications(); await store.startHealth() }
                 .task { await store.runSyncLoop() }
+                .onOpenURL { store.open($0) }
                 .onChange(of: phase) { _, value in
-                    if value == .active { Task { await store.syncNow(); await store.refreshHealth() } }
+                    if value == .active { store.refreshLiveActivity(); Task { await store.syncNow(); await store.refreshHealth() } }
                     // Edits are written in the background; finish before the app can be suspended.
                     else { store.saver?.flush() }
                 }

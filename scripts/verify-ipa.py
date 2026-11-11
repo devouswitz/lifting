@@ -36,6 +36,13 @@ def main():
         }
         for key, value in expected.items():
             checks[key] = entitlements.get(key) == value
+        # The Live Activity extension ships inside the app and must match its version.
+        live = app / 'PlugIns' / 'SetformLive.appex'
+        live_info = plistlib.loads((live / 'Info.plist').read_bytes()) if live.exists() else {}
+        checks['live activities declared'] = info.get('NSSupportsLiveActivities') is True
+        checks['live activity extension'] = live_info.get('CFBundleIdentifier') == 'local.lifting.app.live'
+        checks['live activity extension build'] = live_info.get('CFBundleVersion') == args.build
+        checks['live activity extension point'] = live_info.get('NSExtension', {}).get('NSExtensionPointIdentifier') == 'com.apple.widgetkit-extension'
         failed = [name for name, passed in checks.items() if not passed]
         if failed:
             raise SystemExit('IPA validation failed: ' + ', '.join(failed))

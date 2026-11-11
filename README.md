@@ -130,7 +130,7 @@ This compiles and runs the actual XCTest case bodies with a small compatibility 
 ./scripts/ui-check.sh
 ```
 
-This runs the UI tests in `Tests/SetformUITests` on an iOS simulator: a workout with an exercise removed, restored, and swapped, a logged set, and Finish through to History; swapping and removing in a saved day; a program import; hold-and-drag reordering of exercises and of sets; and a logged set surviving the app being killed. Run it before each build. The import test hands the app its CSV through the `SETFORM_IMPORT_CSV` environment variable, which opens the same preview the file picker does.
+This runs the UI tests in `Tests/SetformUITests` on an iOS simulator: a workout with an exercise removed, restored, and swapped, a logged set, and Finish through to History; swapping and removing in a saved day; a program import; hold-and-drag reordering of exercises and of sets; a logged set surviving the app being killed; and the workout appearing on the Lock Screen during a rest, opening from its link, and clearing when the workout is finished. Run it before each build. The import test hands the app its CSV through the `SETFORM_IMPORT_CSV` environment variable, which opens the same preview the file picker does.
 
 
 See `VERIFICATION.md` for completed checks and remaining device checks. `DESIGN.md` describes the current UI; `RESEARCH.md` lists its references.
@@ -143,4 +143,4 @@ Export using the existing App Store Connect app and signing team. Verify the act
 python3 scripts/verify-ipa.py /path/to/Setform.ipa --build 5
 ```
 
-A build produced with `CODE_SIGNING_ALLOWED=NO` does not carry signed entitlements. Before distribution export, sign its embedded frameworks and app locally, with `Resources/Lifting.entitlements` on the app, so Xcode preserves HealthKit while applying distribution signing. The exported IPA must pass the capability check above. Keep the bundle identifier and storage paths unchanged for updates.
+A build produced with `CODE_SIGNING_ALLOWED=NO` does not carry signed entitlements. Before distribution export, sign its embedded framework, the Live Activity extension (`PlugIns/SetformLive.appex`), and then the app locally, with `Resources/Lifting.entitlements` on the app, so Xcode preserves HealthKit while applying distribution signing. The extension's bundle identifier is `local.lifting.app.live`; automatic signing registers it on first export. The exported IPA must pass the capability check above. Keep the bundle identifier and storage paths unchanged for updates.

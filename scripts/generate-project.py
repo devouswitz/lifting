@@ -34,6 +34,14 @@ for file in sorted((root/'Tests'/'SetformUITests').glob('*.swift')):
     f=add(str(relative),'PBXFileReference',lastKnownFileType='sourcecode.swift',path=q(relative),sourceTree=q('<group>'))
     uirefs.append(f); uibuilds.append(add('build:'+str(relative),'PBXBuildFile',fileRef=f))
 groups.append(add('group:SetformUITests','PBXGroup',children=arr(uirefs),name=q('SetformUITests'),sourceTree=q('<group>')))
+# The Live Activity extension: its own sources plus the state type it shares with the app.
+liverefs=[]; livebuilds=[]
+for file in sorted((root/'Sources'/'SetformLive').glob('*.swift')):
+    relative=file.relative_to(root)
+    f=add(str(relative),'PBXFileReference',lastKnownFileType='sourcecode.swift',path=q(relative),sourceTree=q('<group>'))
+    liverefs.append(f); livebuilds.append(add('build:'+str(relative),'PBXBuildFile',fileRef=f))
+livebuilds.append(add('livebuild:attributes','PBXBuildFile',fileRef=ref('Sources/LiftingApp/WorkoutActivityAttributes.swift')))
+groups.append(add('group:SetformLive','PBXGroup',children=arr(liverefs),name=q('SetformLive'),sourceTree=q('<group>')))
 privacy=add('privacy','PBXFileReference',lastKnownFileType='text.xml',path=q('Resources/PrivacyInfo.xcprivacy'),sourceTree=q('<group>'))
 assets=add('assets','PBXFileReference',lastKnownFileType='folder.assetcatalog',path=q('Resources/Assets.xcassets'),sourceTree=q('<group>'))
 groups += [privacy,assets]
@@ -41,10 +49,11 @@ coreproduct=add('coreproduct','PBXFileReference',explicitFileType='wrapper.frame
 appproduct=add('appproduct','PBXFileReference',explicitFileType='wrapper.application',path=q('Setform.app'),sourceTree='BUILT_PRODUCTS_DIR')
 testproduct=add('testproduct','PBXFileReference',explicitFileType='wrapper.cfbundle',path=q('LiftingCoreTests.xctest'),sourceTree='BUILT_PRODUCTS_DIR')
 uiproduct=add('uiproduct','PBXFileReference',explicitFileType='wrapper.cfbundle',path=q('SetformUITests.xctest'),sourceTree='BUILT_PRODUCTS_DIR')
-products=add('products','PBXGroup',children=arr([appproduct,coreproduct,testproduct,uiproduct]),name='Products',sourceTree=q('<group>'))
+liveproduct=add('liveproduct','PBXFileReference',explicitFileType=q('wrapper.app-extension'),path=q('SetformLive.appex'),sourceTree='BUILT_PRODUCTS_DIR')
+products=add('products','PBXGroup',children=arr([appproduct,coreproduct,testproduct,uiproduct,liveproduct]),name='Products',sourceTree=q('<group>'))
 main=add('main','PBXGroup',children=arr(groups+[products]),sourceTree=q('<group>'))
 
-common={'SDKROOT':'iphoneos','IPHONEOS_DEPLOYMENT_TARGET':'17.0','SWIFT_VERSION':'5.0','CLANG_ENABLE_MODULES':'YES','CLANG_ENABLE_OBJC_ARC':'YES','SUPPORTED_PLATFORMS':q('iphoneos iphonesimulator'),'TARGETED_DEVICE_FAMILY':q('1,2'),'CODE_SIGN_STYLE':'Automatic','MARKETING_VERSION':'1.0','CURRENT_PROJECT_VERSION':'19','GENERATE_INFOPLIST_FILE':'YES','ENABLE_USER_SCRIPT_SANDBOXING':'YES','DEAD_CODE_STRIPPING':'YES','COPY_PHASE_STRIP':'YES'}
+common={'SDKROOT':'iphoneos','IPHONEOS_DEPLOYMENT_TARGET':'17.0','SWIFT_VERSION':'5.0','CLANG_ENABLE_MODULES':'YES','CLANG_ENABLE_OBJC_ARC':'YES','SUPPORTED_PLATFORMS':q('iphoneos iphonesimulator'),'TARGETED_DEVICE_FAMILY':q('1,2'),'CODE_SIGN_STYLE':'Automatic','MARKETING_VERSION':'1.0','CURRENT_PROJECT_VERSION':'20','GENERATE_INFOPLIST_FILE':'YES','ENABLE_USER_SCRIPT_SANDBOXING':'YES','DEAD_CODE_STRIPPING':'YES','COPY_PHASE_STRIP':'YES'}
 def configs(name,extras):
     ids=[]
     for mode in ['Debug','Release']:
@@ -56,9 +65,10 @@ def configs(name,extras):
     return add(name+'configs','XCConfigurationList',buildConfigurations=arr(ids),defaultConfigurationIsVisible='0',defaultConfigurationName='Release')
 
 coreconfigs=configs('core',{'PRODUCT_BUNDLE_IDENTIFIER':'local.lifting.core','PRODUCT_NAME':q('$(TARGET_NAME)'),'DEFINES_MODULE':'YES','SKIP_INSTALL':'YES','DYLIB_INSTALL_NAME_BASE':q('@rpath')})
-appconfigs=configs('app',{'PRODUCT_BUNDLE_IDENTIFIER':'local.lifting.app','PRODUCT_NAME':q('Setform'),'INFOPLIST_KEY_CFBundleDisplayName':'Setform','INFOPLIST_KEY_ITSAppUsesNonExemptEncryption':'NO','INFOPLIST_KEY_ITSAppUsesNonExemptEncryption':'NO','INFOPLIST_KEY_UILaunchScreen_Generation':'YES','INFOPLIST_KEY_UIApplicationSceneManifest_Generation':'YES','INFOPLIST_KEY_UISupportedInterfaceOrientations':q('UIInterfaceOrientationPortrait'),'INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad':q('UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight'),'LD_RUNPATH_SEARCH_PATHS':q('$(inherited) @executable_path/Frameworks'),'ASSETCATALOG_COMPILER_APPICON_NAME':'AppIcon','CODE_SIGN_ENTITLEMENTS':q('Resources/Lifting.entitlements'),'INFOPLIST_KEY_NSHealthShareUsageDescription':q('Setform reads workouts, calories, and heart rate from Apple Health to add them to the matching workout in your history.'),'INFOPLIST_KEY_NSHealthUpdateUsageDescription':q('With Save Workouts to Apple Health on, Setform saves a strength workout only when nothing else recorded that time.')})
+appconfigs=configs('app',{'PRODUCT_BUNDLE_IDENTIFIER':'local.lifting.app','PRODUCT_NAME':q('Setform'),'INFOPLIST_KEY_CFBundleDisplayName':'Setform','INFOPLIST_KEY_ITSAppUsesNonExemptEncryption':'NO','INFOPLIST_KEY_ITSAppUsesNonExemptEncryption':'NO','INFOPLIST_KEY_UILaunchScreen_Generation':'YES','INFOPLIST_KEY_UIApplicationSceneManifest_Generation':'YES','INFOPLIST_KEY_UISupportedInterfaceOrientations':q('UIInterfaceOrientationPortrait'),'INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad':q('UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight'),'LD_RUNPATH_SEARCH_PATHS':q('$(inherited) @executable_path/Frameworks'),'ASSETCATALOG_COMPILER_APPICON_NAME':'AppIcon','CODE_SIGN_ENTITLEMENTS':q('Resources/Lifting.entitlements'),'INFOPLIST_FILE':q('Resources/Setform-Info.plist'),'INFOPLIST_KEY_NSHealthShareUsageDescription':q('Setform reads workouts, calories, and heart rate from Apple Health to add them to the matching workout in your history.'),'INFOPLIST_KEY_NSHealthUpdateUsageDescription':q('With Save Workouts to Apple Health on, Setform saves a strength workout only when nothing else recorded that time.')})
 testconfigs=configs('test',{'PRODUCT_BUNDLE_IDENTIFIER':'local.lifting.tests','PRODUCT_NAME':q('$(TARGET_NAME)'),'LD_RUNPATH_SEARCH_PATHS':q('$(inherited) @loader_path/Frameworks @executable_path/Frameworks')})
 uiconfigs=configs('uitest',{'PRODUCT_BUNDLE_IDENTIFIER':'local.lifting.uitests','PRODUCT_NAME':q('$(TARGET_NAME)'),'TEST_TARGET_NAME':'Setform','LD_RUNPATH_SEARCH_PATHS':q('$(inherited) @loader_path/Frameworks @executable_path/Frameworks')})
+liveconfigs=configs('live',{'PRODUCT_BUNDLE_IDENTIFIER':'local.lifting.app.live','PRODUCT_NAME':q('$(TARGET_NAME)'),'INFOPLIST_FILE':q('Resources/SetformLive-Info.plist'),'INFOPLIST_KEY_CFBundleDisplayName':'Setform','SKIP_INSTALL':'YES','APPLICATION_EXTENSION_API_ONLY':'YES','LD_RUNPATH_SEARCH_PATHS':q('$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks')})
 projectconfigs=configs('project',{})
 coresrc=add('coresrc','PBXSourcesBuildPhase',buildActionMask='2147483647',files=arr(sources['LiftingCore']),runOnlyForDeploymentPostprocessing='0')
 appsrc=add('appsrc','PBXSourcesBuildPhase',buildActionMask='2147483647',files=arr(sources['LiftingApp']),runOnlyForDeploymentPostprocessing='0')
@@ -73,7 +83,14 @@ resources=add('resources','PBXResourcesBuildPhase',buildActionMask='2147483647',
 core=add('coretarget','PBXNativeTarget',buildConfigurationList=coreconfigs,buildPhases=arr([coresrc]),buildRules='()',dependencies='()',name='LiftingCore',productName='LiftingCore',productReference=coreproduct,productType=q('com.apple.product-type.framework'))
 proxy=add('coreproxy','PBXContainerItemProxy',containerPortal=ref('project'),proxyType='1',remoteGlobalIDString=core,remoteInfo='LiftingCore')
 dependency=add('coredependency','PBXTargetDependency',target=core,targetProxy=proxy)
-app=add('apptarget','PBXNativeTarget',buildConfigurationList=appconfigs,buildPhases=arr([appsrc,appframeworks,resources,embedphase]),buildRules='()',dependencies=arr([dependency]),name='Setform',productName='Setform',productReference=appproduct,productType=q('com.apple.product-type.application'))
+livesrc=add('livesrc','PBXSourcesBuildPhase',buildActionMask='2147483647',files=arr(livebuilds),runOnlyForDeploymentPostprocessing='0')
+liveframeworks=add('liveframeworks','PBXFrameworksBuildPhase',buildActionMask='2147483647',files='()',runOnlyForDeploymentPostprocessing='0')
+live=add('livetarget','PBXNativeTarget',buildConfigurationList=liveconfigs,buildPhases=arr([livesrc,liveframeworks]),buildRules='()',dependencies='()',name='SetformLive',productName='SetformLive',productReference=liveproduct,productType=q('com.apple.product-type.app-extension'))
+liveproxy=add('liveproxy','PBXContainerItemProxy',containerPortal=ref('project'),proxyType='1',remoteGlobalIDString=live,remoteInfo='SetformLive')
+livedependency=add('livedependency','PBXTargetDependency',target=live,targetProxy=liveproxy)
+liveembed=add('liveembedbuild','PBXBuildFile',fileRef=liveproduct,settings=dictionary({'ATTRIBUTES':arr(['RemoveHeadersOnCopy'])}))
+liveembedphase=add('liveembed','PBXCopyFilesBuildPhase',buildActionMask='2147483647',dstPath=q(''),dstSubfolderSpec='13',files=arr([liveembed]),name=q('Embed Foundation Extensions'),runOnlyForDeploymentPostprocessing='0')
+app=add('apptarget','PBXNativeTarget',buildConfigurationList=appconfigs,buildPhases=arr([appsrc,appframeworks,resources,embedphase,liveembedphase]),buildRules='()',dependencies=arr([dependency,livedependency]),name='Setform',productName='Setform',productReference=appproduct,productType=q('com.apple.product-type.application'))
 test=add('testtarget','PBXNativeTarget',buildConfigurationList=testconfigs,buildPhases=arr([testsrc,testframeworks]),buildRules='()',dependencies=arr([dependency]),name='LiftingCoreTests',productName='LiftingCoreTests',productReference=testproduct,productType=q('com.apple.product-type.bundle.unit-test'))
 # UI tests drive the built app through its core flows; they are not part of an archive.
 uisrc=add('uisrc','PBXSourcesBuildPhase',buildActionMask='2147483647',files=arr(uibuilds),runOnlyForDeploymentPostprocessing='0')
@@ -81,7 +98,7 @@ uiframeworks=add('uiframeworks','PBXFrameworksBuildPhase',buildActionMask='21474
 appproxy=add('appproxy','PBXContainerItemProxy',containerPortal=ref('project'),proxyType='1',remoteGlobalIDString=app,remoteInfo='Setform')
 appdependency=add('appdependency','PBXTargetDependency',target=app,targetProxy=appproxy)
 uitest=add('uitarget','PBXNativeTarget',buildConfigurationList=uiconfigs,buildPhases=arr([uisrc,uiframeworks]),buildRules='()',dependencies=arr([appdependency]),name='SetformUITests',productName='SetformUITests',productReference=uiproduct,productType=q('com.apple.product-type.bundle.ui-testing'))
-add('project','PBXProject',attributes=dictionary({'LastUpgradeCheck':'1600','BuildIndependentTargetsInParallel':'YES'}),buildConfigurationList=projectconfigs,compatibilityVersion=q('Xcode 14.0'),developmentRegion='en',hasScannedForEncodings='0',knownRegions=arr(['en','Base']),mainGroup=main,productRefGroup=products,projectDirPath=q(''),projectRoot=q(''),targets=arr([app,core,test,uitest]))
+add('project','PBXProject',attributes=dictionary({'LastUpgradeCheck':'1600','BuildIndependentTargetsInParallel':'YES'}),buildConfigurationList=projectconfigs,compatibilityVersion=q('Xcode 14.0'),developmentRegion='en',hasScannedForEncodings='0',knownRegions=arr(['en','Base']),mainGroup=main,productRefGroup=products,projectDirPath=q(''),projectRoot=q(''),targets=arr([app,core,test,uitest,live]))
 project=root/'Lifting.xcodeproj'; project.mkdir(exist_ok=True)
 contents='// !$*UTF8*$!\n{ archiveVersion = 1; classes = {}; objectVersion = 56; objects = {\n'
 for key,value in objects.items(): contents += f'{key} = {dictionary(value)};\n'

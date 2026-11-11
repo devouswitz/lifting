@@ -2,6 +2,21 @@
 
 Entries below are dated records. Earlier toolchain and distribution limitations describe the environment at that time; see the newest pass for current evidence.
 
+## Workout summary and Live Activity, build 20 (November 11, 2026)
+
+iPhone 18 Pro simulator (iOS 27.0), showcase library, scripted UI walker and the UI tests.
+
+- Summary: finishing a Push workout with Bench press 250 × 5 over a best of 190 × 7 opened the saved workout with "−18", "−1:05:29", and "−11,698 lb" under Sets, Duration, and Volume, "Compared with Saturday, November 7", and "1 record: Bench press 250 lb × 5 up from 190 × 7". The set's row carried a star. History already marked a record lift on its card; what is new is the comparison, the record list, and the star on the set.
+- Lock Screen: after a logged set it showed the exercise, the next set, the countdown in the Rest color, and a bar that emptied. Skipping the rest showed the time trained and "1 of 19 sets"; pausing showed the time held and "Paused". Finishing cleared it.
+- Dynamic Island: compact showed the countdown during a rest and "1/19" between rests; a hold expanded it to the exercise, next set, countdown, and bar.
+- Rest end with the phone locked: the countdown stopped at 0:00 on time and the "Rest complete" notification arrived. The switch to "Rest done" is the system redrawing stale content; it had not happened 20 seconds after the rest ended and had by 60 seconds.
+- A tap on the Lock Screen activity opened the app on the workout; with the workout minimized, `setform://workout` presented it again.
+- Next set: logging a working set before the warm-ups showed a warm-up as next. It now follows the last logged set, so the next working set is shown.
+- 116 core test cases, zero failures under `./scripts/check.sh` and `xcodebuild test`. Seven UI tests pass, including a new one that checks the Lock Screen during a rest, the link, and the Lock Screen clearing on Finish. Mac preview compiles.
+- Release: the archive now contains `PlugIns/SetformLive.appex` (`local.lifting.app.live`). It is signed locally before the app, and `scripts/verify-ipa.py` checks its identity, version, and extension point.
+
+Not verified: a physical iPhone (Live Activities and the Dynamic Island were seen in the simulator only), the system's first-run "Allow Live Activities" prompt being answered, the Lock Screen in light appearance, an iPad, and VoiceOver.
+
 ## UI tests and swap in saved days, build 19 (November 11, 2026)
 
 The project now has a UI test target, `SetformUITests`, run with `./scripts/ui-check.sh`. Six tests, all passing on the iPhone 18 Pro simulator (iOS 27.0):

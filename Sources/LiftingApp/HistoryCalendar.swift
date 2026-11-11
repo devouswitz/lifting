@@ -190,10 +190,4 @@ struct HistoryCalendar: View {
         let style = Date.IntervalFormatStyle().month(.abbreviated).day()
         return (interval.start..<last).formatted(calendar.isDate(last, equalTo: .now, toGranularity: .year) ? style : style.year())
     }
-
-    private func delta(_ value: Double) -> String {
-        let rounded = value.rounded()
-        return rounded == 0 ? "same" : "\(rounded > 0 ? "+" : "−")\(grouped(abs(rounded)))"
-    }
-    private func timeDelta(_ value: Double) -> String { abs(value) < 1 ? "same" : "\(value > 0 ? "+" : "−")\(clockText(abs(value)))" }
 }

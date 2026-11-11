@@ -70,9 +70,10 @@ final class CoreFlowTests: XCTestCase {
         expect("1 of 19")
         tap("rest.skip")
 
-        // Finish opens the saved workout, which lists the change from the plan.
+        // Finish opens the saved workout, which compares it with the last Push day and lists the change from the plan.
         tap("workout.finish")
         tap("workout.save")
+        expect("history.compared")
         expect("Swapped Overhead press for Seated dumbbell press")
         app.navigationBars.buttons.element(boundBy: 0).tap()
         expect("train.start")
@@ -135,6 +136,41 @@ final class CoreFlowTests: XCTestCase {
         // The warm-up is no longer first, and a working set is.
         expect("Working, set 1, change set type")
         expectGone("Warm-up, set 1, change set type")
+    }
+
+    func testRestShowsOnTheLockScreenAndClearsWhenTheWorkoutEnds() {
+        let board = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        /// Locks the phone and wakes it, leaving the Lock Screen showing.
+        func showLockScreen() {
+            XCUIDevice.shared.perform(NSSelectorFromString("pressLockButton"))
+            XCUIDevice.shared.press(.home)
+        }
+        launch()
+        startWorkout()
+        tap("Expand Bench press")
+        tap(".complete")
+        expect("rest.skip")
+
+        // The Lock Screen carries the next exercise and the running rest.
+        showLockScreen()
+        XCTAssertTrue(board.staticTexts["Bench press"].waitForExistence(timeout: 10), "Expected the workout on the Lock Screen")
+        XCTAssertTrue(board.staticTexts["Rest"].exists)
+
+        // Minimized, the workout opens again from the link the Lock Screen and Dynamic Island use.
+        app.activate()
+        tap("Minimize workout")
+        expect("workout.resume")
+        XCUIDevice.shared.system.open(URL(string: "setform://workout")!)
+        expect("workout.finish")
+
+        // Finishing takes it off the Lock Screen.
+        tap("rest.skip")
+        tap("workout.finish")
+        tap("workout.save")
+        expect("history.compared")
+        showLockScreen()
+        XCTAssertTrue(board.staticTexts["Bench press"].waitForNonExistence(timeout: 10), "Expected the Lock Screen to be clear")
+        app.activate()
     }
 
     func testLoggedSetSurvivesTheAppBeingKilled() {
