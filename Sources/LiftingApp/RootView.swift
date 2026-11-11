@@ -35,6 +35,7 @@ struct RootView: View {
         .tint(resolved.action)
         .preferredColorScheme(store.data.settings.theme == "system" ? nil : store.data.settings.theme == "dark" ? .dark : .light)
         .modifier(WorkoutPresentation())
+        .modifier(CSVImportModifier(isPresented: .constant(false), opensLaunchFile: true))
         .modifier(NoticeBanner())
         .alert("Could not complete action", isPresented: Binding(get: { store.error != nil && !store.workoutPresented }, set: { if !$0 { store.error = nil } })) {
             Button("OK") { store.error = nil }

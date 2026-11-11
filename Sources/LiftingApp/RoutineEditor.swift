@@ -13,6 +13,8 @@ struct RoutineEditor: View {
     @State private var expanded: UUID?
     /// The slot whose superset or circuit is being edited. The sheet is keyed on it, so it always opens on that exercise.
     @State private var linking: LinkTarget?
+    /// The slot whose exercise is being swapped.
+    @State private var swapping: LinkTarget?
     @State private var warmups = false
     @State private var renaming = false
     @State private var name = ""
@@ -37,7 +39,8 @@ struct RoutineEditor: View {
                                 canMoveDown: routine.slots.last?.id != slot.id,
                                 slotID: slot.id, reordering: reordering,
                                 remove: { remove(slot) },
-                                swap: { id in store.perform { try $0.swapSlotExercise(routineID: routineID, slotID: slot.id, to: id) } }
+                                swap: { id in store.perform { try $0.swapSlotExercise(routineID: routineID, slotID: slot.id, to: id) } },
+                                substitute: { swapping = LinkTarget(id: slot.id) }
                             )
                         }
                     }
@@ -64,6 +67,12 @@ struct RoutineEditor: View {
         .onAppear { if expanded == nil { expanded = routine?.slots.first?.id } }
         .sheet(isPresented: $picker) { ExercisePicker(title: "Add Exercises", onAdd: { store.add($0, to: routineID) }).sheetSize() }
         .sheet(item: $linking) { LinkedExerciseEditor(routineID: routineID, exerciseID: $0.id).sheetSize() }
+        .sheet(item: $swapping) { target in
+            let current = routine?.slots.first { $0.id == target.id }.flatMap { store.data.variant($0.variantID) }.flatMap { store.data.exercise($0.exerciseID) }
+            ExercisePicker(title: "Swap Exercise", similarMuscle: current?.muscle, onSelect: { exercise in
+                store.perform { try $0.swapSlotExercise(routineID: routineID, slotID: target.id, to: exercise.id) }
+            }).sheetSize()
+        }
         .sheet(isPresented: $warmups) { WarmupsSheet(routineID: routineID).sheetSize() }
     }
 

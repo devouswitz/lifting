@@ -53,7 +53,7 @@ open -n '../Setform.app' --args --demo
 - History comparisons use equal elapsed days for an unfinished period and show their exact dates. Rest days show No data when a period has no recorded history; future days are excluded.
 - Independent weights: later untouched working sets follow the nearest earlier explicit entry, in both days and active workouts. Entering 100, then 110 in the next set gives 100/110/110; changing the first to 105 keeps 105/110/110. Fixed loads, completed sets, and later explicit entries are preserved. Percentage warm-ups follow the first working set. Save Changes to Plan in the exercise menu makes today's version permanent: sets, set types, targets, entered weights (inherited ones stay inherited), and rest. Native number fields select their contents on first focus and support paste; the entire form row focuses its field.
 - Finish saves the workout and opens it on Train: its totals, every set, and a Record mark on each lift whose heaviest set beat all earlier workouts. Back returns to Train.
-- Exercises: swipe an exercise's header left for Swap and Remove, or swipe all the way to remove it. Removal is immediate with Undo in the notice at the top. Both remain in the exercise menu.
+- Exercises: swipe an exercise's header left for Swap and Remove, in a workout or a saved day, or swipe all the way to remove it. In a saved day Swap changes the day itself. Removal is immediate with Undo in the notice at the top. Both remain in the exercise menu.
 - Records: logging a set heavier than any earlier set of that lift (more reps break a tie) shows a notice and a star on the set.
 - Complete Set When Reps Are Entered (Settings > Workout, on by default): off, confirming reps only fills them in and the check completes the set.
 - Cancel Workout, in the workout menu, discards the workout after a confirmation. Pause Workout stops duration, exercise timers, and rest. Resume continues elapsed active time. With notification permission, unfinished workouts remind after 45 minutes without changes, or 30 minutes paused, with one follow-up 90 minutes later. Finishing, discarding, or disabling reminders cancels them. The rest timer's − and + buttons default to 15 seconds; hold either to change the step, also in Settings > Workout. When rest runs out the timer turns solid in the rest color, says Rest done, and vibrates once; it stays until Done or the next logged set.
@@ -125,6 +125,12 @@ Apple references: [directory access](https://developer.apple.com/documentation/u
 ```
 
 This compiles and runs the actual XCTest case bodies with a small compatibility harness, including on machines without Xcode. With Xcode, run the Setform scheme's tests normally.
+
+```sh
+./scripts/ui-check.sh
+```
+
+This runs the UI tests in `Tests/SetformUITests` on an iOS simulator: a workout with an exercise removed, restored, and swapped, a logged set, and Finish through to History; swapping and removing in a saved day; a program import; hold-and-drag reordering of exercises and of sets; and a logged set surviving the app being killed. Run it before each build. The import test hands the app its CSV through the `SETFORM_IMPORT_CSV` environment variable, which opens the same preview the file picker does.
 
 
 See `VERIFICATION.md` for completed checks and remaining device checks. `DESIGN.md` describes the current UI; `RESEARCH.md` lists its references.

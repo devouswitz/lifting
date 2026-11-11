@@ -19,6 +19,8 @@ struct TemplateExerciseCard: View {
     var remove: (() -> Void)? = nil
     /// Points this day's slot at another exercise, such as the same movement on other equipment.
     var swap: ((UUID) -> Void)? = nil
+    /// Opens the exercise picker to swap this slot's exercise.
+    var substitute: (() -> Void)? = nil
     @State private var sheet: Sheet?
     @State private var liftedSet: LiftedRow?
     @State private var setRows = RowFrames()
@@ -45,7 +47,7 @@ struct TemplateExerciseCard: View {
     var body: some View {
         let weights = variant.resolvedWeights
         ExerciseCard(name: exercise?.name ?? "Exercise", link: groupTitle, summary: planSummary(variant, unit: unit), expanded: expanded, toggle: toggle,
-                     order: CardOrder(id: slotID, canMoveUp: canMoveUp, canMoveDown: canMoveDown, reordering: reordering, move: move), remove: remove) {
+                     order: CardOrder(id: slotID, canMoveUp: canMoveUp, canMoveDown: canMoveDown, reordering: reordering, move: move), remove: remove, swap: substitute) {
             EmptyView()
         } menu: { menuItems } content: {
             ExerciseInfoRow(exerciseID: variant.exerciseID, swap: swap, load: loadSummary(zip(variant.sets, weights).compactMap { $0.kind == .warmup ? nil : $1 }, mode: mode, unit: unit),
@@ -83,6 +85,7 @@ struct TemplateExerciseCard: View {
     }
 
     @ViewBuilder private var menuItems: some View {
+        if let substitute { Button("Swap Exercise", systemImage: "arrow.triangle.2.circlepath", action: substitute) }
         Button("Plan Settings", systemImage: "slider.horizontal.3") { sheet = .settings }
         if let link { Button("Superset / Circuit", systemImage: "link", action: link) }
         if mode != .cardio {

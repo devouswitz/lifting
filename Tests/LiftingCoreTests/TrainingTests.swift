@@ -2349,7 +2349,8 @@ final class TrainingTests: XCTestCase {
         // Weekly volume keeps empty weeks and adds up to the muscle totals.
         let weeks = data.volumeBuckets(since: start.addingTimeInterval(-14 * 86_400), until: start.addingTimeInterval(7 * 86_400), monthly: false)
         XCTAssertTrue(weeks.count >= 3)
-        XCTAssertEqual(weeks.reduce(0) { $0 + $1.volume }, 100 * 3 + 90 * 6 + 80 * 9, accuracy: 0.001)
+        let logged: Double = 100 * 3 + 90 * 6 + 80 * 9
+        XCTAssertEqual(weeks.reduce(0) { $0 + $1.volume }, logged, accuracy: 0.001)
         XCTAssertTrue(weeks.contains { $0.volume == 0 })
 
         // The body-weight trend averages the week up to each weigh-in.

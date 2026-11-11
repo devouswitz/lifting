@@ -32,11 +32,22 @@ private struct CSVPreview: Identifiable {
     var routines: RoutineBundle?
     var history: HistoryBundle?
     var external: Data?
+    /// Reads a day or program CSV, a logged-set CSV, or another app's export (CSV or JSON).
+    init(bytes: Data, json: Bool = false) throws {
+        let bytes = json ? try ExternalHistoryJSON.csv(bytes) : bytes
+        let header = try CSVCodec.parse(bytes)[0].map { $0.lowercased().replacingOccurrences(of: " ", with: "_").trimmingCharacters(in: .whitespacesAndNewlines) }
+        if header.contains("day") { routines = try RoutineCSV.decode(bytes) }
+        else if ["date", "workout", "exercise", "weight_kg"].allSatisfy(header.contains) { history = try HistoryCSV.decode(bytes) }
+        else { external = bytes }
+    }
 }
 
 struct CSVImportModifier: ViewModifier {
     @EnvironmentObject var store: AppStore
     @Binding var isPresented: Bool
+    /// Opens the CSV text in the `SETFORM_IMPORT_CSV` environment variable at launch, so UI tests reach
+    /// the import preview without the system file picker.
+    var opensLaunchFile = false
     @State private var preview: CSVPreview?
     func body(content: Content) -> some View {
         content.background {
@@ -47,13 +58,12 @@ struct CSVImportModifier: ViewModifier {
                 let access = url.startAccessingSecurityScopedResource()
                 defer { if access { url.stopAccessingSecurityScopedResource() } }
                 guard (try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0) <= 25_000_000 else { throw TrainingError.invalid("CSV files must be under 25 MB.") }
-                var bytes = try Data(contentsOf: url)
-                if url.pathExtension.lowercased() == "json" { bytes = try ExternalHistoryJSON.csv(bytes) }
-                let header = try CSVCodec.parse(bytes)[0].map { $0.lowercased().replacingOccurrences(of: " ", with: "_").trimmingCharacters(in: .whitespacesAndNewlines) }
-                if header.contains("day") { preview = CSVPreview(routines: try RoutineCSV.decode(bytes)) }
-                else if ["date", "workout", "exercise", "weight_kg"].allSatisfy(header.contains) { preview = CSVPreview(history: try HistoryCSV.decode(bytes)) }
-                else { preview = CSVPreview(external: bytes) }
+                preview = try CSVPreview(bytes: Data(contentsOf: url), json: url.pathExtension.lowercased() == "json")
             } catch { store.error = "Import failed. \(error.localizedDescription)" }
+        }
+        .task {
+            guard opensLaunchFile, let text = ProcessInfo.processInfo.environment["SETFORM_IMPORT_CSV"] else { return }
+            do { preview = try CSVPreview(bytes: Data(text.utf8)) } catch { store.error = "Import failed. \(error.localizedDescription)" }
         }
         .sheet(item: $preview) { item in
             Group {

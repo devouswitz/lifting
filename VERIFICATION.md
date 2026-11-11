@@ -2,6 +2,20 @@
 
 Entries below are dated records. Earlier toolchain and distribution limitations describe the environment at that time; see the newest pass for current evidence.
 
+## UI tests and swap in saved days, build 19 (November 11, 2026)
+
+The project now has a UI test target, `SetformUITests`, run with `./scripts/ui-check.sh`. Six tests, all passing on the iPhone 18 Pro simulator (iOS 27.0):
+
+- Workout: header swipe, Remove with its notice, Undo, Swap to another exercise, a logged set moving the count and starting rest, Finish opening the saved workout with "Swapped Overhead press for Seated dumbbell press", and History's log row reading "1 change from the plan".
+- Saved day: header swipe, Swap changing the day's exercise (new in this build; before, a saved day's swipe offered Remove only), Remove with its notice, Undo.
+- Program import: a CSV opened the preview, Add and Make Current Program showed "Added Imported Block, now your current program", and Train showed the program and its first day. This closes the import notice left unverified in build 18.
+- Hold and drag moved an exercise below its neighbour in a workout, and moved a warm-up below working sets in a saved day. This closes the drag reorder left unverified in builds 17 and 18.
+- A set logged and the app killed at once: on relaunch the workout resumed with the set still logged, so the background save had already reached disk.
+
+The unit test target had not compiled under Xcode since build 13: one assertion was too complex for the type checker. `./scripts/check.sh` never saw it because its harness is simpler. It is fixed and `xcodebuild test` now runs all 114 core tests, zero failures.
+
+- Not verified: history (logged-set) import through the UI, which shares the import preview and notice with the program import tested here; a physical iPhone; VoiceOver.
+
 ## Feedback pass, build 18 (November 11, 2026)
 
 iPhone 18 Pro simulator (iOS 27.0), scripted UI walker, showcase library.
