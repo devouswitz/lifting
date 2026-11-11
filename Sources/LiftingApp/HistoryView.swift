@@ -103,6 +103,8 @@ private struct HistoryWorkoutRow: View {
                     Text([counted(exercises, "exercise"), counted(session.completedSets, "set"), clockText(session.duration()), total.empty ? nil : total.value, total.note, session.health?.activeKcal.map { "\(grouped($0)) kcal" }]
                         .compactMap { $0 }.joined(separator: " · "))
                         .font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                    let changes = session.planChanges, changed = changes.added.count + changes.swapped.count + changes.removed.count
+                    if changed > 0 { Label("\(counted(changed, "change")) from the plan", systemImage: "arrow.triangle.branch").font(.caption).foregroundStyle(.secondary) }
                     if !session.notes.isEmpty { Label(session.notes, systemImage: "note.text").font(.caption).foregroundStyle(.secondary).lineLimit(1) }
                 }
             }
@@ -138,11 +140,12 @@ struct SessionDetail: View {
         }
         .navigationTitle(session.map { store.data.title(for: $0) } ?? "Workout").inlineTitle()
         .toolbar { if session != nil { Button(editing ? "Done" : "Edit") { editing.toggle() }.fontWeight(editing ? .semibold : .regular).accessibilityIdentifier("history.edit") } }
-        .confirmationDialog("Delete this workout?", isPresented: $deleting) {
+        .alert("Delete this workout?", isPresented: $deleting) {
             Button("Delete Workout", role: .destructive) {
                 store.deleteSession(sessionID)
                 dismiss()
             }
+            Button("Cancel", role: .cancel) {}
         }
     }
 
@@ -186,6 +189,7 @@ struct SessionDetail: View {
                             }.font(.subheadline).accessibilityElement(children: .combine).accessibilityIdentifier("history.health")
                         }
                     }
+                    planChanges(session)
                     if !session.notes.isEmpty { Text(session.notes).font(.subheadline).textSelection(.enabled) }
                 }.frame(maxWidth: .infinity, alignment: .leading).card(padding: 16)
                 ForEach(session.exercises) { exercise in
@@ -203,7 +207,8 @@ struct SessionDetail: View {
                                 Image(systemName: "chart.xyaxis.line").font(.subheadline).foregroundStyle(palette.action)
                             }.contentShape(Rectangle())
                         }.buttonStyle(.plain)
-                        if let from = exercise.substitutedFrom { Text("Substitute for \(from)").font(.caption).foregroundStyle(.secondary) }
+                        if let from = exercise.substitutedFrom { Label("Instead of \(from)", systemImage: "arrow.triangle.2.circlepath").font(.caption).foregroundStyle(.secondary) }
+                        else if exercise.slotID == nil, session.routineID != nil { Label("Added to this workout", systemImage: "plus").font(.caption).foregroundStyle(.secondary) }
                         HistorySetTable(sets: exercise.sets, mode: exercise.mode, unit: store.data.settings.unit)
                         if !exercise.recurringNotes.isEmpty { Label(exercise.recurringNotes, systemImage: "pin.fill").font(.caption).foregroundStyle(.secondary) }
                         if !exercise.notes.isEmpty { Text(exercise.notes).font(.subheadline).textSelection(.enabled) }
@@ -212,6 +217,22 @@ struct SessionDetail: View {
                 Button("Delete Workout", role: .destructive) { deleting = true }.font(.subheadline).frame(maxWidth: .infinity, minHeight: 44)
             }.padding(16).readableWidth()
         }.background(palette.background)
+    }
+
+    /// How the workout departed from its day: what was added, swapped, and taken out.
+    @ViewBuilder private func planChanges(_ session: Session) -> some View {
+        let changes = session.planChanges
+        let lines: [(symbol: String, text: String)] = [
+            changes.added.isEmpty ? nil : ("plus", "Added \(changes.added.formatted(.list(type: .and)))"),
+            changes.swapped.isEmpty ? nil : ("arrow.triangle.2.circlepath", "Swapped \(changes.swapped.map { "\($0.from) for \($0.name)" }.formatted(.list(type: .and)))"),
+            changes.removed.isEmpty ? nil : ("minus", "Left out \(changes.removed.formatted(.list(type: .and)))"),
+        ].compactMap { $0 }
+        if !lines.isEmpty {
+            VStack(alignment: .leading, spacing: 5) {
+                Text("Changes from the plan").font(.caption).foregroundStyle(.secondary)
+                ForEach(lines, id: \.text) { line in Label(line.text, systemImage: line.symbol).font(.subheadline) }
+            }.accessibilityElement(children: .combine).accessibilityIdentifier("history.changes")
+        }
     }
 
     /// For example "412 kcal · 128 bpm average · Apple Watch".
@@ -247,7 +268,7 @@ struct SessionDetail: View {
                                         value.exercises[exerciseIndex].sets[setIndex] = newSet
                                     }
                                 }
-                            }), unit: store.data.settings.unit)
+                            }), unit: store.data.settings.unit, completedAt: session.endedAt ?? session.startedAt)
                         } label: { setRow(set, mode: exercise.mode) }
                     }.onDelete { offsets in
                         let ids = offsets.map { exercise.sets[$0].id }
@@ -354,13 +375,15 @@ struct LoggedSetEditor: View {
     @Environment(\.palette) private var palette
     @Binding var set: LoggedSet
     let unit: WeightUnit
+    /// The time a set takes when it is marked complete here: the workout's, not now.
+    let completedAt: Date
     var body: some View {
         ThemedForm {
             Picker("Type", selection: setTypeChoice($set.plan, types: palette.setTypes)) {
                 ForEach(SetKind.allCases) { Text($0.title).tag(SetTypeChoice.kind($0)) }
                 ForEach(palette.setTypes) { Text($0.name).tag(SetTypeChoice.custom($0.id)) }
             }
-            Toggle("Completed", isOn: Binding(get: { set.completedAt != nil }, set: { set.completedAt = $0 ? .now : nil }))
+            Toggle("Completed", isOn: Binding(get: { set.completedAt != nil }, set: { set.completedAt = $0 ? completedAt : nil }))
             NumberRow("Weight (\(unit.rawValue))", value: $set.weight, factor: unit.kilograms(1))
             NumberRow("Reps", value: Binding(get: { set.reps.map(Double.init) }, set: { set.reps = $0.map(Int.init) }), integer: true)
             DurationRow(title: "Time", seconds: $set.seconds)

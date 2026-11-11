@@ -38,7 +38,7 @@ struct WorkoutView: View {
             .onChange(of: store.autoFocusRevision) { _, _ in
                 guard let id = store.autoFocusedExerciseID else { return }
                 if reduceMotion { reader.scrollTo(id, anchor: .top) }
-                else { withAnimation(.easeInOut(duration: 0.25)) { reader.scrollTo(id, anchor: .top) } }
+                else { withAnimation(.smooth(duration: 0.35)) { reader.scrollTo(id, anchor: .top) } }
             }
             }
             .navigationTitle(store.data.activeSession?.name ?? "Workout").inlineTitle()
@@ -69,7 +69,7 @@ struct WorkoutView: View {
             .sheet(isPresented: $adding) { ExercisePicker(title: "Add Exercises", onAdd: { exercises in store.perform { data in for exercise in exercises { try data.addExerciseToSession(exercise.id) } } }).environmentObject(store).sheetSize() }
             .sheet(isPresented: $warmups) { WarmupsSheet().environmentObject(store).sheetSize() }
             .sheet(isPresented: $finishing) { finishSheet }
-            .confirmationDialog("Cancel this workout?", isPresented: $cancelling, titleVisibility: .visible) {
+            .alert("Cancel this workout?", isPresented: $cancelling) {
                 Button("Discard Workout", role: .destructive) { store.discard() }
                 Button("Keep Workout", role: .cancel) {}
             } message: { Text("Logged sets in this workout will not be saved.") }
@@ -82,6 +82,7 @@ struct WorkoutView: View {
                 }.sheetSize()
             }
         }.tint(palette.action)
+        .modifier(NoticeBanner())
         .alert("Could not complete action", isPresented: Binding(get: { store.error != nil }, set: { if !$0 { store.error = nil } })) { Button("OK") { store.error = nil } } message: { Text(store.error ?? "") }
         .onAppear {
             store.requestWorkoutAlerts()
@@ -149,8 +150,9 @@ struct WorkoutView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Back") { finishing = false } }
             }
-            .confirmationDialog("Discard this workout?", isPresented: $discard, titleVisibility: .visible) {
+            .alert("Discard this workout?", isPresented: $discard) {
                 Button("Discard Workout", role: .destructive) { finishing = false; store.discard() }
+                Button("Keep Workout", role: .cancel) {}
             } message: { Text("Logged sets in this workout will not be saved.") }
         }.sheetSize()
     }
@@ -176,7 +178,7 @@ struct WorkoutSummaryHeader: View {
     func stat(_ title: String, _ value: String, note: String? = nil) -> some View {
         VStack(spacing: 1) {
             Text(title).font(.caption).foregroundStyle(.secondary)
-            Text(value).font(.figure(17)).lineLimit(1).minimumScaleFactor(0.8)
+            Text(value).font(.figure(17)).lineLimit(1).minimumScaleFactor(0.8).contentTransition(.numericText())
             if let note { Text(note).font(.caption2).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.8) }
         }.frame(maxWidth: .infinity).multilineTextAlignment(.center).accessibilityElement(children: .combine)
     }
@@ -275,7 +277,6 @@ struct WorkoutExerciseCard: View {
     let exerciseID: UUID
     let reordering: Reordering
     @State private var sheet: ExerciseSheet?
-    @State private var removing = false
     @FocusState private var noteFocused: Bool
     var item: SessionExercise? { store.data.activeSession?.exercises.first { $0.id == exerciseID } }
     var body: some View {
@@ -288,9 +289,10 @@ struct WorkoutExerciseCard: View {
                              store.perform { $0.moveSessionExercise(exerciseID, offset: offset) }
                          },
                          accessibilityValue: "\(item.collapsed == true ? "Collapsed" : "Expanded"), \(done) of \(item.sets.count) sets",
+                         remove: { store.removeExercise(exerciseID) }, swap: completed ? nil : { sheet = .substitute },
                          identifier: "workout.\(exerciseID)") {
-                if completed { Image(systemName: "checkmark.circle.fill").font(.system(size: 22)).foregroundStyle(palette.completed) }
-                else { Text("\(done) of \(item.sets.count)").font(.figure(13, weight: .medium)).foregroundStyle(.secondary) }
+                if completed { Image(systemName: "checkmark.circle.fill").font(.system(size: 22)).foregroundStyle(palette.completed).transition(.scale.combined(with: .opacity)) }
+                else { Text("\(done) of \(item.sets.count)").font(.figure(13, weight: .medium)).foregroundStyle(.secondary).contentTransition(.numericText()) }
             } menu: { menuItems(item) } content: {
                 ExerciseInfoRow(exerciseID: item.exerciseID, swap: { id in store.perform { try $0.substitute(sessionExerciseID: exerciseID, with: id, future: false) } }, swapDisabled: completed,
                                 load: loadSummary(item.sets.filter { $0.plan.kind != .warmup }.map(\.weight), mode: item.mode, unit: store.data.settings.unit), rest: item.restSeconds,
@@ -311,10 +313,9 @@ struct WorkoutExerciseCard: View {
             .task(id: autoCollapseReady) {
                 guard autoCollapseReady else { return }
                 do { try await Task.sleep(for: .milliseconds(650)) } catch { return }
-                store.collapseCompleted(exerciseID)
+                withAnimation(.smooth(duration: 0.35)) { store.collapseCompleted(exerciseID) }
             }
             .sheet(item: $sheet) { sheetContent($0, item: item).environmentObject(store) }
-            .confirmationDialog("Remove \(item.name)?", isPresented: $removing) { Button("Remove from workout", role: .destructive) { store.editActive { $0.exercises.removeAll { $0.id == exerciseID } } } } message: { Text("This removes its sets from the current workout.") }
         }
     }
     private func editItem(_ change: @escaping (inout SessionExercise) -> Void) -> Bool {
@@ -337,10 +338,12 @@ struct WorkoutExerciseCard: View {
         }
         Button("Warm-ups…", systemImage: "flame") { sheet = .warmups }.disabled(item.mode == .cardio)
         Button("Edit Saved Prescription", systemImage: "slider.horizontal.3") { sheet = .savedPlan(item.variantID) }
-        Button("Save Changes to Plan", systemImage: "square.and.arrow.down") { store.perform { try $0.saveSessionPlan(exerciseID) } }
+        Button("Save Changes to Plan", systemImage: "square.and.arrow.down") {
+            if store.perform({ try $0.saveSessionPlan(exerciseID) }) { store.announce("Saved \(item.name) to the plan") }
+        }
         Button("Plate Calculator", systemImage: "circle.grid.2x1") { sheet = .plates }.disabled(item.mode != .strength)
         Divider()
-        Button("Remove from Workout", systemImage: "trash", role: .destructive) { removing = true }
+        Button("Remove from Workout", systemImage: "trash", role: .destructive) { store.removeExercise(exerciseID) }
     }
     private func adder(_ item: SessionExercise) -> SetAdder {
         SetAdder(set: { store.perform { try $0.addSessionSet(to: exerciseID) } }, warmup: addWarmup,
@@ -427,7 +430,7 @@ struct WorkoutExerciseCard: View {
     }
     var completed: Bool { guard let item else { return false }; return !item.sets.isEmpty && item.sets.allSatisfy { $0.completedAt != nil } }
     var autoCollapseReady: Bool {
-        completed && item?.collapsed != true && item?.keepExpanded != true && sheet == nil && !removing && !noteFocused && store.data.settings.collapsesCompletedExercises
+        completed && item?.collapsed != true && item?.keepExpanded != true && sheet == nil && !noteFocused && store.data.settings.collapsesCompletedExercises
     }
     /// Collapsed summary in the standard prescription form, for example "3 × 8–10 · 65 lb".
     func compactSummary(_ item: SessionExercise) -> String {

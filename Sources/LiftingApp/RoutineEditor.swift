@@ -36,7 +36,7 @@ struct RoutineEditor: View {
                                 canMoveUp: routine.slots.first?.id != slot.id,
                                 canMoveDown: routine.slots.last?.id != slot.id,
                                 slotID: slot.id, reordering: reordering,
-                                remove: { update { $0.slots.removeAll { $0.id == slot.id } } },
+                                remove: { remove(slot) },
                                 swap: { id in store.perform { try $0.swapSlotExercise(routineID: routineID, slotID: slot.id, to: id) } }
                             )
                         }
@@ -86,6 +86,15 @@ struct RoutineEditor: View {
         store.perform { data in
             guard let index = data.routines.firstIndex(where: { $0.id == routineID }) else { return }
             change(&data.routines[index])
+        }
+    }
+    /// Takes an exercise out of the day at once; the notice offers Undo.
+    private func remove(_ slot: RoutineSlot) {
+        guard let index = routine?.slots.firstIndex(where: { $0.id == slot.id }) else { return }
+        let name = store.data.variant(slot.variantID).flatMap { store.data.exercise($0.exerciseID)?.name } ?? "exercise"
+        update { $0.slots.remove(at: index) }
+        store.announce("Removed \(name)", symbol: "trash.fill", role: .failure) {
+            update { day in if !day.slots.contains(where: { $0.id == slot.id }) { day.slots.insert(slot, at: min(index, day.slots.count)) } }
         }
     }
     private func move(_ id: UUID, by offset: Int) { store.perform { $0.moveSlot(id, routineID: routineID, offset: offset) } }

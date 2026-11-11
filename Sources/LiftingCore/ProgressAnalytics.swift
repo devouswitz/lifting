@@ -51,6 +51,21 @@ public extension TrainingData {
         }
     }
 
+    /// Every exercise's heaviest completed working set across history, more reps breaking a tie.
+    func bestSets() -> [UUID: TopSet] {
+        var best: [UUID: TopSet] = [:]
+        for session in sessions where session.skipped != true {
+            for item in session.exercises where item.mode == .strength {
+                for set in item.sets {
+                    guard set.completedAt != nil, set.plan.kind != .warmup, let weight = set.weight, weight > 0, let reps = set.reps, reps > 0 else { continue }
+                    if let held = best[item.exerciseID], held.weight > weight || (held.weight == weight && held.reps >= reps) { continue }
+                    best[item.exerciseID] = TopSet(sessionID: session.id, date: session.startedAt, weight: weight, reps: reps)
+                }
+            }
+        }
+        return best
+    }
+
     /// Each session's cardio for an exercise, oldest first; sessions with no time or distance are left out.
     func cardioEfforts(exerciseID: UUID, variantID: UUID? = nil, programID: UUID? = nil, since: Date = .distantPast) -> [CardioEffort] {
         sessions(inProgram: programID).filter { $0.startedAt >= since && $0.skipped != true }.sorted { $0.startedAt < $1.startedAt }.compactMap { session in

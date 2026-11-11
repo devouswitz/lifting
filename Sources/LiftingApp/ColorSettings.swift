@@ -44,8 +44,9 @@ struct ColorSettingsView: View {
             store.perform { $0.settings.colors = theme == ColorTheme() ? nil : theme }
         }
         .onDisappear { if loaded, theme != (store.data.settings.colors ?? ColorTheme()) { store.perform { $0.settings.colors = theme == ColorTheme() ? nil : theme } } }
-        .confirmationDialog("Reset all colors to the defaults?", isPresented: $resetting, titleVisibility: .visible) {
+        .alert("Reset all colors to the defaults?", isPresented: $resetting) {
             Button("Reset All Colors", role: .destructive) { theme = ColorTheme() }
+            Button("Cancel", role: .cancel) {}
         }
     }
 

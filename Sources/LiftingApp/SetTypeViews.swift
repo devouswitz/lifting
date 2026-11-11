@@ -163,8 +163,9 @@ struct SetTypeEditor: View {
                 }
             }
             .formStyle(.grouped).navigationTitle(isNew ? "New Set Type" : type.name).inlineTitle()
-            .confirmationDialog("Delete \(type.name)?", isPresented: $deleting, titleVisibility: .visible) {
+            .alert("Delete \(type.name)?", isPresented: $deleting) {
                 Button("Delete Set Type", role: .destructive) { if store.perform({ $0.removeSetType(type.id) }) { deleted = true; dismiss() } }
+                Button("Cancel", role: .cancel) {}
             } message: { Text("Sets that used it keep counting the same way and show as \(type.countsAs.title).") }
         }
     }

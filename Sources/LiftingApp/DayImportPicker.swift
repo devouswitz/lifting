@@ -87,11 +87,12 @@ struct SavedDaysView: View {
             }.disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || name.count > 200)
             Button("Cancel", role: .cancel) {}
         }
-        .confirmationDialog("Delete \(deleting?.name ?? "day")?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }), titleVisibility: .visible) {
+        .alert("Delete \(deleting?.name ?? "day")?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } })) {
             Button("Delete Saved Day", role: .destructive) {
                 if let deleting { store.perform { $0.removeDay(deleting.id) } }
                 deleting = nil
             }
+            Button("Cancel", role: .cancel) { deleting = nil }
         }
     }
 }

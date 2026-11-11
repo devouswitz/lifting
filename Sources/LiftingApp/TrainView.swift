@@ -12,7 +12,7 @@ struct TrainView: View {
             VStack(alignment: .leading, spacing: 24) {
                 if let program = store.data.activeProgram {
                     programRow(program)
-                    WeekStrip()
+                    WeekSummary()
                     if let next = program.nextDayID.flatMap(store.data.routine) {
                         VStack(alignment: .leading, spacing: 10) {
                             SectionTitle(title: "Next workout")
@@ -74,30 +74,61 @@ struct TrainView: View {
     }
 }
 
-/// This week's days, drawn as the History calendar draws them. A trained day opens its workout.
-struct WeekStrip: View {
+/// The card at the top of Train: this week's days as the History calendar draws them, or the week's volume
+/// day by day. A trained day opens its workout. The heading is a menu that changes what the card shows or
+/// turns it off; Settings turns it back on.
+struct WeekSummary: View {
     @EnvironmentObject var store: AppStore
+    @Environment(\.palette) var palette
     var body: some View {
-        let calendar = Calendar.current
-        let start = calendar.dateInterval(of: .weekOfYear, for: .now)?.start ?? .now
-        let days = (0..<7).compactMap { calendar.date(byAdding: .day, value: $0, to: start) }
-        let sessions = store.data.sessions.filter { $0.skipped != true && $0.startedAt >= start }.sorted { $0.startedAt < $1.startedAt }
-        VStack(alignment: .leading, spacing: 10) {
-            SectionTitle(title: "This week", trailing: sessions.isEmpty ? nil : counted(sessions.count, "workout"))
-            HStack(spacing: 0) {
-                ForEach(days, id: \.self) { day in
-                    let session = sessions.last { calendar.isDate($0.startedAt, inSameDayAs: day) }
-                    VStack(spacing: 6) {
-                        Text(day, format: .dateTime.weekday(.narrow)).font(.caption).foregroundStyle(.secondary)
-                        if let session {
-                            NavigationLink(value: SessionRoute(id: session.id)) { CalendarDay(date: day, trained: true) }.buttonStyle(.plain)
-                        } else { CalendarDay(date: day) }
+        let mode = store.data.settings.trainSummary ?? .days
+        if mode != .off {
+            let calendar = Calendar.current
+            let unit = store.data.settings.unit
+            let start = calendar.dateInterval(of: .weekOfYear, for: .now)?.start ?? .now
+            let days = (0..<7).compactMap { calendar.date(byAdding: .day, value: $0, to: start) }
+            let sessions = store.data.sessions.filter { $0.skipped != true && $0.startedAt >= start }.sorted { $0.startedAt < $1.startedAt }
+            let volumes = days.map { day in sessions.filter { calendar.isDate($0.startedAt, inSameDayAs: day) }.reduce(0) { $0 + $1.volume } }
+            let total = volumes.reduce(0, +), top = max(volumes.max() ?? 0, 1)
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .firstTextBaseline) {
+                    Menu {
+                        Picker("This week shows", selection: Binding(get: { mode }, set: { value in store.perform { $0.settings.trainSummary = value == .days ? nil : value } })) {
+                            ForEach(TrainSummary.allCases) { Text($0.title).tag($0) }
+                        }
+                    } label: {
+                        HStack(spacing: 5) {
+                            Text("This week").font(.title3.weight(.bold)).foregroundStyle(Color.primary)
+                            Image(systemName: "chevron.up.chevron.down").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                        }
+                    }.compactMenu().accessibilityLabel("This week, showing \(mode.title)").accessibilityIdentifier("train.summary")
+                    Spacer()
+                    let trailing = mode == .volume ? (total > 0 ? "\(grouped(unit.display(total))) \(unit.rawValue)" : "") : (sessions.isEmpty ? "" : counted(sessions.count, "workout"))
+                    Text(trailing).font(.subheadline).foregroundStyle(.secondary).monospacedDigit()
+                }.padding(.horizontal, 4).padding(.top, 8)
+                HStack(alignment: .bottom, spacing: 0) {
+                    ForEach(Array(days.enumerated()), id: \.element) { index, day in
+                        let session = sessions.last { calendar.isDate($0.startedAt, inSameDayAs: day) }
+                        let today = calendar.isDateInToday(day)
+                        let cell = VStack(spacing: 6) {
+                            Text(day, format: .dateTime.weekday(.narrow)).font(.caption.weight(mode == .volume && today ? .bold : .regular))
+                                .foregroundStyle(mode == .volume && today ? Color.primary : Color.secondary)
+                            if mode == .volume {
+                                // A day's bar against the week's heaviest day; a trained day with no lifting keeps a stub.
+                                RoundedRectangle(cornerRadius: 4, style: .continuous).fill(session == nil ? palette.field : palette.completed)
+                                    .frame(width: 20, height: session == nil ? 4 : max(4, 34 * volumes[index] / top))
+                                    .frame(height: 34, alignment: .bottom)
+                            } else { CalendarDay(date: day, trained: session != nil) }
+                        }.frame(maxWidth: .infinity).contentShape(Rectangle())
+                        Group {
+                            if let session { NavigationLink(value: SessionRoute(id: session.id)) { cell }.buttonStyle(.plain) } else { cell }
+                        }
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel(day.formatted(.dateTime.weekday(.wide).month(.wide).day()))
+                        .accessibilityValue(session == nil ? "No workout" : mode == .volume ? "\(grouped(unit.display(volumes[index]))) \(unit.rawValue)" : "Workout logged")
                     }
-                    .frame(maxWidth: .infinity)
-                    .accessibilityElement(children: .combine)
-                    .accessibilityLabel("\(day.formatted(.dateTime.weekday(.wide).month(.wide).day()))\(session == nil ? "" : ", workout logged")")
-                }
-            }.card(padding: 12)
+                }.card(padding: 12)
+            }
         }
     }
 }
@@ -265,23 +296,27 @@ struct DayMenu: View {
                 }
                 Divider()
                 Button("Duplicate Day", systemImage: "plus.square.on.square") { store.perform { _ = try $0.addDay(to: program.id, templateID: day.id, name: TrainingData.uniqueName(day.name + " copy", among: store.data.routines.map(\.name))) } }
-                Button("Save Day Copy", systemImage: "square.and.arrow.down.on.square") { store.perform { _ = try $0.saveDayAsTemplate(day.id) } }
+                Button("Save Day Copy", systemImage: "square.and.arrow.down.on.square") {
+                    if store.perform({ _ = try $0.saveDayAsTemplate(day.id) }) { store.announce("Saved \(day.name) to Saved Days") }
+                }
             } else {
                 if !store.data.programs.isEmpty {
-                    Menu { ForEach(store.data.programs) { target in Button(target.name) { store.perform { _ = try $0.addDay(to: target.id, templateID: day.id) } } } } label: { Label("Add to Program", systemImage: "plus.rectangle.on.rectangle") }
+                    Menu { ForEach(store.data.programs) { target in Button(target.name) { if store.perform({ _ = try $0.addDay(to: target.id, templateID: day.id) }) { store.announce("Added \(day.name) to \(target.name)") } } } } label: { Label("Add to Program", systemImage: "plus.rectangle.on.rectangle") }
                 }
                 Button("Duplicate Saved Day", systemImage: "plus.square.on.square") { store.perform { _ = try $0.saveDayAsTemplate(day.id, name: TrainingData.uniqueName(day.name + " copy", among: store.data.dayTemplates.map(\.name))) } }
             }
             Button("Export CSV", systemImage: "square.and.arrow.up") { do { export = try .day(day.id, in: store.data) } catch { store.error = error.localizedDescription } }
             Divider()
-            Button(program == nil ? "Delete Template" : "Delete Day", systemImage: "trash", role: .destructive) { deleting = true }
+            Button(program == nil ? "Delete Saved Day" : "Delete Day", systemImage: "trash", role: .destructive) { deleting = true }
         } label: { Image(systemName: "ellipsis").font(.body.weight(.semibold)).frame(width: 44, height: 44).contentShape(Rectangle()) }
         .compactMenu().fixedSize().foregroundStyle(.secondary).accessibilityLabel("Options for \(day.name)")
-        .confirmationDialog(program == nil ? "Delete this template?" : "Delete this day?", isPresented: $deleting, titleVisibility: .visible) {
+        .alert("Delete \(day.name)?", isPresented: $deleting) {
             Button("Delete", role: .destructive) { if store.perform({ $0.removeDay(day.id) }) { onDelete?() } }
+            Button("Cancel", role: .cancel) {}
         } message: { Text("Workout history is kept.") }
-        .confirmationDialog("Skip \(day.name)?", isPresented: $skipping, titleVisibility: .visible) {
+        .alert("Skip \(day.name)?", isPresented: $skipping) {
             Button("Skip Workout") { if let program { store.skipNext(in: program.id) } }
+            Button("Cancel", role: .cancel) {}
         } message: { Text(skipMessage) }
         .modifier(CSVExportModifier(request: $export))
     }

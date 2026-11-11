@@ -1299,6 +1299,56 @@ final class TrainingTests: XCTestCase {
         XCTAssertNoThrow(try data.validated())
     }
 
+    func testPlanChangesRecordAddedSwappedAndRemovedExercises() throws {
+        var data = TrainingData.starter()
+        try data.start(routineID: data.routines[0].id)
+        XCTAssertTrue(data.activeSession!.planChanges.added.isEmpty && data.activeSession!.planChanges.removed.isEmpty)
+        // Added: an exercise that is not in the day.
+        try data.addExerciseToSession(data.exercises.first { $0.name == "Squat" }!.id)
+        // Swapped: the first exercise for another.
+        let first = data.activeSession!.exercises[0]
+        try data.substitute(sessionExerciseID: first.id, with: data.exercises.first { $0.name == "Incline dumbbell press" }!.id, future: false)
+        // Removed: a planned exercise, then put back, then removed again.
+        let row = data.activeSession!.exercises[1]
+        let removed = try XCTUnwrap(data.removeSessionExercise(row.id))
+        XCTAssertEqual(data.activeSession!.removedExercises, ["Barbell row"])
+        data.restoreSessionExercise(removed.item, at: removed.index)
+        XCTAssertNil(data.activeSession!.removedExercises)
+        XCTAssertEqual(data.activeSession!.exercises[1].id, row.id)
+        data.removeSessionExercise(row.id)
+        // Removing an exercise that was added on the day is not a change from the plan.
+        let added = data.activeSession!.exercises.last!
+        data.removeSessionExercise(added.id)
+        try data.addExerciseToSession(data.exercises.first { $0.name == "Squat" }!.id)
+        let changes = data.activeSession!.planChanges
+        XCTAssertEqual(changes.added, ["Squat"])
+        XCTAssertEqual(changes.swapped.map(\.name), ["Incline dumbbell press"])
+        XCTAssertEqual(changes.swapped.map(\.from), ["Bench press"])
+        XCTAssertEqual(changes.removed, ["Barbell row"])
+        // Kept through a save and reload, and a workout without a day has no plan to change.
+        let restored = try LocalRepository.decode(LocalRepository.encode(data))
+        XCTAssertEqual(restored.activeSession?.removedExercises, ["Barbell row"])
+        var empty = Session(name: "Workout")
+        empty.exercises = data.activeSession!.exercises
+        XCTAssertTrue(empty.planChanges.added.isEmpty)
+    }
+
+    func testBestSetsAndNewSettingsDefaults() throws {
+        let data = TrainingData.demo(now: Date(timeIntervalSince1970: 1_792_300_000))
+        let bench = data.exercises.first { $0.name == "Bench press" }!
+        let best = try XCTUnwrap(data.bestSets()[bench.id])
+        // The heaviest completed working set, as the session top sets report it.
+        let tops = data.topSets(exerciseID: bench.id)
+        XCTAssertEqual(best.weight, tops.map(\.weight).max())
+        XCTAssertNil(data.bestSets()[data.exercises.first { $0.name == "Run" }!.id])
+        var settings = Settings()
+        XCTAssertTrue(settings.completesSetOnReps); XCTAssertNil(settings.trainSummary)
+        settings.completesSetOnReps = false; settings.trainSummary = .volume
+        var changed = TrainingData.starter(); changed.settings = settings
+        let restored = try LocalRepository.decode(LocalRepository.encode(changed))
+        XCTAssertFalse(restored.settings.completesSetOnReps); XCTAssertEqual(restored.settings.trainSummary, .volume)
+    }
+
     func testFutureSubstitutionOnlyChangesThisSlot() throws {
         var data = TrainingData.starter()
         let original = data.routines

@@ -45,7 +45,7 @@ struct TemplateExerciseCard: View {
     var body: some View {
         let weights = variant.resolvedWeights
         ExerciseCard(name: exercise?.name ?? "Exercise", link: groupTitle, summary: planSummary(variant, unit: unit), expanded: expanded, toggle: toggle,
-                     order: CardOrder(id: slotID, canMoveUp: canMoveUp, canMoveDown: canMoveDown, reordering: reordering, move: move)) {
+                     order: CardOrder(id: slotID, canMoveUp: canMoveUp, canMoveDown: canMoveDown, reordering: reordering, move: move), remove: remove) {
             EmptyView()
         } menu: { menuItems } content: {
             ExerciseInfoRow(exerciseID: variant.exerciseID, swap: swap, load: loadSummary(zip(variant.sets, weights).compactMap { $0.kind == .warmup ? nil : $1 }, mode: mode, unit: unit),

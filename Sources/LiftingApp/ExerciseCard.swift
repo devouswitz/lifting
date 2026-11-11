@@ -23,6 +23,9 @@ struct ExerciseCard<Status: View, MenuItems: View, Content: View>: View {
     let toggle: () -> Void
     let order: CardOrder
     var accessibilityValue = ""
+    /// Swiping the header left removes the exercise, with Swap beside it when one is given.
+    var remove: (() -> Void)? = nil
+    var swap: (() -> Void)? = nil
     /// Prefix for UI-test identifiers on the header and menu.
     var identifier: String? = nil
     @ViewBuilder let status: () -> Status
@@ -31,22 +34,28 @@ struct ExerciseCard<Status: View, MenuItems: View, Content: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 4) {
-                // A tap toggles; holding lifts the card to drag. Both live on the header itself, so neither steals the other.
-                header
-                    .onTapGesture(perform: toggle)
-                    .reorderHandle(order.id, order.reordering, enabled: order.canMoveUp || order.canMoveDown)
-                    .accessibilityElement(children: .combine).accessibilityAddTraits(.isButton).accessibilityAction(.default, toggle)
-                    .modifier(ReorderActions(canMoveUp: order.canMoveUp, canMoveDown: order.canMoveDown, move: order.move))
-                    .accessibilityLabel("\(expanded ? "Collapse" : "Expand") \(name)").accessibilityValue(accessibilityValue)
-                    .accessibilityIdentifier(identifier.map { "\($0).collapse" } ?? "")
-                Menu(content: menu) {
-                    Image(systemName: "ellipsis").font(.system(size: 18, weight: .semibold)).frame(width: 32, height: 44)
-                }.compactMenu().foregroundStyle(.secondary)
-                    .accessibilityLabel("Options for \(name)").accessibilityIdentifier(identifier.map { "\($0).options" } ?? "")
-            }
-            if expanded { content() }
+            if let remove {
+                SwipeToDelete(deleteLabel: "Remove \(name)", secondary: swap.map { SwipeAction(title: "Swap \(name)", symbol: "arrow.triangle.2.circlepath", run: $0) }, covers: true, action: remove) { headerRow }
+            } else { headerRow }
+            if expanded { content().transition(.opacity) }
         }.card(padding: 16).reorderRow(order.id, order.reordering)
+    }
+
+    private var headerRow: some View {
+        HStack(spacing: 4) {
+            // A tap toggles; holding lifts the card to drag. Both live on the header itself, so neither steals the other.
+            header
+                .onTapGesture(perform: toggle)
+                .reorderHandle(order.id, order.reordering, enabled: order.canMoveUp || order.canMoveDown)
+                .accessibilityElement(children: .combine).accessibilityAddTraits(.isButton).accessibilityAction(.default, toggle)
+                .modifier(ReorderActions(canMoveUp: order.canMoveUp, canMoveDown: order.canMoveDown, move: order.move))
+                .accessibilityLabel("\(expanded ? "Collapse" : "Expand") \(name)").accessibilityValue(accessibilityValue)
+                .accessibilityIdentifier(identifier.map { "\($0).collapse" } ?? "")
+            Menu(content: menu) {
+                Image(systemName: "ellipsis").font(.system(size: 18, weight: .semibold)).frame(width: 32, height: 44)
+            }.compactMenu().foregroundStyle(.secondary)
+                .accessibilityLabel("Options for \(name)").accessibilityIdentifier(identifier.map { "\($0).options" } ?? "")
+        }.background(palette.card)
     }
 
     private var header: some View {

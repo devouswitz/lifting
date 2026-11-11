@@ -37,6 +37,9 @@ struct SettingsView: View {
                 } label: { TileLabel(title: "Distance Unit", symbol: "figure.run", color: palette.rest) }
                 Picker(selection: setting(\.theme)) { Text("System").tag("system"); Text("Light").tag("light"); Text("Dark").tag("dark") } label: { TileLabel(title: "Appearance", symbol: "circle.lefthalf.filled", color: .indigo) }
                 NavigationLink { ColorSettingsView() } label: { HStack { TileLabel(title: "Colors", symbol: "paintpalette.fill", color: palette.technique); Spacer(); ColorSwatches() } }.accessibilityIdentifier("settings.colors")
+                Picker(selection: Binding(get: { store.data.settings.trainSummary ?? .days }, set: { value in store.perform { $0.settings.trainSummary = value == .days ? nil : value } })) {
+                    ForEach(TrainSummary.allCases) { Text($0.title).tag($0) }
+                } label: { TileLabel(title: "This Week on Train", symbol: "calendar", color: palette.completed) }
             }
             Section("Workout") {
                 NavigationLink { WarmupPresetLibrary() } label: { TileLabel(title: "Warm-up Presets", symbol: "flame.fill", color: palette.warmup) }.accessibilityIdentifier("settings.warmups")
@@ -50,6 +53,7 @@ struct SettingsView: View {
                     Text("Off").tag(Int?.none)
                     ForEach([120, 180, 240, 300, 420], id: \.self) { Text(clockText(Double($0))).tag(Int?.some($0)) }
                 } label: { TileLabel(title: "Rest After a Missed Target", symbol: "arrow.uturn.down", color: palette.failure) }
+                Toggle(isOn: setting(\.completesSetOnReps)) { TileLabel(title: "Complete Set When Reps Are Entered", symbol: "checkmark.square.fill", color: palette.completed) }
                 Toggle(isOn: setting(\.ordersExercisesAsLogged)) { TileLabel(title: "Order Exercises as You Go", symbol: "arrow.up.arrow.down", color: palette.action) }
                 Toggle(isOn: Binding(get: { store.data.settings.showsWarmupVolume == true }, set: { value in store.perform { $0.settings.showsWarmupVolume = value ? true : nil } })) {
                     TileLabel(title: "Show Warm-up Volume", symbol: "scalemass", color: palette.warmup)
@@ -121,8 +125,11 @@ struct SettingsView: View {
                 confirmingImport = true
             } catch { store.error = "Import failed. \(error.localizedDescription)" }
         }
-        .confirmationDialog("Replace all data with this backup?", isPresented: $confirmingImport, titleVisibility: .visible) {
-            Button("Replace all data", role: .destructive) { if let importPreview { store.importBackup(importPreview) }; importPreview = nil }
+        .alert("Replace all data with this backup?", isPresented: $confirmingImport) {
+            Button("Replace All Data", role: .destructive) {
+                if let importPreview { store.importBackup(importPreview); if store.error == nil { store.announce("Backup restored") } }
+                importPreview = nil
+            }
             Button("Cancel", role: .cancel) { importPreview = nil }
         } message: { Text("\(importPreview?.sessions.count ?? 0) workouts, \(importPreview?.programs.count ?? 0) programs, \(importPreview?.routines.count ?? 0) days, \(importPreview?.variants.count ?? 0) variants. A copy of your current data is preserved locally.") }
         .modifier(CSVImportModifier(isPresented: $importingCSV))

@@ -271,6 +271,8 @@ public struct Session: Identifiable, Codable, Equatable, Sendable {
     public var lastActivityAt: Date?
     public var notes: String
     public var exercises: [SessionExercise]
+    /// Planned exercises taken out during the workout, by name, so History can show what changed.
+    public var removedExercises: [String]?
     public init(id: UUID = UUID(), routineID: UUID? = nil, name: String, startedAt: Date = Date(), endedAt: Date? = nil, exercises: [SessionExercise] = []) {
         self.id = id; self.routineID = routineID; self.name = name; self.startedAt = startedAt; self.endedAt = endedAt; self.exercises = exercises; notes = ""
     }
@@ -279,6 +281,14 @@ public struct Session: Identifiable, Codable, Equatable, Sendable {
     public func duration(at now: Date = Date()) -> TimeInterval {
         let pausedSeconds = (pauses ?? []).reduce(0) { $0 + $1.duration }
         return max(0, (endedAt ?? pausedAt ?? now).timeIntervalSince(startedAt) - pausedSeconds)
+    }
+    /// How the workout departed from its day: exercises added, swapped in for another, and taken out.
+    /// A workout that was not started from a day has no plan to depart from.
+    public var planChanges: (added: [String], swapped: [(name: String, from: String)], removed: [String]) {
+        guard routineID != nil else { return ([], [], []) }
+        return (exercises.filter { $0.slotID == nil }.map(\.name),
+                exercises.compactMap { item in item.substitutedFrom.map { (item.name, $0) } },
+                removedExercises ?? [])
     }
     public var volume: Double { volume(warmups: false) }
     public var warmupVolume: Double { volume(warmups: true) }
@@ -327,7 +337,19 @@ public struct Settings: Codable, Equatable, Sendable {
     /// The warm-up preset applied most recently, offered again in each exercise's menu.
     public var lastWarmups: WarmupPreset?
     public var health: HealthSettings?
+    /// Confirming a rep count on the keypad also completes the set. Nil is on.
+    public var completeOnReps: Bool?
+    public var completesSetOnReps: Bool { get { completeOnReps ?? true } set { completeOnReps = newValue } }
+    /// What the card at the top of Train shows. Nil is this week's training days.
+    public var trainSummary: TrainSummary?
     public init() {}
+}
+
+/// The card at the top of Train: this week's training days, this week's volume by day, or nothing.
+public enum TrainSummary: String, Codable, CaseIterable, Identifiable, Sendable {
+    case days, volume, off
+    public var id: String { rawValue }
+    public var title: String { self == .days ? "Training Days" : self == .volume ? "Volume" : "Off" }
 }
 
 public struct HistoryImportLink: Codable, Equatable, Sendable {

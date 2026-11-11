@@ -2,6 +2,20 @@
 
 Entries below are dated records. Earlier toolchain and distribution limitations describe the environment at that time; see the newest pass for current evidence.
 
+## Feedback pass, build 18 (November 11, 2026)
+
+iPhone 18 Pro simulator (iOS 27.0), scripted UI walker, showcase library.
+
+- Previous values: an exercise added to a workout (Deadlift on a Push day) showed its sets from another day (130 × 5, 160 × 5, 195 × 5). Before, Previous was looked up only on the exact day track, so a swapped or added exercise, or one on a copied day, showed nothing.
+- Record: logging Bench press 200 × 8 over a best of 190 showed the notice "Record: Bench press 200 lb × 8" and a star on the set's check.
+- Exercise header swipe: a short swipe showed Swap and Remove with the exercise name still readable; Remove took the exercise out with a "Removed Overhead press" notice; Undo put it back in place with its sets (19 of 19 sets again); a long swipe removed outright. Checked in the workout and in a day.
+- History: a workout with Deadlift added and Overhead press removed listed "Added Deadlift" and "Left out Overhead press", labelled the Deadlift card "Added to this workout", and its log row read "2 changes from the plan". Core test covers added, swapped, removed, undo, and reload.
+- This week card: the heading menu switched between Training Days and Volume (55,883 lb with a bar per day).
+- Complete Set When Reps Are Entered off: confirming 7 reps filled them in and left the set unchecked.
+- Save Day Copy showed "Saved Pull to Saved Days".
+- 114 core test cases, zero failures. Mac preview compiles.
+- Not verified: the import notice and the renamed import buttons (the file picker was not driven; the notice uses the same path as the ones checked); how the set and exercise transitions feel in motion, which screenshots cannot show; a physical iPhone; VoiceOver.
+
 ## Launch polish pass, build 17 (November 9, 2026)
 
 Run on the iPhone 18 Pro simulator (iOS 27.0, Xcode 27.1) with a scripted UI walker: an XCUITest that taps, types, drags, and screenshots from a steps file. Data sets: a fresh install, the showcase library, and a generated library of 440 workouts (about three years, a 4.3 MB file).

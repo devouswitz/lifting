@@ -10,11 +10,15 @@ import UserNotifications
 final class AppStore: ObservableObject {
     @Published var data: TrainingData {
         didSet {
-            if oldValue.sessions != data.sessions { previousByVariant = nil }
+            if oldValue.sessions != data.sessions { previous = nil; bests = nil }
             DistanceDisplay.unit = data.settings.distance
         }
     }
-    private var previousByVariant: [UUID: [LoggedSet]]?
+    /// The latest logged sets of each day track and of each exercise, and every exercise's best set, built on first use.
+    private var previous: (byVariant: [UUID: [LoggedSet]], byExercise: [UUID: [LoggedSet]])?
+    private var bests: [UUID: TopSet]?
+    /// A short confirmation shown at the top of the screen, then cleared.
+    @Published var notice: Notice?
     @Published var error: String?
     @Published var storageBlocked = false
     @Published var workoutPresented = false
@@ -95,15 +99,48 @@ final class AppStore: ObservableObject {
         } catch { self.error = error.localizedDescription; return false }
     }
 
-    func previousSets(for variantID: UUID) -> [LoggedSet] {
-        if previousByVariant == nil {
-            var result: [UUID: [LoggedSet]] = [:]
+    /// What was logged last time: on this day's own track, or, when that track has no history yet
+    /// (a swapped or added exercise, a copied day), the last time the exercise was done anywhere.
+    func previousSets(for item: SessionExercise) -> [LoggedSet] {
+        if previous == nil {
+            var byVariant: [UUID: [LoggedSet]] = [:], byExercise: [UUID: [LoggedSet]] = [:]
             for session in data.sessions.filter({ $0.skipped != true }).sorted(by: { $0.startedAt > $1.startedAt }) {
-                for item in session.exercises where result[item.variantID] == nil { result[item.variantID] = item.sets }
+                for logged in session.exercises where logged.sets.contains(where: { $0.completedAt != nil }) {
+                    if byVariant[logged.variantID] == nil { byVariant[logged.variantID] = logged.sets }
+                    if byExercise[logged.exerciseID] == nil { byExercise[logged.exerciseID] = logged.sets }
+                }
             }
-            previousByVariant = result
+            previous = (byVariant, byExercise)
         }
-        return previousByVariant?[variantID] ?? []
+        return previous?.byVariant[item.variantID] ?? previous?.byExercise[item.exerciseID] ?? []
+    }
+
+    /// True for the workout's heaviest set of a lift when it beats every set of that lift in history.
+    func isRecord(_ set: LoggedSet, in item: SessionExercise) -> Bool {
+        if bests == nil { bests = data.bestSets() }
+        func beats(_ a: LoggedSet, _ weight: Double, _ reps: Int) -> Bool { (a.weight ?? 0) > weight || (a.weight == weight && (a.reps ?? 0) > reps) }
+        guard item.mode == .strength, let best = bests?[item.exerciseID], set.completedAt != nil, set.plan.kind != .warmup, beats(set, best.weight, best.reps) else { return false }
+        let rivals = item.sets.filter { $0.completedAt != nil && $0.plan.kind != .warmup && $0.id != set.id }
+        return !rivals.contains { beats($0, set.weight ?? 0, set.reps ?? 0) || ($0.weight == set.weight && $0.reps == set.reps && ($0.completedAt ?? .distantFuture) < (set.completedAt ?? .distantPast)) }
+    }
+
+    /// Shows a short confirmation, with an Undo when one is given, and clears it after a few seconds.
+    func announce(_ text: String, symbol: String = "checkmark.circle.fill", role: ColorRole = .completed, undo: (() -> Void)? = nil) {
+        let notice = Notice(text: text, symbol: symbol, role: role, undo: undo)
+        self.notice = notice
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(undo == nil ? 2.5 : 5))
+            if self?.notice?.id == notice.id { self?.notice = nil }
+        }
+    }
+
+    /// Takes an exercise out of the workout at once; the notice offers Undo.
+    func removeExercise(_ id: UUID) {
+        var removed: (item: SessionExercise, index: Int)?
+        guard perform({ removed = $0.removeSessionExercise(id) }), let removed else { return }
+        announce("Removed \(removed.item.name)", symbol: "trash.fill", role: .failure) { [weak self] in
+            self?.perform { $0.restoreSessionExercise(removed.item, at: removed.index) }
+        }
     }
 
     func start(_ routine: Routine) { perform { try $0.start(routineID: routine.id) }; if data.activeSession != nil { workoutPresented = true } }
@@ -148,6 +185,9 @@ final class AppStore: ObservableObject {
         if data.restDeadline != previousDeadline { restStartedAt = data.restDeadline == nil ? nil : Date() }
         if (data.activeSession?.completedSets ?? 0) > before {
             haptic(); scheduleRestAlert()
+            if let item = data.activeSession?.exercises.first(where: { $0.sets.contains { $0.id == setID } }), let set = item.sets.first(where: { $0.id == setID }), isRecord(set, in: item) {
+                announce("Record: \(item.name) \(number(data.settings.unit.display(set.weight ?? 0))) \(data.settings.unit.rawValue) × \(set.reps ?? 0)", symbol: "star.fill", role: .best)
+            }
             // Scroll only when focus moves to another exercise, so rows stay put while logging the same one.
             if data.activeSession?.linkTitle(for: exerciseID) != nil, let target = data.activeSession?.exercises.first(where: { $0.collapsed == false }), target.id != exerciseID {
                 autoFocusedExerciseID = target.id; autoFocusRevision += 1
@@ -256,6 +296,16 @@ final class SaveQueue: @unchecked Sendable {
         try queue.sync { try repository.save(data) }
     }
     func flush() { queue.sync {} }
+}
+
+/// A short confirmation of something that just happened, optionally with a way to take it back.
+struct Notice: Identifiable, Equatable {
+    let id = UUID()
+    let text: String
+    let symbol: String
+    let role: ColorRole
+    var undo: (() -> Void)?
+    static func == (a: Notice, b: Notice) -> Bool { a.id == b.id }
 }
 
 final class RestAlerts: @unchecked Sendable {

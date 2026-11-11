@@ -13,7 +13,7 @@ struct LiveSetRow: View {
     var set: LoggedSet? { item?.sets.first { $0.id == setID } }
     var previous: LoggedSet? {
         guard let item, let set else { return nil }
-        let sets = store.previousSets(for: item.variantID).filter { $0.plan.kind == set.plan.kind }
+        let sets = store.previousSets(for: item).filter { $0.plan.kind == set.plan.kind }
         let ordinal = item.sets.prefix(index).filter { $0.plan.kind == set.plan.kind }.count
         if sets.indices.contains(ordinal), sets[ordinal].completedAt != nil { return sets[ordinal] }
         return nil
@@ -63,14 +63,23 @@ struct LiveSetRow: View {
                         if columns.time { cell(title: "TIME", value: set.seconds.map(clockText), field: .time, labeled: stacked) }
                         if columns.distance { cell(title: DistanceDisplay.unit.rawValue.uppercased(), value: set.meters.map { number(DistanceDisplay.value($0), decimals: 2) }, field: .distance, labeled: stacked) }
                         cell(title: "RPE", value: set.rpe.map { number($0) }, field: .rpe, labeled: stacked).frame(maxWidth: stacked || !columns.hasMeasurements ? .infinity : 44)
-                        Button { withAnimation(.snappy(duration: 0.2)) { store.toggle(exerciseID, setID) } } label: {
+                        let record = store.isRecord(set, in: item)
+                        Button { withAnimation(.snappy(duration: 0.25)) { store.toggle(exerciseID, setID) } } label: {
                             let done = set.completedAt != nil
-                            Image(systemName: "checkmark").font(.system(size: 14, weight: .bold))
+                            Image(systemName: "checkmark").font(.system(size: 14, weight: .bold)).symbolEffect(.bounce, value: done)
                                 .foregroundStyle(done ? palette.on(.completed) : Color.secondary.opacity(0.5))
                                 .frame(width: 32, height: 32)
                                 .background(done ? palette.completed : palette.field, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                // The workout's best set of this lift, when it beats every earlier one.
+                                .overlay(alignment: .topTrailing) {
+                                    if record {
+                                        Image(systemName: "star.fill").font(.system(size: 10, weight: .bold)).foregroundStyle(palette.best)
+                                            .padding(3).background(palette.card, in: Circle()).offset(x: 6, y: -6)
+                                            .transition(.scale.combined(with: .opacity))
+                                    }
+                                }
                                 .frame(width: 44, height: 44).contentShape(Rectangle())
-                        }.buttonStyle(.plain).accessibilityLabel("\(set.completedAt == nil ? "Complete" : "Undo") \(palette.title(set.plan).lowercased()) set \(setLabel(item))").accessibilityIdentifier("workout.\(exerciseID).\(setID).complete")
+                        }.buttonStyle(.plain).accessibilityLabel("\(set.completedAt == nil ? "Complete" : "Undo") \(palette.title(set.plan).lowercased()) set \(setLabel(item))").accessibilityValue(record ? "Record" : "").accessibilityIdentifier("workout.\(exerciseID).\(setID).complete")
                     }
                 }
                 if let rest = set.plan.restSeconds {
@@ -133,7 +142,7 @@ struct LiveSetRow: View {
             previous: adjacentID(id, offset: -1, field: field) != nil ? { adjacent(id, offset: -1, field: field) } : nil,
             next: adjacentID(id, offset: 1, field: field) != nil ? { adjacent(id, offset: 1, field: field) } : nil,
             // Confirming a rep count logs the set.
-            confirm: field == .reps ? { store.completeIfLogged(exerciseID, id) } : nil
+            confirm: field == .reps && store.data.settings.completesSetOnReps ? { store.completeIfLogged(exerciseID, id) } : nil
         ) { newValue in
             store.perform { data in
                 switch field {

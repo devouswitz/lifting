@@ -1,32 +1,68 @@
 import SwiftUI
 
-/// Swipe actions for set tables, which live inside cards rather than a List.
+/// A second action revealed by a short swipe, beside Delete.
+struct SwipeAction {
+    let title: String
+    let symbol: String
+    let run: () -> Void
+}
+
+/// Swipe actions for rows that live inside cards rather than a List: set rows and exercise headers.
+/// A short swipe reveals the actions; swiping on past them deletes.
 struct SwipeToDelete<Content: View>: View {
+    @Environment(\.palette) private var palette
+    var deleteLabel = "Delete set"
+    var secondary: SwipeAction? = nil
+    /// The actions slide in over the row's trailing side and the row stays put, so its name stays readable.
+    var covers = false
     let action: () -> Void
     @ViewBuilder let content: Content
     @State private var offset: CGFloat = 0
     @State private var origin: CGFloat = 0
     @State private var axis: Axis?
     @State private var width: CGFloat = 320
+    private let slot: CGFloat = 76
+    /// Where the row rests with its actions showing, and how far a swipe must go to delete outright.
+    private var open: CGFloat { secondary == nil ? slot : slot * 2 }
+    private var full: CGFloat { max(open + 44, min(220, width * 0.6)) }
 
     var body: some View {
         ZStack(alignment: .trailing) {
-            if offset < 0 {
-                Button(role: .destructive, action: remove) {
-                    Image(systemName: "trash.fill").foregroundStyle(.white)
-                        .frame(width: max(76, -offset)).frame(maxHeight: .infinity)
-                        .background(Color.red)
-                }.buttonStyle(.plain).accessibilityLabel("Delete set")
-            }
+            if !covers { actions }
             content
                 .disabled(axis == .horizontal || offset < 0)
                 .overlay { if offset < 0 { Color.clear.contentShape(Rectangle()).onTapGesture { close() } } }
-                .offset(x: offset)
+                .offset(x: covers ? 0 : offset)
+            if covers { actions }
         }
         .clipShape(RoundedRectangle(cornerRadius: 9))
         .background { GeometryReader { proxy in Color.clear.onAppear { width = proxy.size.width }.onChange(of: proxy.size.width) { width = $1 } } }
         .modifier(HorizontalSwipe(changed: { _, translation in changed(translation) }, ended: ended))
-        .accessibilityAction(named: "Delete set", action)
+        .accessibilityAction(named: deleteLabel, action)
+        .modifier(SecondaryAccessibilityAction(action: secondary))
+    }
+
+    @ViewBuilder private var actions: some View {
+        if offset < 0 {
+            // Past the full-swipe point Delete takes the whole strip, showing what letting go will do.
+            let side = -offset >= full ? 0 : min(slot, -offset / 2)
+            HStack(spacing: 0) {
+                if let secondary, side > 0 {
+                    Button { close(); secondary.run() } label: {
+                        Image(systemName: secondary.symbol).foregroundStyle(palette.on(.action))
+                            .frame(width: side).frame(maxHeight: .infinity).background(palette.action)
+                    }.buttonStyle(.plain).accessibilityLabel(secondary.title)
+                }
+                Button(role: .destructive, action: remove) {
+                    Image(systemName: "trash.fill").foregroundStyle(.white)
+                        .frame(width: max(slot, -offset - (secondary == nil ? 0 : side))).frame(maxHeight: .infinity)
+                        .background(Color.red)
+                }.buttonStyle(.plain).accessibilityLabel(deleteLabel)
+            }
+            // Covering the row, the strip is only as wide as the swipe so far, so it slides in from the edge.
+            .frame(width: covers ? -offset : nil, alignment: .leading).clipped()
+            .animation(.snappy(duration: 0.2), value: -offset >= full)
+        }
     }
 
     /// The first direction decides, so a scroll never nudges the row sideways.
@@ -42,12 +78,19 @@ struct SwipeToDelete<Content: View>: View {
     private func ended() {
         defer { axis = nil }
         guard axis == .horizontal else { return }
-        if -offset >= min(180, width * 0.55) { remove() }
-        else { withAnimation(.snappy) { offset = offset < -38 ? -76 : 0; origin = offset } }
+        if -offset >= full { remove() }
+        else { withAnimation(.snappy) { offset = offset < -38 ? -open : 0; origin = offset } }
     }
 
     private func close() { withAnimation(.snappy) { offset = 0; origin = 0 } }
     private func remove() { withAnimation(.snappy) { action(); offset = 0; origin = 0 } }
+}
+
+private struct SecondaryAccessibilityAction: ViewModifier {
+    let action: SwipeAction?
+    func body(content: Content) -> some View {
+        if let action { content.accessibilityAction(named: action.title, action.run) } else { content }
+    }
 }
 
 /// A sideways drag, reported as the finger's location and how far it has moved. On iOS 18 and later it is a UIKit

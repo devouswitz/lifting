@@ -35,6 +35,7 @@ struct RootView: View {
         .tint(resolved.action)
         .preferredColorScheme(store.data.settings.theme == "system" ? nil : store.data.settings.theme == "dark" ? .dark : .light)
         .modifier(WorkoutPresentation())
+        .modifier(NoticeBanner())
         .alert("Could not complete action", isPresented: Binding(get: { store.error != nil && !store.workoutPresented }, set: { if !$0 { store.error = nil } })) {
             Button("OK") { store.error = nil }
         } message: { Text(store.error ?? "") }
@@ -68,6 +69,36 @@ struct RootView: View {
         }.buttonStyle(.plain).foregroundStyle(selected == index ? resolved.action : Color.secondary).accessibilityAddTraits(selected == index ? .isSelected : []).accessibilityIdentifier("tab.\(title)")
     }
     #endif
+}
+
+/// The store's notice, dropped in from the top edge over whatever is on screen. Tap it to dismiss.
+struct NoticeBanner: ViewModifier {
+    @EnvironmentObject var store: AppStore
+    @Environment(\.palette) var palette
+    func body(content: Content) -> some View {
+        content.overlay(alignment: .top) {
+            if let notice = store.notice {
+                HStack(spacing: 10) {
+                    Image(systemName: notice.symbol).foregroundStyle(palette.color(notice.role))
+                    Text(notice.text).font(.subheadline.weight(.semibold)).foregroundStyle(Color.primary).lineLimit(2).accessibilityIdentifier("notice")
+                    if let undo = notice.undo {
+                        Button("Undo") { undo(); store.notice = nil }.font(.subheadline.weight(.semibold)).foregroundStyle(palette.action)
+                            .padding(.leading, 6).frame(minHeight: 32).contentShape(Rectangle()).accessibilityIdentifier("notice.undo")
+                    }
+                }
+                .padding(.horizontal, 18).padding(.vertical, 10)
+                .floatingCapsule()
+                .shadow(color: .black.opacity(palette.dark ? 0.5 : 0.12), radius: 16, y: 4)
+                .padding(.horizontal, 16).padding(.top, 4)
+                .onTapGesture { store.notice = nil }
+                .transition(.move(edge: .top).combined(with: .opacity))
+                .id(notice.id)
+            }
+        }
+        .animation(.snappy, value: store.notice)
+        .sensoryFeedback(.success, trigger: store.notice) { _, new in new != nil && store.data.settings.haptics }
+        .onChange(of: store.notice) { _, value in if let value { AccessibilityNotification.Announcement(value.text).post() } }
+    }
 }
 
 /// The active workout, shown above the tab bar while the workout screen is minimized.

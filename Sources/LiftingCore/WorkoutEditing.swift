@@ -16,6 +16,25 @@ public extension TrainingData {
         activeSession!.exercises.append(item)
     }
 
+    /// Takes an exercise out of the workout and returns it with its place, so the removal can be undone.
+    /// A planned exercise is remembered by name for History.
+    @discardableResult mutating func removeSessionExercise(_ exerciseID: UUID) -> (item: SessionExercise, index: Int)? {
+        guard let index = activeSession?.exercises.firstIndex(where: { $0.id == exerciseID }) else { return nil }
+        let item = activeSession!.exercises.remove(at: index)
+        if item.slotID != nil { activeSession!.removedExercises = (activeSession!.removedExercises ?? []) + [item.substitutedFrom ?? item.name] }
+        return (item, index)
+    }
+
+    /// Puts back an exercise taken out with `removeSessionExercise`.
+    mutating func restoreSessionExercise(_ item: SessionExercise, at index: Int) {
+        guard activeSession != nil, !activeSession!.exercises.contains(where: { $0.id == item.id }) else { return }
+        activeSession!.exercises.insert(item, at: min(index, activeSession!.exercises.count))
+        if item.slotID != nil, let last = activeSession!.removedExercises?.lastIndex(of: item.substitutedFrom ?? item.name) {
+            activeSession!.removedExercises!.remove(at: last)
+            if activeSession!.removedExercises!.isEmpty { activeSession!.removedExercises = nil }
+        }
+    }
+
     mutating func setExerciseExpanded(_ exerciseID: UUID, expanded: Bool, focus: Bool = false) {
         guard var session = activeSession, let index = session.exercises.firstIndex(where: { $0.id == exerciseID }) else { return }
         if focus { for i in session.exercises.indices { session.exercises[i].collapsed = i != index } }

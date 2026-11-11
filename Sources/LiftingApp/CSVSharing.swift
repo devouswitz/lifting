@@ -89,11 +89,15 @@ struct CSVImportPreview: View {
                         }
                     }
                     if !bundle.content.dayTemplates.isEmpty {
-                        Section("Templates") { ForEach(bundle.content.dayTemplates) { day in dayPreview(day, in: bundle.content) } }
+                        Section("Saved Days") { ForEach(bundle.content.dayTemplates) { day in dayPreview(day, in: bundle.content) } }
                     }
                     Section {
-                        Button(bundle.content.programs.isEmpty ? "Add to Templates" : "Add") { add(bundle, load: false) }.accessibilityIdentifier("csv.add")
-                        if !bundle.content.programs.isEmpty { Button("Add and Load") { add(bundle, load: true) }.accessibilityIdentifier("csv.addAndLoad") }
+                        Button(bundle.content.programs.isEmpty ? "Add to Saved Days" : "Add to Programs") { add(bundle, load: false) }.accessibilityIdentifier("csv.add")
+                        if !bundle.content.programs.isEmpty {
+                            Button("Add and Make Current Program") { add(bundle, load: true) }.accessibilityIdentifier("csv.addAndLoad")
+                        }
+                    } footer: {
+                        if !bundle.content.programs.isEmpty { Text("Both add it to Programs. Your current program is the one Train shows.") }
                     }
                 }
                 if let bundle = history {
@@ -125,7 +129,7 @@ struct CSVImportPreview: View {
                         if store.perform({ data in
                             _ = try data.importHistory(bundle)
                             if createProgram { try data.createProgramFromHistory(bundle, name: programName) }
-                        }) { dismiss() }
+                        }) { dismiss(); store.announce("Added \(counted(count, "workout"))\(createProgram ? " and \(programName)" : "")") }
                     }.disabled(count == 0 || createProgram && programName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty).accessibilityIdentifier("csv.addHistory")
                 }
             }.formStyle(.grouped).navigationTitle("Import CSV").inlineTitle()
@@ -143,6 +147,10 @@ struct CSVImportPreview: View {
         } label: { HStack { Text(day.name); Spacer(); Text(counted(day.slots.count, "exercise")).foregroundStyle(.secondary) } }
     }
     func add(_ bundle: RoutineBundle, load: Bool) {
-        if store.perform({ _ = try $0.importRoutines(bundle, loadFirst: load) }) { dismiss() }
+        guard store.perform({ _ = try $0.importRoutines(bundle, loadFirst: load) }) else { return }
+        dismiss()
+        let programs = bundle.content.programs
+        let what = programs.count == 1 ? programs[0].name : programs.isEmpty ? counted(bundle.dayCount, "saved day") : counted(programs.count, "program")
+        store.announce("Added \(what)\(load ? ", now your current program" : "")")
     }
 }
