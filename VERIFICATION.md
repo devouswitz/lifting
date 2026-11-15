@@ -2,6 +2,18 @@
 
 Entries below are dated records. Earlier toolchain and distribution limitations describe the environment at that time; see the newest pass for current evidence.
 
+## Gesture hints, build 21 (November 15, 2026)
+
+iPhone 18 Pro simulator (iOS 27.0), showcase library, scripted UI walker and the UI tests.
+
+- A new workout showed "Swipe an exercise's name left to swap or remove it." under the totals, with a hand symbol and a close button. Swiping a header retired it and "Hold a reps box to set a target or a range." took its place.
+- Holding a reps box, a weight, a set's number, the Drop button (choosing Drop Setup), and Rest each opened its sheet and retired its hint, in that order; after the sixth the line was gone.
+- A day showed the weight hint next, without the reps hint.
+- Settings > Gesture Hints off: no hint in the workout. Back on: the hints started over at the swipe.
+- 116 core test cases, zero failures under `./scripts/check.sh` and `xcodebuild test`; the settings test now covers hints defaulting on, learned gestures surviving a save, and the toggle starting them over. Eight UI tests pass, including a new one for a hint retiring on use and on close. That new test failed once in the first full run (an exercise header was not found within five seconds) and passed alone and in the next full run; the tests' wait is now ten seconds. Mac preview compiles.
+
+Not verified: a physical iPhone, VoiceOver reading the hint line, an iPad, and a cardio-only workout or day (its shorter hint list is by construction, not seen).
+
 ## Workout summary and Live Activity, build 20 (November 11, 2026)
 
 iPhone 18 Pro simulator (iOS 27.0), showcase library, scripted UI walker and the UI tests.

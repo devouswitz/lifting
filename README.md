@@ -130,7 +130,7 @@ This compiles and runs the actual XCTest case bodies with a small compatibility 
 ./scripts/ui-check.sh
 ```
 
-This runs the UI tests in `Tests/SetformUITests` on an iOS simulator: a workout with an exercise removed, restored, and swapped, a logged set, and Finish through to History; swapping and removing in a saved day; a program import; hold-and-drag reordering of exercises and of sets; a logged set surviving the app being killed; and the workout appearing on the Lock Screen during a rest, opening from its link, and clearing when the workout is finished. Run it before each build. The import test hands the app its CSV through the `SETFORM_IMPORT_CSV` environment variable, which opens the same preview the file picker does.
+This runs the UI tests in `Tests/SetformUITests` on an iOS simulator: a workout with an exercise removed, restored, and swapped, a logged set, and Finish through to History; swapping and removing in a saved day; a program import; hold-and-drag reordering of exercises and of sets; a logged set surviving the app being killed; a gesture hint retiring when its gesture is used or the hint is closed; and the workout appearing on the Lock Screen during a rest, opening from its link, and clearing when the workout is finished. Run it before each build. The import test hands the app its CSV through the `SETFORM_IMPORT_CSV` environment variable, which opens the same preview the file picker does.
 
 
 See `VERIFICATION.md` for completed checks and remaining device checks. `DESIGN.md` describes the current UI; `RESEARCH.md` lists its references.

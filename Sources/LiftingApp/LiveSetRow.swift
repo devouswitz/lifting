@@ -38,7 +38,7 @@ struct LiveSetRow: View {
                         if set.plan.load == .percent {
                             Button("\(number(set.plan.percent))%") { open(.percent) }
                                 .font(.caption).frame(minWidth: 44, minHeight: 20)
-                                .longPress("Weight settings") { present(.load(setID)) }
+                                .longPress("Weight settings", teaches: .weight) { present(.load(setID)) }
                         }
                     }.frame(width: typeSize.isAccessibilitySize ? nil : 44)
                     let measurements = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(spacing: 6)) : AnyLayout(HStackLayout(spacing: 6))
@@ -53,12 +53,12 @@ struct LiveSetRow: View {
                         } else if !stacked { Text("–").foregroundStyle(.tertiary).frame(width: 64, height: 44) }
                         if columns.weight {
                             cell(title: item.mode == .bodyweight ? "+\(unit.rawValue.uppercased())" : unit.rawValue.uppercased(), value: loadText(set.weight, mode: item.mode, unit: unit), field: .weight, labeled: stacked)
-                                .longPress("Weight settings") { present(.load(setID)) }
+                                .longPress("Weight settings", teaches: .weight) { present(.load(setID)) }
                         }
                         if columns.reps {
                             cell(title: set.plan.amrap ? "AMRAP" : "REPS", value: set.reps.map(String.init), field: .reps, labeled: stacked,
                                  placeholder: set.plan.repRange != nil || set.plan.amrap ? set.plan.repTarget.map(displayTarget) : nil)
-                                .longPress("Edit rep target") { present(.reps(setID)) }
+                                .longPress("Edit rep target", teaches: .reps) { present(.reps(setID)) }
                         }
                         if columns.time { cell(title: "TIME", value: set.seconds.map(clockText), field: .time, labeled: stacked) }
                         if columns.distance { cell(title: DistanceDisplay.unit.rawValue.uppercased(), value: set.meters.map { number(DistanceDisplay.value($0), decimals: 2) }, field: .distance, labeled: stacked) }

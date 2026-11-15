@@ -28,6 +28,7 @@ struct WorkoutView: View {
                         if session.pausedAt != nil {
                             Button { store.pauseWorkout(false) } label: { Label("Resume Workout", systemImage: "play.fill") }.buttonStyle(AccentButtonStyle()).accessibilityIdentifier("workout.unpause")
                         }
+                        if !session.exercises.isEmpty { GestureHintRow(hints: GestureHint.workout(lifts: session.exercises.contains { $0.mode != .cardio })) }
                         ForEach(session.exercises) { exercise in WorkoutExerciseCard(exerciseID: exercise.id, reordering: reordering).id(exercise.id) }
                         Button { adding = true } label: { Label("Add Exercise", systemImage: "plus") }.buttonStyle(FieldButtonStyle()).padding(.top, 4)
                     }.padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 24).readableWidth()

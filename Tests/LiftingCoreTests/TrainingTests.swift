@@ -1347,6 +1347,15 @@ final class TrainingTests: XCTestCase {
         var changed = TrainingData.starter(); changed.settings = settings
         let restored = try LocalRepository.decode(LocalRepository.encode(changed))
         XCTAssertFalse(restored.settings.completesSetOnReps); XCTAssertEqual(restored.settings.trainSummary, .volume)
+        // Gesture hints are on until turned off; learned gestures survive a save, and turning hints back on starts them over.
+        XCTAssertTrue(settings.showsGestureHints)
+        settings.learnedGestures = ["swipe", "reps"]
+        changed.settings = settings
+        XCTAssertEqual(try LocalRepository.decode(LocalRepository.encode(changed)).settings.learnedGestures, ["swipe", "reps"])
+        settings.showsGestureHints = false
+        XCTAssertFalse(settings.showsGestureHints); XCTAssertEqual(settings.learnedGestures, ["swipe", "reps"])
+        settings.showsGestureHints = true
+        XCTAssertTrue(settings.showsGestureHints); XCTAssertNil(settings.learnedGestures)
     }
 
     func testFutureSubstitutionOnlyChangesThisSlot() throws {

@@ -78,6 +78,7 @@ struct SettingsView: View {
                 Toggle(isOn: Binding(get: { store.data.settings.remindsAboutUnfinishedWorkouts }, set: { value in store.perform { $0.settings.workoutReminders = value }; if value { store.requestWorkoutAlerts() } })) { TileLabel(title: "Unfinished Workout Reminders", symbol: "bell.fill", color: palette.rest) }
                 Toggle(isOn: Binding(get: { store.data.settings.collapsesCompletedExercises }, set: { value in store.perform { $0.settings.autoCollapseCompleted = value } })) { TileLabel(title: "Collapse Finished Exercises", symbol: "rectangle.compress.vertical", color: palette.completed) }
                 Toggle(isOn: setting(\.haptics)) { TileLabel(title: "Haptics", symbol: "hand.tap.fill", color: .pink) }
+                Toggle(isOn: setting(\.showsGestureHints)) { TileLabel(title: "Gesture Hints", symbol: "hand.draw.fill", color: palette.action) }.accessibilityIdentifier("settings.hints")
                 Toggle(isOn: setting(\.keepAwake)) { TileLabel(title: "Keep Screen On During Workouts", symbol: "sun.max.fill", color: .orange) }
             }
             Section("Plates") {

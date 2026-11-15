@@ -3,17 +3,29 @@ import LiftingCore
 
 extension View {
     /// A hold that opens a value's extra settings, also offered as a named accessibility action.
-    @ViewBuilder func longPress(_ label: String, perform action: @escaping () -> Void) -> some View {
+    /// Holding counts as having learned the gesture, which retires its hint.
+    func longPress(_ label: String, teaches hint: GestureHint? = nil, perform action: @escaping () -> Void) -> some View {
+        modifier(Hold(label: label, hint: hint, action: action))
+    }
+}
+
+private struct Hold: ViewModifier {
+    @EnvironmentObject private var store: AppStore
+    let label: String
+    let hint: GestureHint?
+    let action: () -> Void
+    func body(content: Content) -> some View {
+        let held = { if let hint { store.learn(hint) }; action() }
         #if os(iOS)
         if #available(iOS 18, *) {
             // UIKit's long press gives way once the finger moves, so a swipe that starts on the value still scrolls.
             // SwiftUI's LongPressGesture held the touch and the scroll never started.
-            gesture(PressRecognizer(action: action)).accessibilityAction(named: label, action)
+            content.gesture(PressRecognizer(action: held)).accessibilityAction(named: label, action)
         } else {
-            highPriorityGesture(LongPressGesture().onEnded { _ in action() }).accessibilityAction(named: label, action)
+            content.highPriorityGesture(LongPressGesture().onEnded { _ in held() }).accessibilityAction(named: label, action)
         }
         #else
-        highPriorityGesture(LongPressGesture().onEnded { _ in action() }).accessibilityAction(named: label, action)
+        content.highPriorityGesture(LongPressGesture().onEnded { _ in held() }).accessibilityAction(named: label, action)
         #endif
     }
 }
@@ -77,11 +89,11 @@ struct SetTypeButton<Label: View>: View {
         if let reorder, reorder.enabled {
             // The tap and the hold-to-drag sit on the same view; a Button's own gesture would outrank the drag.
             face.onTapGesture { choosing = true }
-                .reorderHandle(reorder.id, reorder.reordering, hold: details)
+                .reorderHandle(reorder.id, reorder.reordering, hold: { store.learn(.badge); details() })
                 .accessibilityAddTraits(.isButton).accessibilityAction { choosing = true }
                 .accessibilityAction(named: "Set details", details)
         } else {
-            Button { choosing = true } label: { face }.buttonStyle(.plain).longPress("Set details", perform: details)
+            Button { choosing = true } label: { face }.buttonStyle(.plain).longPress("Set details", teaches: .badge, perform: details)
         }
     }
     private func select(_ kind: SetKind, customID: UUID? = nil) {
@@ -111,7 +123,7 @@ struct QuickAddButton: View {
         }.buttonStyle(FieldButtonStyle(role: .technique))
             .contextMenu {
                 if let technique = slot.technique {
-                    Button("\(slot.title(store.data)) Setup…", systemImage: "slider.horizontal.3") { customize(technique) }
+                    Button("\(slot.title(store.data)) Setup…", systemImage: "slider.horizontal.3") { store.learn(.quick); customize(technique) }
                 }
                 Section("Change Button") {
                     ForEach(QuickAdd.options(store.data), id: \.self) { option in
@@ -132,6 +144,7 @@ struct QuickAddButton: View {
             }
     }
     private func assign(_ option: QuickAdd) {
+        store.learn(.quick)
         store.perform { data in
             var slots = QuickAdd.slots(data).map(\.raw)
             slots[index] = option.raw

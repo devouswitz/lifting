@@ -26,6 +26,10 @@ struct RoutineEditor: View {
                 LazyVStack(alignment: .leading, spacing: 12) {
                     TextField("Day note", text: Binding(get: { self.routine?.notes ?? "" }, set: { value in update { $0.notes = value } }), axis: .vertical)
                         .lineLimit(1...6).padding(16).card(padding: 0)
+                    if !routine.slots.isEmpty {
+                        let lifts = routine.slots.contains { store.data.variant($0.variantID).flatMap { store.data.exercise($0.exerciseID) }?.mode != .cardio }
+                        GestureHintRow(hints: GestureHint.day(lifts: lifts))
+                    }
                     ForEach(routine.slots) { slot in
                         if let initial = store.data.variant(slot.variantID) {
                             TemplateExerciseCard(

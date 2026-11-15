@@ -13,6 +13,7 @@ struct CardOrder {
 /// One exercise, in the live workout or a saved day. The header collapses it and drags to reorder;
 /// the ellipsis holds the exercise's actions; the content shows while expanded.
 struct ExerciseCard<Status: View, MenuItems: View, Content: View>: View {
+    @EnvironmentObject private var store: AppStore
     @Environment(\.palette) private var palette
     @Environment(\.dynamicTypeSize) private var typeSize
     let name: String
@@ -35,7 +36,7 @@ struct ExerciseCard<Status: View, MenuItems: View, Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             if let remove {
-                SwipeToDelete(deleteLabel: "Remove \(name)", secondary: swap.map { SwipeAction(title: "Swap \(name)", symbol: "arrow.triangle.2.circlepath", run: $0) }, covers: true, action: remove) { headerRow }
+                SwipeToDelete(deleteLabel: "Remove \(name)", secondary: swap.map { SwipeAction(title: "Swap \(name)", symbol: "arrow.triangle.2.circlepath", run: $0) }, covers: true, used: { store.learn(.swipe) }, action: remove) { headerRow }
             } else { headerRow }
             if expanded { content().transition(.opacity) }
         }.card(padding: 16).reorderRow(order.id, order.reordering)
@@ -97,7 +98,7 @@ struct ExerciseInfoRow: View {
             HStack(spacing: 12) {
                 token("Rest", rest, action: editRest).accessibilityLabel("Rest between sets, \(clockText(Double(rest)))")
                 if let warmupRest { token("Warm-up", warmupRest, action: editWarmupRest).accessibilityLabel("Rest after warm-ups, \(clockText(Double(warmupRest)))") }
-            }.fixedSize().longPress("Rest settings", perform: restSettings)
+            }.fixedSize().longPress("Rest settings", teaches: .rest, perform: restSettings)
             if !typeSize.isAccessibilitySize { Spacer(minLength: 0) }
         }.buttonStyle(.plain)
     }

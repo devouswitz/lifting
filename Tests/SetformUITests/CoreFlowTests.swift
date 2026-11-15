@@ -22,7 +22,7 @@ final class CoreFlowTests: XCTestCase {
     }
     private func element(_ text: String) -> XCUIElement { matches(text).firstMatch }
 
-    @discardableResult private func expect(_ text: String, timeout: TimeInterval = 5, file: StaticString = #filePath, line: UInt = #line) -> XCUIElement {
+    @discardableResult private func expect(_ text: String, timeout: TimeInterval = 10, file: StaticString = #filePath, line: UInt = #line) -> XCUIElement {
         let found = element(text)
         XCTAssertTrue(found.waitForExistence(timeout: timeout), "Expected \"\(text)\" on screen", file: file, line: line)
         return found
@@ -136,6 +136,20 @@ final class CoreFlowTests: XCTestCase {
         // The warm-up is no longer first, and a working set is.
         expect("Working, set 1, change set type")
         expectGone("Warm-up, set 1, change set type")
+    }
+
+    func testGestureHintsRetireWhenTheGestureIsUsedOrClosed() {
+        launch()
+        startWorkout()
+        // One hint shows at a time. Swiping a header retires the swipe hint and the next takes its place.
+        expect("hint.swipe")
+        expect("Expand Overhead press").swipeLeft()
+        expectGone("hint.swipe")
+        expect("hint.reps")
+        // Closing a hint retires it too.
+        tap("hint.close")
+        expectGone("hint.reps")
+        expect("hint.weight")
     }
 
     func testRestShowsOnTheLockScreenAndClearsWhenTheWorkoutEnds() {

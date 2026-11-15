@@ -15,6 +15,8 @@ struct SwipeToDelete<Content: View>: View {
     var secondary: SwipeAction? = nil
     /// The actions slide in over the row's trailing side and the row stays put, so its name stays readable.
     var covers = false
+    /// Called when a swipe shows the actions or deletes.
+    var used: (() -> Void)? = nil
     let action: () -> Void
     @ViewBuilder let content: Content
     @State private var offset: CGFloat = 0
@@ -78,8 +80,11 @@ struct SwipeToDelete<Content: View>: View {
     private func ended() {
         defer { axis = nil }
         guard axis == .horizontal else { return }
-        if -offset >= full { remove() }
-        else { withAnimation(.snappy) { offset = offset < -38 ? -open : 0; origin = offset } }
+        if -offset >= full { used?(); remove() }
+        else {
+            if offset < -38 { used?() }
+            withAnimation(.snappy) { offset = offset < -38 ? -open : 0; origin = offset }
+        }
     }
 
     private func close() { withAnimation(.snappy) { offset = 0; origin = 0 } }

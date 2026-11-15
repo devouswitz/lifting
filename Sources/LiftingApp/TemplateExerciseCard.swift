@@ -135,11 +135,11 @@ struct TemplateExerciseCard: View {
                 if plan.load == .percent {
                     Button("\(number(plan.percent))%") { open(plan.id, .percent) }
                         .font(.caption).frame(minWidth: 44, minHeight: 20)
-                        .longPress("Weight settings") { sheet = .load(plan) }
+                        .longPress("Weight settings", teaches: .weight) { sheet = .load(plan) }
                 }
             }
             SetValueCell(title: mode == .cardio ? "Time" : "Weight", value: load, labeled: labeled) { open(plan.id, mode == .cardio ? .time : .weight) }
-                .longPress("Weight settings") { sheet = .load(plan) }
+                .longPress("Weight settings", teaches: .weight) { sheet = .load(plan) }
                 .accessibilityLabel("Set \(index + 1), \(mode == .cardio ? "time" : "weight"), \(load)")
             SetValueCell(title: "Reps", value: plan.repTarget.map(displayTarget) ?? "–", labeled: labeled) { sheet = .reps(plan) }
                 .accessibilityLabel("Set \(index + 1), rep target, \(plan.repTarget ?? "none")")

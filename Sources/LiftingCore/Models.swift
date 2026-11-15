@@ -342,6 +342,14 @@ public struct Settings: Codable, Equatable, Sendable {
     public var completesSetOnReps: Bool { get { completeOnReps ?? true } set { completeOnReps = newValue } }
     /// What the card at the top of Train shows. Nil is this week's training days.
     public var trainSummary: TrainSummary?
+    /// Gestures the lifter has used, or whose hint they closed. A hint shows only until its gesture is here.
+    public var learnedGestures: [String]?
+    /// Nil is on. Turning hints back on starts them over.
+    public var gestureHints: Bool?
+    public var showsGestureHints: Bool {
+        get { gestureHints ?? true }
+        set { gestureHints = newValue ? nil : false; if newValue { learnedGestures = nil } }
+    }
     public init() {}
 }
 
