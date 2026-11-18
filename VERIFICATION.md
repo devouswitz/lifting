@@ -2,6 +2,16 @@
 
 Entries below are dated records. Earlier toolchain and distribution limitations describe the environment at that time; see the newest pass for current evidence.
 
+## Start Workout at the top of a day, build 23 (November 17, 2026)
+
+iPhone 18 Pro simulator (iOS 27.0), showcase library.
+
+- A day opened from a program shows Start Workout under the title, above the day note, the gesture hint and the exercises (screenshot of Pull, and a UI test that compares the button's position with the first exercise).
+- The double history import UI test failed once in a full run: the import sheet closed with the build-program switch still off, because the test's tap on the switch had missed. The test now reads the button's title to confirm the switch took before going on.
+- 123 core tests and 10 UI tests pass.
+
+Not verified: a physical iPhone; the Resume and dark appearance forms of the button on this screen, which use the same control.
+
 ## Separate plans for every day, and a defect sweep, build 22 (November 17, 2026)
 
 iPhone 18 Pro simulator (iOS 27.0), showcase library and a fresh data directory, scripted UI walker and the UI tests.

@@ -24,6 +24,7 @@ struct RoutineEditor: View {
         ScrollView {
             if let routine {
                 LazyVStack(alignment: .leading, spacing: 12) {
+                    if showsStart && !routine.slots.isEmpty { StartDayButton(day: routine) }
                     TextField("Day note", text: Binding(get: { self.routine?.notes ?? "" }, set: { value in update { $0.notes = value } }), axis: .vertical)
                         .lineLimit(1...6).padding(16).card(padding: 0)
                     if !routine.slots.isEmpty {
@@ -49,7 +50,6 @@ struct RoutineEditor: View {
                         }
                     }
                     Button { picker = true } label: { Label("Add Exercises", systemImage: "plus") }.buttonStyle(FieldButtonStyle()).accessibilityIdentifier("routine.addExercises")
-                    if showsStart && !routine.slots.isEmpty { StartDayButton(day: routine) }
                 }.padding(16).readableWidth().reorderingStack("day")
             }
         }

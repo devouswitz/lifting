@@ -88,6 +88,7 @@ final class CoreFlowTests: XCTestCase {
         app.swipeUp()
         tap("train.day.")
         let header = expect("Collapse Barbell row")
+        XCTAssertLessThan(expect("train.start").frame.minY, header.frame.minY, "Start Workout sits above the day's exercises")
 
         header.swipeLeft()
         tap("Swap Barbell row")
@@ -209,7 +210,12 @@ final class CoreFlowTests: XCTestCase {
             let csv = (["Date,Workout Name,Exercise Name,Weight,Reps"] + rows).joined(separator: "\n")
             launch(["--data-directory", directory], environment: ["SETFORM_IMPORT_CSV": csv])
             tap("csv.previewExternal")
-            expect("Build program from latest workouts").coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
+            // The switch can miss a tap made while the sheet is still settling; the button's title shows whether it took.
+            let build = expect("Build program from latest workouts")
+            for _ in 0..<3 where !element("Add History and Program").waitForExistence(timeout: 2) {
+                build.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
+            }
+            expect("Add History and Program")
             tap("csv.addHistory")
             expect("Programs, Imported program")
         }
