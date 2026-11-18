@@ -143,8 +143,11 @@ public extension TrainingData {
             routines[r].notes = session.notes
             for item in session.exercises {
                 let mapped = historyImports.first(where: { $0.sourceVariantID == item.variantID })?.variantID ?? item.variantID
-                guard let v = variant(mapped) else { throw TrainingError.invalid("Import the workout history before building its program.") }
-                if let index = variants.firstIndex(where: { $0.id == v.id }) {
+                guard let track = variant(mapped) else { throw TrainingError.invalid("Import the workout history before building its program.") }
+                // A plan that a day already uses stays that day's; this day gets its own.
+                let taken = routines.contains { $0.slots.contains { $0.variantID == track.id } }
+                let planID = taken ? copyPlan(track, label: [program(programID)?.name, routines[r].name].compactMap { $0 }.joined(separator: " · ")) : track.id
+                if let index = variants.firstIndex(where: { $0.id == planID }) {
                     let base = item.sets.first(where: { $0.plan.kind == .working || $0.plan.kind == .failure || $0.plan.kind == .myoActivation })?.weight ?? item.sets.first(where: { $0.plan.kind != .warmup })?.weight ?? 0
                     variants[index].workingWeight = base
                     variants[index].sets = item.sets.map { logged in
@@ -157,14 +160,15 @@ public extension TrainingData {
                     }
                     for s in variants[index].sets.indices.dropLast() where variants[index].sets[s + 1].kind == .drop { variants[index].sets[s].restSeconds = 0 }
                 }
-                var slot = RoutineSlot(variantID: v.id, group: item.group ?? "")
+                var slot = RoutineSlot(variantID: planID, group: item.group ?? "")
                 slot.groupRestSeconds = item.groupRestSeconds; slot.transitionSeconds = item.transitionSeconds
                 routines[r].slots.append(slot)
             }
         }
         let sourceSessions = Dictionary(uniqueKeysWithValues: bundle.content.sessions.map { ($0.id, $0) })
         for s in sessions.indices {
-            guard let source = sourceSessions[sessions[s].id] else { continue }
+            // Workouts that already belong to a day stay with it.
+            guard let source = sourceSessions[sessions[s].id], sessions[s].routineID.flatMap(routine) == nil else { continue }
             sessions[s].routineID = dayMap["\(source.programName ?? "")|\(source.name)"]
             sessions[s].programID = programID; sessions[s].programName = program(programID)?.name
         }

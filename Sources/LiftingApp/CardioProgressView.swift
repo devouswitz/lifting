@@ -48,6 +48,8 @@ struct CardioProgressView: View {
     var body: some View {
         let monthly = days == 0 || days > 120
         let all = summaries
+        // An exercise chosen in another range that has nothing here would leave the card empty.
+        let exerciseID = all.contains { $0.id == self.exerciseID } ? self.exerciseID : nil
         let shown = all.filter { exerciseID == nil || $0.id == exerciseID }
         // Every exercise's buckets start on the same week or month, so they stack.
         let first = since == .distantPast ? all.map { $0.efforts[0].date }.min() ?? since : since
@@ -69,8 +71,8 @@ struct CardioProgressView: View {
                 if all.count > 1 {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {
-                            Button("All cardio") { exerciseID = nil }.buttonStyle(ChipStyle(selected: exerciseID == nil, onCard: true))
-                            ForEach(all) { row in Button(row.exercise.name) { exerciseID = row.id }.buttonStyle(ChipStyle(selected: exerciseID == row.id, onCard: true)) }
+                            Button("All cardio") { self.exerciseID = nil }.buttonStyle(ChipStyle(selected: exerciseID == nil, onCard: true))
+                            ForEach(all) { row in Button(row.exercise.name) { self.exerciseID = row.id }.buttonStyle(ChipStyle(selected: exerciseID == row.id, onCard: true)) }
                         }.padding(.horizontal, 1)
                     }
                 }

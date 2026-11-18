@@ -83,6 +83,7 @@ public struct DeviceSyncState: Codable, Equatable, Sendable {
         }
         if result.activeProgramID.flatMap(result.program) == nil { result.activeProgramID = result.programs.first?.id }
         result.refreshSessionBodyWeights()
+        result.separateSharedPlans()
         // A mixed concurrent delete/edit can break a reference. Reject that merge
         // atomically instead of discarding a workout or silently repairing history.
         do { result = try result.validated() }

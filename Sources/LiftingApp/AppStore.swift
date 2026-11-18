@@ -122,10 +122,12 @@ final class AppStore: ObservableObject {
     /// True for the workout's heaviest set of a lift when it beats every set of that lift in history.
     func isRecord(_ set: LoggedSet, in item: SessionExercise) -> Bool {
         if bests == nil { bests = data.bestSets() }
-        func beats(_ a: LoggedSet, _ weight: Double, _ reps: Int) -> Bool { (a.weight ?? 0) > weight || (a.weight == weight && (a.reps ?? 0) > reps) }
-        guard item.mode == .strength, let best = bests?[item.exerciseID], set.completedAt != nil, set.plan.kind != .warmup, beats(set, best.weight, best.reps) else { return false }
-        let rivals = item.sets.filter { $0.completedAt != nil && $0.plan.kind != .warmup && $0.id != set.id }
-        return !rivals.contains { beats($0, set.weight ?? 0, set.reps ?? 0) || ($0.weight == set.weight && $0.reps == set.reps && ($0.completedAt ?? .distantFuture) < (set.completedAt ?? .distantPast)) }
+        guard item.mode == .strength, let best = bests?[item.exerciseID], let lift = set.lifted, outlifts(lift, (best.weight, best.reps)) else { return false }
+        // Of equal sets, the first one logged holds the record.
+        return !item.sets.contains { rival in
+            guard rival.id != set.id, let other = rival.lifted else { return false }
+            return outlifts(other, lift) || (!outlifts(lift, other) && (rival.completedAt ?? .distantFuture) < (set.completedAt ?? .distantPast))
+        }
     }
 
     /// Shows a short confirmation, with an Undo when one is given, and clears it after a few seconds.

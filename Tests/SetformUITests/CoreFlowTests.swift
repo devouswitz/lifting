@@ -187,6 +187,48 @@ final class CoreFlowTests: XCTestCase {
         app.activate()
     }
 
+    func testProgramEditorEndsReorderingAndAsksBeforeDeletingADay() {
+        launch()
+        tap("train.program")
+        tap("Open Push Pull Legs")
+        app.buttons["Reorder"].firstMatch.tap()
+        app.buttons["Done"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["Reorder"].firstMatch.waitForExistence(timeout: 5))
+        // A swipe on a day asks first, as the day's own menu does.
+        let row = app.staticTexts["Pull"].firstMatch
+        row.coordinate(withNormalizedOffset: CGVector(dx: 4, dy: 0.5)).press(forDuration: 0.1, thenDragTo: row.coordinate(withNormalizedOffset: CGVector(dx: -1, dy: 0.5)))
+        app.buttons["Delete"].firstMatch.tap()
+        expect("Delete Pull?")
+        app.buttons["Cancel"].firstMatch.tap()
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+    }
+
+    func testProgramsBuiltTwiceFromImportedHistoryKeepTheirOwnDays() {
+        let directory = NSTemporaryDirectory() + "setform-uitest-" + UUID().uuidString
+        func importLog(_ rows: [String]) {
+            let csv = (["Date,Workout Name,Exercise Name,Weight,Reps"] + rows).joined(separator: "\n")
+            launch(["--data-directory", directory], environment: ["SETFORM_IMPORT_CSV": csv])
+            tap("csv.previewExternal")
+            expect("Build program from latest workouts").coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
+            tap("csv.addHistory")
+            expect("Programs, Imported program")
+        }
+        func benchWeight(in program: String) -> String {
+            tap("train.program")
+            tap("Open \(program)")
+            app.staticTexts["Push"].firstMatch.tap()
+            let load = expect("Working sets, ").label
+            app.terminate()
+            return load
+        }
+        importLog(["2026-10-18,Push,Bench Press (Barbell),40,8"])
+        // A later export holds the old workout and a new one; its program gets its own days.
+        importLog(["2026-10-18,Push,Bench Press (Barbell),40,8", "2026-10-25,Push,Bench Press (Barbell),45,8"])
+        XCTAssertEqual(benchWeight(in: "Imported program (2)"), "Working sets, 45 lb")
+        launch(["--data-directory", directory])
+        XCTAssertEqual(benchWeight(in: "Imported program"), "Working sets, 40 lb")
+    }
+
     func testLoggedSetSurvivesTheAppBeingKilled() {
         let directory = NSTemporaryDirectory() + "setform-uitest-" + UUID().uuidString
         launch(["--data-directory", directory])

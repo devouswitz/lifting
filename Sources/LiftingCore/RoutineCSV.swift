@@ -8,7 +8,7 @@ public struct RoutineBundle: Sendable {
 }
 
 public enum RoutineCSV {
-    public static let headers = ["format", "record_type", "program_id", "program", "program_notes", "day_order", "day_id", "day", "day_notes", "exercise_order", "slot_id", "exercise_id", "exercise", "mode", "muscle", "equipment", "variant_id", "variant", "working_weight_kg", "rounding_kg", "rest_seconds", "exercise_notes", "progression", "increment_kg", "deload_after", "deload_percent", "group", "set_order", "set_id", "set_type", "load_rule", "fixed_weight_kg", "percent", "reps_min", "reps_max", "seconds", "meters", "rpe", "amrap", "set_rest_seconds", "group_rest_seconds", "transition_seconds", "secondary_muscles", "set_type_name", "set_type_badge", "set_type_color", "weight_override_kg"]
+    public static let headers = ["format", "record_type", "program_id", "program", "program_notes", "day_order", "day_id", "day", "day_notes", "exercise_order", "slot_id", "exercise_id", "exercise", "mode", "muscle", "equipment", "variant_id", "variant", "working_weight_kg", "rounding_kg", "rest_seconds", "exercise_notes", "progression", "increment_kg", "deload_after", "deload_percent", "group", "set_order", "set_id", "set_type", "load_rule", "fixed_weight_kg", "percent", "reps_min", "reps_max", "seconds", "meters", "rpe", "amrap", "set_rest_seconds", "group_rest_seconds", "transition_seconds", "secondary_muscles", "set_type_name", "set_type_badge", "set_type_color", "weight_override_kg", "warmup_rest_seconds", "fail_rest_seconds"]
 
     public static func export(_ data: TrainingData, programID: UUID? = nil, dayID: UUID? = nil) throws -> Data {
         let owner = programID.flatMap(data.program)
@@ -28,6 +28,8 @@ public enum RoutineCSV {
                 var values = dayValues
                 values.merge(["record_type": "set", "exercise_order": String(exerciseOrder + 1), "slot_id": slot.id.uuidString, "exercise_id": exercise.id.uuidString, "exercise": exercise.name, "mode": exercise.mode.rawValue, "muscle": exercise.muscle, "equipment": exercise.equipment, "variant_id": variant.id.uuidString, "variant": variant.label, "working_weight_kg": String(variant.workingWeight), "rounding_kg": String(variant.rounding), "rest_seconds": String(variant.restSeconds), "exercise_notes": variant.notes, "progression": variant.progression.mode.rawValue, "increment_kg": String(variant.progression.increment), "deload_after": String(variant.progression.deloadAfter), "deload_percent": String(variant.progression.deloadPercent), "group": slot.group]) { _, new in new }
                 values["group_rest_seconds"] = slot.groupRestSeconds.map(String.init) ?? ""
+                values["warmup_rest_seconds"] = variant.warmupRestSeconds.map(String.init) ?? ""
+                values["fail_rest_seconds"] = variant.failRestSeconds.map(String.init) ?? ""
                 values["transition_seconds"] = slot.transitionSeconds.map(String.init) ?? ""
                 values["secondary_muscles"] = exercise.secondaryMuscles?.joined(separator: "|") ?? ""
                 for (setOrder, plan) in variant.sets.enumerated() {
@@ -108,7 +110,8 @@ public enum RoutineCSV {
             progression.increment = try r.double("increment_kg", default: progression.increment)!
             progression.deloadAfter = try r.int("deload_after", default: progression.deloadAfter)!
             progression.deloadPercent = try r.double("deload_percent", default: progression.deloadPercent)!
-            let variant = Variant(id: variantID, exerciseID: exerciseID, label: label, workingWeight: try r.double("working_weight_kg", default: 0)!, rounding: try r.double("rounding_kg", default: 0)!, restSeconds: try r.int("rest_seconds", default: 90)!, notes: r.text("exercise_notes"), sets: [], progression: progression)
+            var variant = Variant(id: variantID, exerciseID: exerciseID, label: label, workingWeight: try r.double("working_weight_kg", default: 0)!, rounding: try r.double("rounding_kg", default: 0)!, restSeconds: try r.int("rest_seconds", default: 90)!, notes: r.text("exercise_notes"), sets: [], progression: progression)
+            variant.warmupRestSeconds = try r.int("warmup_rest_seconds"); variant.failRestSeconds = try r.int("fail_rest_seconds")
             if var existing = data.variant(variantID) { existing.sets = []; guard existing == variant else { throw TrainingError.invalid("Conflicting variant details on row \(r.number).") } }
             else { data.variants.append(variant) }
             let existingExerciseOrder = slotOrder[dayID]?.first { $0.value.variantID == variantID }?.key
@@ -169,6 +172,7 @@ public extension TrainingData {
         }
         if loadFirst, let first = imported.first { next.activeProgramID = first }
         next.adoptSetTypes(from: source, existingVariants: existingVariants, existingSessions: Set(next.sessions.map(\.id)))
+        next.separateSharedPlans()
         self = try next.validated()
         return imported
     }

@@ -23,7 +23,8 @@ public extension TrainingData {
             ("Run", "Cardio", "", .cardio), ("Sprint", "Cardio", "", .cardio), ("Bike", "Cardio", "Bike", .cardio),
             ("Row", "Cardio", "Rower", .cardio), ("Walk", "Cardio", "", .cardio), ("Stair climber", "Cardio", "Machine", .cardio)
         ]
-        data.exercises = catalog.map { Exercise(name: $0.0, muscle: $0.1, equipment: $0.2, mode: $0.3) }
+        // The same ids on every install, so two devices that sync share one of each exercise.
+        data.exercises = catalog.map { Exercise(id: ExternalHistoryCSV.stableID("starter|exercise|\($0.0)"), name: $0.0, muscle: $0.1, equipment: $0.2, mode: $0.3) }
         func add(_ name: String, day: String, pounds: Double, reps: Int, upper: Int, count: Int, warmup: Bool = false) -> RoutineSlot {
             let exercise = data.exercises.first { $0.name == name }!
             var plans = (0..<count).map { _ in SetPlan(load: exercise.mode == .strength ? .working : .none, reps: reps, repCeiling: upper) }

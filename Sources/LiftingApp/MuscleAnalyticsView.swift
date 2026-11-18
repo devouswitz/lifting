@@ -97,9 +97,11 @@ struct MuscleAnalyticsView: View {
 
     @ViewBuilder private var volumeView: some View {
         let monthly = days == 0 || days > 120
+        let muscles = current.filter { $0.volume > 0 }.sorted { $0.volume > $1.volume }
+        // A muscle chosen in another range that has nothing here would leave the card empty with no way back.
+        let muscle = muscles.contains { $0.name == self.muscle } ? self.muscle : nil
         let buckets = store.data.volumeBuckets(programID: programID, since: since, muscle: muscle, monthly: monthly)
         let values = buckets.map { unit.display($0.volume) }
-        let muscles = current.filter { $0.volume > 0 }.sorted { $0.volume > $1.volume }
         // The period in progress is shown but left out of the average, and the headline starts on the last full one.
         let complete = buckets.count > 1 ? Array(values.dropLast()) : values
         let selected = selectedDate.flatMap { date in buckets.lastIndex { $0.start <= date } } ?? (buckets.count > 1 ? buckets.count - 2 : 0)
@@ -108,8 +110,8 @@ struct MuscleAnalyticsView: View {
         } else {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
-                    Button("All muscles") { muscle = nil }.buttonStyle(ChipStyle(selected: muscle == nil, onCard: true))
-                    ForEach(muscles) { row in Button(row.name) { muscle = row.name }.buttonStyle(ChipStyle(selected: muscle == row.name, onCard: true)) }
+                    Button("All muscles") { self.muscle = nil }.buttonStyle(ChipStyle(selected: muscle == nil, onCard: true))
+                    ForEach(muscles) { row in Button(row.name) { self.muscle = row.name }.buttonStyle(ChipStyle(selected: muscle == row.name, onCard: true)) }
                 }.padding(.horizontal, 1)
             }
             let average = complete.reduce(0, +) / Double(max(complete.count, 1))

@@ -21,6 +21,13 @@ public struct NextSet: Equatable, Sendable {
     public var count: Int
 }
 
+/// Weights are kept in kilograms, so the same pounds reached two ways can differ in the last bit.
+public func sameWeight(_ a: Double, _ b: Double) -> Bool { abs(a - b) < 0.001 }
+/// A heavier set, or the same weight for more reps.
+public func outlifts(_ a: (weight: Double, reps: Int), _ b: (weight: Double, reps: Int)) -> Bool {
+    sameWeight(a.weight, b.weight) ? a.reps > b.reps : a.weight > b.weight
+}
+
 public extension LoggedSet {
     /// A completed working set with a weight and reps, the kind that can be a best.
     var lifted: (weight: Double, reps: Int)? {
@@ -62,13 +69,12 @@ public extension TrainingData {
     /// in workout order. A lift done for the first time has nothing to beat.
     func records(in session: Session) -> [RecordSet] {
         guard session.skipped != true else { return [] }
-        func beats(_ a: (weight: Double, reps: Int), _ b: (weight: Double, reps: Int)) -> Bool { a.weight > b.weight || (a.weight == b.weight && a.reps > b.reps) }
         var tops: [(item: SessionExercise, set: LoggedSet)] = []
         for item in session.exercises where item.mode == .strength {
             for set in item.sets {
                 guard let lift = set.lifted else { continue }
                 if let held = tops.firstIndex(where: { $0.item.exerciseID == item.exerciseID }) {
-                    if let top = tops[held].set.lifted, beats(lift, top) { tops[held] = (item, set) }
+                    if let top = tops[held].set.lifted, outlifts(lift, top) { tops[held] = (item, set) }
                 } else { tops.append((item, set)) }
             }
         }
@@ -78,13 +84,13 @@ public extension TrainingData {
             for item in other.exercises where item.mode == .strength && wanted.contains(item.exerciseID) {
                 for set in item.sets {
                     guard let lift = set.lifted else { continue }
-                    if let held = earlier[item.exerciseID], !beats(lift, held) { continue }
+                    if let held = earlier[item.exerciseID], !outlifts(lift, held) { continue }
                     earlier[item.exerciseID] = lift
                 }
             }
         }
         return tops.compactMap { top in
-            guard let lift = top.set.lifted, let before = earlier[top.item.exerciseID], beats(lift, before) else { return nil }
+            guard let lift = top.set.lifted, let before = earlier[top.item.exerciseID], outlifts(lift, before) else { return nil }
             return RecordSet(exerciseID: top.item.exerciseID, setID: top.set.id, name: top.item.name, weight: lift.weight, reps: lift.reps,
                              previousWeight: before.weight, previousReps: before.reps)
         }

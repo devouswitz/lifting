@@ -16,7 +16,9 @@ public struct LocalRepository {
     public static func decode(_ bytes: Data) throws -> TrainingData {
         guard bytes.count <= 100_000_000 else { throw TrainingError.invalid("The backup is too large.") }
         let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .millisecondsSince1970
-        return try decoder.decode(TrainingData.self, from: bytes).validated()
+        var data = try decoder.decode(TrainingData.self, from: bytes)
+        data.separateSharedPlans()
+        return try data.validated()
     }
     public func load() throws -> LoadResult? {
         guard FileManager.default.fileExists(atPath: url.path) else {

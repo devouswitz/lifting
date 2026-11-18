@@ -230,6 +230,52 @@ final class TrainingTests: XCTestCase {
         XCTAssertEqual(local.muscleSummary().first?.name, "Chest")
     }
 
+    func testProgramsBuiltTwiceFromHistoryDoNotShareExercisePlans() throws {
+        func bundle(_ rows: [[String]]) throws -> HistoryBundle {
+            let bytes = CSVCodec.render([["Date", "Workout Name", "Exercise Name", "Weight", "Reps"]] + rows)
+            return try ExternalHistoryCSV.decode(bytes, options: ExternalHistoryCSV.detect(try CSVCodec.parse(bytes)[0]))
+        }
+        var data = TrainingData.starter()
+        let first = try bundle([["2026-10-18", "Push", "Bench Press (Barbell)", "40", "8"]])
+        try data.importHistory(first); try data.createProgramFromHistory(first, name: "Imported")
+        // A later export of the same log holds the old workout and a new one.
+        let second = try bundle([["2026-10-18", "Push", "Bench Press (Barbell)", "40", "8"], ["2026-10-25", "Push", "Bench Press (Barbell)", "45", "8"]])
+        try data.importHistory(second); try data.createProgramFromHistory(second, name: "Imported again")
+        let days = data.programs.suffix(2).map { data.routine($0.dayIDs[0])! }
+        XCTAssertNotEqual(days[0].slots[0].variantID, days[1].slots[0].variantID)
+        let used = data.routines.flatMap(\.slots).map(\.variantID)
+        XCTAssertEqual(Set(used).count, used.count)
+        // The first program's day keeps the plan it was built with.
+        XCTAssertEqual(data.variant(days[0].slots[0].variantID)?.workingWeight, 40)
+        XCTAssertEqual(data.variant(days[1].slots[0].variantID)?.workingWeight, 45)
+        XCTAssertNoThrow(try data.validated())
+    }
+
+    func testLoadingSeparatesAPlanSharedByTwoDays() throws {
+        var data = TrainingData.starter()
+        let source = data.dayTemplates[0], plan = source.slots[0].variantID
+        let programID = try data.createProgram(name: "Block")
+        let dayID = try data.addDay(to: programID, name: "Heavy")
+        let r = data.routines.firstIndex { $0.id == dayID }!
+        data.routines[r].slots.append(RoutineSlot(variantID: plan))
+        // The program's day is the one that has logged the plan, so it keeps it.
+        try data.start(routineID: dayID, now: Date(timeIntervalSince1970: 1000))
+        let item = data.activeSession!.exercises[0]
+        try data.toggleSet(exerciseID: item.id, setID: item.sets[0].id, now: Date(timeIntervalSince1970: 1100))
+        try data.finish(now: Date(timeIntervalSince1970: 2000))
+        let bytes = try LocalRepository.encode(data)
+
+        let loaded = try LocalRepository.decode(bytes)
+        XCTAssertEqual(loaded.routine(dayID)?.slots[0].variantID, plan)
+        let copy = loaded.routine(source.id)!.slots[0].variantID
+        XCTAssertNotEqual(copy, plan)
+        XCTAssertEqual(loaded.variant(copy)?.sets.count, loaded.variant(plan)?.sets.count)
+        XCTAssertEqual(loaded.variant(copy)?.exerciseID, loaded.variant(plan)?.exerciseID)
+        // Every device makes the same copy, and loading again changes nothing.
+        XCTAssertEqual(try LocalRepository.decode(bytes), loaded)
+        XCTAssertEqual(try LocalRepository.decode(LocalRepository.encode(loaded)), loaded)
+    }
+
     func testLinkedFlowWarmupsRoundsUnevenSetsAndDropChains() throws {
         var data = TrainingData.starter()
         let day = data.dayTemplates[0], ids = Set(day.slots.prefix(2).map(\.id))
@@ -2365,6 +2411,69 @@ final class TrainingTests: XCTestCase {
         // The body-weight trend averages the week up to each weigh-in.
         data.bodyWeights = [80, 82, 81].enumerated().map { BodyWeightEntry(date: start.addingTimeInterval(Double($0.offset) * 86_400), kilograms: $0.element) }
         XCTAssertEqual(data.bodyWeightTrend().map(\.average), [80, 81, 81])
+    }
+
+    func testRecordsTreatTheSameWeightReachedTwoWaysAsEqual() throws {
+        var data = TrainingData.starter()
+        let day = data.routines[0].id, start = Date(timeIntervalSince1970: 1_792_300_000)
+        func workout(week: Int, weight: Double, reps: Int) throws -> Session {
+            let now = start.addingTimeInterval(Double(week) * 604_800)
+            try data.start(routineID: day, now: now)
+            data.activeSession!.exercises[0].sets[2].weight = weight; data.activeSession!.exercises[0].sets[2].reps = reps
+            let item = data.activeSession!.exercises[0]
+            try data.toggleSet(exerciseID: item.id, setID: item.sets[2].id, now: now)
+            try data.finish(now: now.addingTimeInterval(1800))
+            return data.sessions.last!
+        }
+        // 135 lb plus a 5 lb step and a typed 140 lb are not the same number of kilograms.
+        let stepped = WeightUnit.lb.kilograms(135) + WeightUnit.lb.kilograms(5), typed = WeightUnit.lb.kilograms(140)
+        _ = try workout(week: 0, weight: min(stepped, typed) - 1e-9, reps: 8)
+        let fewer = try workout(week: 1, weight: max(stepped, typed) + 1e-9, reps: 6)
+        let more = try workout(week: 2, weight: min(stepped, typed) - 2e-9, reps: 9)
+        XCTAssertTrue(data.records(in: fewer).isEmpty)
+        XCTAssertEqual(data.records(in: more).first?.reps, 9)
+        XCTAssertEqual(data.bestSets()[more.exercises[0].exerciseID]?.reps, 9)
+    }
+
+    func testSwappingBackToThePlannedExerciseLeavesNoSwapInHistory() throws {
+        var data = TrainingData.starter()
+        try data.start(routineID: data.routines[0].id)
+        let planned = data.activeSession!.exercises[0]
+        let incline = data.exercises.first { $0.name == "Incline dumbbell press" }!, seated = data.exercises.first { $0.name == "Seated dumbbell press" }!
+        try data.substitute(sessionExerciseID: planned.id, with: incline.id, future: false)
+        try data.substitute(sessionExerciseID: data.activeSession!.exercises[0].id, with: seated.id, future: false)
+        XCTAssertEqual(data.activeSession!.exercises[0].substitutedFrom, planned.name)
+        try data.substitute(sessionExerciseID: data.activeSession!.exercises[0].id, with: planned.exerciseID, future: false)
+        XCTAssertNil(data.activeSession!.exercises[0].substitutedFrom)
+    }
+
+    func testSupersetMovesOnAfterSkippedWarmups() throws {
+        var data = TrainingData.starter()
+        let day = data.dayTemplates[0]
+        try data.linkRoutineExercises(routineID: day.id, slots: Set(day.slots.prefix(2).map(\.id)), rest: 75, transition: 5)
+        try data.start(routineID: day.id)
+        let first = data.activeSession!.exercises[0], now = Date(timeIntervalSince1970: 1000)
+        // The first lift has two warm-ups; logging its first working set skips them.
+        let working = try XCTUnwrap(first.sets.first { $0.plan.kind != .warmup })
+        XCTAssertEqual(first.sets.filter { $0.plan.kind == .warmup }.count, 2)
+        try data.toggleSet(exerciseID: first.id, setID: working.id, now: now)
+        XCTAssertEqual(data.activeSession!.exercises[1].collapsed, false)
+        XCTAssertEqual(data.restDeadline, now.addingTimeInterval(5))
+    }
+
+    func testDayCSVKeepsAnExercisesOwnRests() throws {
+        var data = TrainingData.starter()
+        let day = data.dayTemplates[0], v = data.variants.firstIndex { $0.id == day.slots[0].variantID }!
+        data.variants[v].warmupRestSeconds = 45; data.variants[v].failRestSeconds = 240
+        var other = TrainingData.starter()
+        let ids = try other.importRoutines(RoutineCSV.decode(RoutineCSV.export(data, dayID: day.id)))
+        XCTAssertTrue(ids.isEmpty)
+        let copy = try XCTUnwrap(other.dayTemplates.last.flatMap { other.variant($0.slots[0].variantID) })
+        XCTAssertEqual(copy.warmupRestSeconds, 45); XCTAssertEqual(copy.failRestSeconds, 240)
+    }
+
+    func testStarterExercisesHaveTheSameIdsOnEveryInstall() {
+        XCTAssertEqual(TrainingData.starter().exercises.map(\.id), TrainingData.starter().exercises.map(\.id))
     }
 
     func testWorkoutSummaryFindsRecordsAndTheLastTimeOnTheSameDay() throws {

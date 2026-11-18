@@ -97,9 +97,11 @@ struct LiveSetRow: View {
     }
     func cell(title: String, value: String?, field: SetField, labeled: Bool = false, placeholder: String? = nil) -> some View {
         let set = self.set
+        // Named as the badge and the checkmark name it: "Working set 1", not its place among the warm-ups.
+        let name = set.flatMap { set in item.map { "\(palette.title(set.plan)) set \(setLabel($0))" } } ?? "Set \(index + 1)"
         return SetValueCell(title: title, value: value ?? placeholder ?? "–", labeled: labeled, filled: set?.completedAt == nil,
                             dimmed: value == nil || (field == .weight && set?.weightIsEdited != true && set?.completedAt == nil)) { open(field) }
-            .accessibilityLabel("Set \(index + 1), \(title), \(value ?? "not set")\(placeholder.map { ", target \($0)" } ?? "")").accessibilityIdentifier("workout.\(exerciseID).\(setID).\(field.rawValue)")
+            .accessibilityLabel("\(name), \(title), \(value ?? "not set")\(placeholder.map { ", target \($0)" } ?? "")").accessibilityIdentifier("workout.\(exerciseID).\(setID).\(field.rawValue)")
     }
     func previousValue(_ set: LoggedSet, mode: ExerciseMode) -> String {
         let unit = store.data.settings.unit

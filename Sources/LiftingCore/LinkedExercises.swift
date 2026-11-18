@@ -65,7 +65,11 @@ public extension TrainingData {
               let logged = current.sets.first(where: { $0.id == setID }), session.linkTitle(for: exerciseID) != nil else { return }
         let members = session.linkedExercises(for: exerciseID)
         guard let index = members.firstIndex(where: { $0.id == exerciseID }) else { return }
-        let pendingWarmups = members.filter { $0.sets.contains { $0.completedAt == nil && $0.plan.kind == .warmup } }
+        // A warm-up left unchecked before a logged set was skipped, as in `nextSet`, and holds nothing up.
+        let pendingWarmups = members.filter { member in
+            let logged = member.sets.lastIndex { $0.completedAt != nil } ?? -1
+            return member.sets.indices.contains { $0 > logged && member.sets[$0].completedAt == nil && member.sets[$0].plan.kind == .warmup }
+        }
         var target: SessionExercise?
         var rest = current.rest(after: logged, settings: settings)
         if !pendingWarmups.isEmpty {

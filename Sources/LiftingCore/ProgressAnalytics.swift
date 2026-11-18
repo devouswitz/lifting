@@ -46,7 +46,7 @@ public extension TrainingData {
                 .compactMap { set -> TopSet? in
                     set.lifted.map { TopSet(sessionID: session.id, date: session.startedAt, weight: $0.weight, reps: $0.reps) }
                 }
-                .max { $0.weight == $1.weight ? $0.reps < $1.reps : $0.weight < $1.weight }
+                .max { outlifts(($1.weight, $1.reps), ($0.weight, $0.reps)) }
         }
     }
 
@@ -57,7 +57,7 @@ public extension TrainingData {
             for item in session.exercises where item.mode == .strength {
                 for set in item.sets {
                     guard let (weight, reps) = set.lifted else { continue }
-                    if let held = best[item.exerciseID], held.weight > weight || (held.weight == weight && held.reps >= reps) { continue }
+                    if let held = best[item.exerciseID], !outlifts((weight, reps), (held.weight, held.reps)) { continue }
                     best[item.exerciseID] = TopSet(sessionID: session.id, date: session.startedAt, weight: weight, reps: reps)
                 }
             }
@@ -99,7 +99,7 @@ public extension TrainingData {
         }
         let records = counts.compactMap { count in
             sets.filter { $0.reps >= count }
-                .max { $0.weight == $1.weight ? $0.date > $1.date : $0.weight < $1.weight }
+                .max { sameWeight($0.weight, $1.weight) ? $0.date > $1.date : $0.weight < $1.weight }
                 .map { RepRecord(reps: count, weight: $0.weight, date: $0.date) }
         }
         return records.enumerated().filter { index, record in index + 1 == records.count || records[index + 1].weight < record.weight }.map(\.element)

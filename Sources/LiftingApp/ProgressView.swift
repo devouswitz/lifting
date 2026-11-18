@@ -519,7 +519,11 @@ private struct ProgressTrack: Identifiable {
     let points: [ProgressPoint]
     /// Deloads and light days: plotted, but off the line and out of the statistics.
     var light: Set<UUID> = []
-    var regularPoints: [ProgressPoint] { points.filter { !light.contains($0.id) } }
+    /// The points the statistics read. A range holding only light days reads those rather than zero.
+    var regularPoints: [ProgressPoint] {
+        let regular = points.filter { !light.contains($0.id) }
+        return regular.isEmpty ? points : regular
+    }
     var data: [ProgressChartDatum] {
         points.map { ProgressChartDatum(id: "\(id.uuidString)-\($0.id.uuidString)", sessionID: $0.id, trackID: id, date: $0.date, value: $0.value, light: light.contains($0.id)) }
     }

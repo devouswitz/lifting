@@ -55,6 +55,10 @@ struct HistoryView: View {
         .searchable(text: $search, prompt: "Search workouts")
         // Search results are a list, so searching shows the log.
         .onChange(of: search) { _, value in if !value.isEmpty { mode = .log } }
+        // A day whose last workout was deleted is no longer selected.
+        .onChange(of: store.data.sessions.count) {
+            if let day = selectedDay, !store.data.sessions.contains(where: { calendar.isDate($0.startedAt, inSameDayAs: day) }) { selectedDay = nil }
+        }
     }
 
     /// The workouts on the day tapped in the calendar.
@@ -87,13 +91,14 @@ private struct HistoryWorkoutRow: View {
     let session: Session
     let title: String
     let settings: LiftingCore.Settings
+    @ScaledMetric(relativeTo: .title3) private var dateWidth = 30.0
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             VStack(spacing: 2) {
                 Text(session.startedAt, format: .dateTime.day()).font(.title3.weight(.semibold)).monospacedDigit()
                 Text(session.startedAt, format: .dateTime.weekday(.abbreviated)).font(.caption2).foregroundStyle(.secondary)
-            }.frame(width: 30)
+            }.lineLimit(1).minimumScaleFactor(0.7).frame(width: dateWidth)
             VStack(alignment: .leading, spacing: 4) {
                 Text(title).font(.headline).foregroundStyle(session.skipped == true ? .secondary : .primary)
                 if session.skipped == true { Text("Skipped").font(.caption).foregroundStyle(.secondary) }

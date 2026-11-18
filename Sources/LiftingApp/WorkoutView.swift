@@ -196,7 +196,8 @@ struct RestBar: View {
     @EnvironmentObject var store: AppStore
     @Environment(\.palette) var palette
     @State private var total: Double = 1
-    @State private var done = false
+    /// The rest that last ran out. Each rest has its own end, so each one vibrates.
+    @State private var ended: Date?
     var body: some View {
         if let deadline = store.data.restDeadline {
             TimelineView(.periodic(from: .now, by: 0.25)) { context in
@@ -225,9 +226,9 @@ struct RestBar: View {
                 .shadow(color: .black.opacity(palette.dark ? 0.5 : 0.12), radius: 16, y: 4)
                 .padding(.horizontal, 12).padding(.bottom, 8)
                 .animation(.snappy, value: over)
-                .onChange(of: over) { _, value in done = value }
+                .onChange(of: over) { _, value in if value { ended = deadline } }
             }
-            .sensoryFeedback(.warning, trigger: done) { old, new in !old && new && store.data.settings.haptics }
+            .sensoryFeedback(.warning, trigger: ended) { _, new in new != nil && store.data.settings.haptics }
             .task(id: deadline) { total = max(1, deadline.timeIntervalSince(store.restStartedAt ?? Date())) }
             .transition(.move(edge: .bottom).combined(with: .opacity))
         }

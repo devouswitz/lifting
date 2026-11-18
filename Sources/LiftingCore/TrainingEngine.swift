@@ -41,11 +41,12 @@ public extension TrainingData {
         }
     }
 
-    /// Unchecking the mini-set that ended a cluster brings the cluster back to its planned size,
-    /// so a mistyped count can be corrected and logged again.
+    /// Unchecking the mini-set whose miss ended a cluster brings the cluster back to its planned size,
+    /// so a mistyped count can be corrected and logged again. A cluster that ran its course stays as it is.
     private mutating func resumeMyoCluster(exercise e: Int, set s: Int) {
         let sets = activeSession!.exercises[e].sets
-        guard sets[s].plan.kind == .myoMini, !(sets.indices.contains(s + 1) && sets[s + 1].plan.kind == .myoMini),
+        guard sets[s].plan.kind == .myoMini, let goal = sets[s].plan.reps, let reps = sets[s].reps, reps < goal,
+              !(sets.indices.contains(s + 1) && sets[s + 1].plan.kind == .myoMini),
               let start = sets.prefix(s).lastIndex(where: { $0.plan.kind != .myoMini }), sets[start].plan.kind == .myoActivation else { return }
         let missing = techniqueDefaults(for: activeSession!.exercises[e].exerciseID).miniCount - (s - start)
         guard missing > 0 else { return }
@@ -143,7 +144,9 @@ public extension TrainingData {
         let replacement = substitutionVariant(from: source, to: exercise)
         var item = SessionExercise(variant: replacement, exercise: exercise, slotID: old.slotID)
         item.group = old.group; item.groupRestSeconds = old.groupRestSeconds; item.transitionSeconds = old.transitionSeconds
-        item.substitutedFrom = old.name
+        // History names the planned exercise, however many swaps it took, and nothing once it is back.
+        let planned = old.substitutedFrom ?? old.name
+        item.substitutedFrom = planned == exercise.name ? nil : planned
         let completed = old.sets.filter { $0.completedAt != nil }
         if completed.isEmpty { item.notes = old.notes }
         if exercise.mode == old.mode {

@@ -2,6 +2,20 @@
 
 Entries below are dated records. Earlier toolchain and distribution limitations describe the environment at that time; see the newest pass for current evidence.
 
+## Separate plans for every day, and a defect sweep, build 22 (November 17, 2026)
+
+iPhone 18 Pro simulator (iOS 27.0), showcase library and a fresh data directory, scripted UI walker and the UI tests.
+
+- Import Day copies: Push imported into a new program, then its first working weight changed to 205 lb, rest to 2:00 and a set added. The original Push still read 190 lb, 3:00 and six sets.
+- A program built from imported history twice shared its plans: the second program's day pointed at the first one's bench plan, the first program's weight became the later workout's, and its workouts moved to the new program. A core test reproduced all three. Now the second program gets its own plans and the first keeps its weights and workouts; a UI test imports two exports through the app and reads 40 lb in the first program's day and 45 lb in the second.
+- A library that already holds a plan used by two days is separated when it loads, merges from sync, or imports a day CSV. The day that logged the plan last keeps it; the copy has the same id on every device, and loading twice changes nothing (core test).
+- Program editor: Reorder now turns into Done and back, and a swipe on a day asks "Delete Pull?" before removing it (UI test).
+- Found by reading and fixed, covered by core tests where the logic is in the core: the rest-end vibration going quiet after Done was tapped on a finished rest; "Record … × 0" for a set checked with no reps; records comparing the same weight reached two ways as different; a superset staying on a lift whose warm-ups were skipped; History naming an intermediate exercise after a swap back; an unchecked mini-set regrowing a finished MYO cluster; day CSV dropping an exercise's own warm-up and missed-target rests; starter exercises getting different ids on each install.
+- Also fixed, by reading only: a muscle or cardio filter leaving Progress empty in a range without that muscle or exercise; exercise statistics reading 0 when a range holds only light days; the History log's date column at large text sizes; a calendar day staying selected after its last workout is deleted; VoiceOver naming a working set by its place among the warm-ups; "All sets logged" on the Lock Screen for a workout with no exercises.
+- 123 core test cases, zero failures under `./scripts/check.sh` and `xcodebuild test`. Ten UI tests pass.
+
+Not verified: a physical iPhone; the rest vibration itself (the simulator has none); the Progress, History and Lock Screen fixes above on screen; VoiceOver. Left as found: an imported exercise whose rows mix blank and filled weights can import as two exercises, and two devices that each installed before this build still hold separate copies of the starter exercises.
+
 ## Gesture hints, build 21 (November 15, 2026)
 
 iPhone 18 Pro simulator (iOS 27.0), showcase library, scripted UI walker and the UI tests.

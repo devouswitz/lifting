@@ -169,6 +169,7 @@ struct ProgramEditor: View {
     @State private var newDay: UUID?
     @State private var dayName = ""
     @State private var deleting = false
+    @State private var deletingDay: Routine?
     @State private var export: CSVExportRequest?
     var program: TrainingProgram? { store.data.program(programID) }
     func update(_ change: @escaping (inout TrainingProgram) -> Void) { store.perform { d in if let i = d.programs.firstIndex(where: { $0.id == programID }) { change(&d.programs[i]) } } }
@@ -196,7 +197,7 @@ struct ProgramEditor: View {
                                 if program.nextDayID != id { Button("Make Next") { store.perform { try $0.selectNextDay(id, in: programID) } }.tint(palette.action) }
                             }
                             .swipeActions(edge: .trailing) {
-                                Button("Delete", role: .destructive) { store.perform { $0.removeDay(id) } }.tint(.red)
+                                Button("Delete", role: .destructive) { deletingDay = day }.tint(.red)
                             }
                         }
                     }
@@ -219,7 +220,9 @@ struct ProgramEditor: View {
         #if os(iOS)
         .environment(\.editMode, $editMode)
         .toolbar {
-            if editMode != .active { ToolbarItem(placement: .primaryAction) { Button("Reorder") { withAnimation { editMode = .active } } } }
+            ToolbarItem(placement: .primaryAction) {
+                if (program?.dayIDs.count ?? 0) > 1 || editMode == .active { Button(editMode == .active ? "Done" : "Reorder") { withAnimation { editMode = editMode == .active ? .inactive : .active } } }
+            }
         }
         #endif
         .navigationDestination(item: $newDay) { RoutineEditor(routineID: $0) }
@@ -230,6 +233,10 @@ struct ProgramEditor: View {
             Button("Cancel", role: .cancel) {}
         }
         .alert("Delete program and its days?", isPresented: $deleting) { Button("Cancel", role: .cancel) {} ; Button("Delete Program", role: .destructive) { if store.perform({ $0.removeProgram(programID) }) { dismiss() } } } message: { Text("Templates and workout history are kept.") }
+        .alert("Delete \(deletingDay?.name ?? "day")?", isPresented: Binding(get: { deletingDay != nil }, set: { if !$0 { deletingDay = nil } })) {
+            Button("Delete", role: .destructive) { if let deletingDay { store.perform { $0.removeDay(deletingDay.id) } }; deletingDay = nil }
+            Button("Cancel", role: .cancel) { deletingDay = nil }
+        } message: { Text("Workout history is kept.") }
         .modifier(CSVExportModifier(request: $export))
     }
     func move(_ id: UUID, by offset: Int) {

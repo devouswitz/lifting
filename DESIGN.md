@@ -24,7 +24,7 @@ The first screen charts up to six chosen lifts, one line each, with program, met
 
 ## Storage and identity
 
-All state stays in local JSON. Edits are written on a background queue, newest state only, so logging a set never waits while years of history are encoded; the queue is flushed when the app leaves the foreground, and a restore or merge writes at once. Exercise definitions and day variants have separate IDs. Substitutions retain a stable family so returning to an exercise resumes its original track. New day copies and imported routine copies get independent tracks. History CSV maintains import mappings across backups and incremental imports.
+All state stays in local JSON. Edits are written on a background queue, newest state only, so logging a set never waits while years of history are encoded; the queue is flushed when the app leaves the foreground, and a restore or merge writes at once. Exercise definitions and day variants have separate IDs. Substitutions retain a stable family so returning to an exercise resumes its original track. New day copies and imported routine copies get independent tracks. No two days share an exercise plan, so an edit to one day never reaches another: a program built from imported history copies any plan a day already uses, and a library that holds a shared plan separates it when it loads, merges, or imports a day CSV, leaving the plan with the day that logged it last. Starter exercises have the same IDs on every install, so devices that sync share one of each. History CSV maintains import mappings across backups and incremental imports.
 
 ## Apple Health
 

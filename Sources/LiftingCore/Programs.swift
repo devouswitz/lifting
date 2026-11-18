@@ -154,18 +154,43 @@ public extension TrainingData {
         guard !clean.isEmpty else { throw TrainingError.invalid("Enter a day name.") }
         var copy = Routine(name: clean, notes: source.notes)
         for slot in source.slots {
-            guard var variant = variant(slot.variantID) else { throw TrainingError.invalid("Exercise unavailable.") }
-            variant.id = UUID()
-            variant.substitutionSourceID = nil
-            let base = [context, clean].compactMap { $0 }.joined(separator: " · ")
-            variant.label = Self.uniqueName(base, among: variants.filter { $0.exerciseID == variant.exerciseID }.map(\.label))
-            variant.progression.failures = 0
-            variant.sets = variant.sets.map { plan in var p = plan; p.id = UUID(); return p }
-            var linkedSlot = slot; linkedSlot.id = UUID(); linkedSlot.variantID = variant.id
-            variants.append(variant); copy.slots.append(linkedSlot)
+            guard let variant = variant(slot.variantID) else { throw TrainingError.invalid("Exercise unavailable.") }
+            var linkedSlot = slot; linkedSlot.id = UUID()
+            linkedSlot.variantID = copyPlan(variant, label: [context, clean].compactMap { $0 }.joined(separator: " · ")) { $0.progression.failures = 0 }
+            copy.slots.append(linkedSlot)
         }
         routines.append(copy)
         return copy
+    }
+
+    /// Adds a copy of an exercise plan for another day to own, with its own track name and substitutions,
+    /// and returns its id. A given id makes the copy the same on every device.
+    @discardableResult mutating func copyPlan(_ source: Variant, id: UUID? = nil, label: String, change: (inout Variant) -> Void = { _ in }) -> UUID {
+        var copy = source
+        copy.id = id ?? UUID(); copy.substitutionSourceID = nil
+        copy.label = Self.uniqueName(label, among: variants.filter { $0.exerciseID == source.exerciseID }.map(\.label))
+        for index in copy.sets.indices { copy.sets[index].id = id == nil ? UUID() : ExternalHistoryCSV.stableID("\(copy.id)|\(index)") }
+        change(&copy)
+        variants.append(copy)
+        return copy.id
+    }
+
+    /// No two days share an exercise plan, so an edit to one day never reaches another. Libraries from
+    /// earlier builds could hold one; the day that logged the plan last keeps it and the others get a copy.
+    mutating func separateSharedPlans() {
+        let uses = Dictionary(grouping: routines.flatMap { day in day.slots.map { (day: day.id, slot: $0.id, plan: $0.variantID) } }, by: \.plan)
+        for (planID, uses) in uses.filter({ $0.value.count > 1 }).sorted(by: { $0.key.uuidString < $1.key.uuidString }) {
+            guard let source = variant(planID) else { continue }
+            let logged = uses.map { use in sessions.filter { $0.routineID == use.day && $0.exercises.contains { $0.variantID == planID } }.map(\.startedAt).max() ?? .distantPast }
+            let keeper = logged.firstIndex(of: logged.max()!)
+            for (index, use) in uses.enumerated() where index != keeper {
+                guard let r = routines.firstIndex(where: { $0.id == use.day }), let s = routines[r].slots.firstIndex(where: { $0.id == use.slot }) else { continue }
+                let id = ExternalHistoryCSV.stableID("plan|\(use.slot)|\(planID)")
+                let label = [programForDay(use.day)?.name, routines[r].name].compactMap { $0 }.joined(separator: " · ")
+                routines[r].slots[s].variantID = variant(id)?.id ?? copyPlan(source, id: id, label: label)
+                if activeSession?.routineID == use.day, let e = activeSession?.exercises.firstIndex(where: { $0.slotID == use.slot && $0.variantID == planID }) { activeSession!.exercises[e].variantID = id }
+            }
+        }
     }
 }
 

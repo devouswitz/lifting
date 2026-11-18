@@ -119,7 +119,7 @@ struct WorkoutLines: View {
                 if clock { WorkoutClock(workout: workout, tint: tint, size: 28) }
             }
             HStack(alignment: .firstTextBaseline, spacing: 12) {
-                Text(context.state.detail ?? "All sets logged").font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                Text(context.state.detail ?? (context.state.total == 0 ? "No exercises yet" : "All sets logged")).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
                 Spacer(minLength: 0)
                 Text(workout.label(context.state)).font(.caption).foregroundStyle(.secondary).lineLimit(1).fixedSize()
             }.monospacedDigit()
