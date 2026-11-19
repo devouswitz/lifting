@@ -1081,6 +1081,38 @@ final class TrainingTests: XCTestCase {
         _ = try data.validated()
     }
 
+    func testForgottenWorkoutKeepsTimeUpToItsLastTouch() throws {
+        var data = TrainingData.starter()
+        let start = Date(timeIntervalSince1970: 1_000_000)
+        try data.start(routineID: data.routines[0].id, now: start)
+        let item = data.activeSession!.exercises[0]
+        let touched = start.addingTimeInterval(3900), later = start.addingTimeInterval(24000)
+        try data.toggleSet(exerciseID: item.id, setID: item.sets[0].id, now: touched)
+        data.activeSession!.lastActivityAt = touched
+        XCTAssertNil(data.activeSession!.forgottenSince(at: touched.addingTimeInterval(WorkoutReminder.idleDelay - 1)))
+        XCTAssertEqual(data.activeSession!.forgottenSince(at: later), touched)
+
+        var timing = data
+        timing.activeSession!.exercises[0].timerStartedAt = touched
+        XCTAssertNil(timing.activeSession!.forgottenSince(at: later))
+        var paused = data
+        paused.setWorkoutPaused(true, now: touched)
+        XCTAssertNil(paused.activeSession!.forgottenSince(at: later))
+
+        var resumed = data
+        resumed.resumeForgotten(now: later)
+        XCTAssertEqual(resumed.activeSession!.duration(at: later.addingTimeInterval(60)), 3960)
+        XCTAssertEqual(resumed.activeSession!.pauses, [DateInterval(start: touched, end: later)])
+        XCTAssertNil(resumed.activeSession!.forgottenSince(at: later.addingTimeInterval(60)))
+        _ = try LocalRepository.decode(LocalRepository.encode(resumed)).validated()
+
+        try data.finishForgotten(now: later)
+        XCTAssertEqual(data.sessions.last!.endedAt, touched)
+        XCTAssertEqual(data.sessions.last!.duration(), 3900)
+        XCTAssertNil(data.activeSession)
+        _ = try data.validated()
+    }
+
     func testDragReorderPreservesExerciseResultsAndSupportsBothDirections() throws {
         var data = TrainingData.starter()
         try data.start(routineID: data.routines[0].id)

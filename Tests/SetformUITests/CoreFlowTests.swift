@@ -247,4 +247,63 @@ final class CoreFlowTests: XCTestCase {
         tap("workout.resume")
         expect("1 of 11")
     }
+
+    /// Moves the saved workout in a data directory back in time, as if the phone had been put down that long ago.
+    private func age(workoutIn directory: String, by seconds: Double) throws {
+        let url = URL(fileURLWithPath: directory).appendingPathComponent("training.json")
+        func aged(_ value: Any) -> Any {
+            if let list = value as? [Any] { return list.map(aged) }
+            guard let record = value as? [String: Any] else { return value }
+            return record.reduce(into: [String: Any]()) { result, entry in
+                let moment = ["startedAt", "lastActivityAt", "completedAt"].contains(entry.key) ? entry.value as? Double : nil
+                result[entry.key] = moment.map { $0 - seconds * 1000 } ?? aged(entry.value)
+            }
+        }
+        var library = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
+        library["activeSession"] = aged(try XCTUnwrap(library["activeSession"]))
+        library["restDeadline"] = nil
+        try JSONSerialization.data(withJSONObject: library).write(to: url, options: .atomic)
+    }
+
+    func testWorkoutLeftRunningAsksAndLeavesTheIdleHoursOut() throws {
+        let directory = NSTemporaryDirectory() + "setform-uitest-" + UUID().uuidString
+        func leaveRunning() throws {
+            startWorkout(collapsed: false)
+            tap(".complete")
+            expect("1 of ")
+            // Leaving the app finishes its save before the file is changed underneath it.
+            XCUIDevice.shared.press(.home)
+            XCTAssertTrue(app.wait(for: .runningBackground, timeout: 10))
+            app.terminate()
+            try age(workoutIn: directory, by: 6 * 3600)
+            launch(["--data-directory", directory])
+            expect("is still running")
+        }
+        launch(["--data-directory", directory])
+        try leaveRunning()
+
+        // Keep Going opens the workout with its clock where it was left, not six hours on.
+        tap("Keep Going")
+        tap("workout.finish")
+        expect("Duration")
+        XCTAssertFalse(element("6:0").exists)
+
+        // The finish sheet renames this workout; it is saved under the new name.
+        tap("finish.name")
+        app.typeText(" - Modified")
+        tap("workout.save")
+        expect("Upper - Modified")
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        expect("train.start")
+        app.tabBars.buttons["History"].tap()
+        tap("Log")
+        expect("Upper - Modified")
+        app.tabBars.buttons["Train"].tap()
+
+        // Finishing from the question saves the workout without opening it.
+        try leaveRunning()
+        tap("Finish at")
+        expectGone("is still running")
+        expectGone("workout.resume")
+    }
 }

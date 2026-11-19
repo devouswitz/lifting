@@ -23,6 +23,9 @@ final class AppStore: ObservableObject {
     @Published var error: String?
     @Published var storageBlocked = false
     @Published var workoutPresented = false
+    /// True while asking what to do with a running workout that has gone untouched.
+    @Published var forgottenWorkoutPrompt = false
+    private var forgottenCheck: Task<Void, Never>?
     @Published var autoFocusedExerciseID: UUID?
     @Published var autoFocusRevision = 0
     /// When the current rest began, so the rest ring keeps its scale across ±15 and reopening the workout.
@@ -98,6 +101,7 @@ final class AppStore: ObservableObject {
             let remindersChanged = next.settings.workoutReminders != data.settings.workoutReminders
             data = next
             if workoutChanged || remindersChanged { refreshWorkoutReminders() }
+            if workoutChanged { watchForForgottenWorkout() }
             scheduleFolderSync()
             return true
         } catch { self.error = error.localizedDescription; return false }
@@ -152,8 +156,9 @@ final class AppStore: ObservableObject {
     func start(_ routine: Routine) { perform { try $0.start(routineID: routine.id) }; if data.activeSession != nil { workoutPresented = true } }
     func emptyWorkout() { perform { d in guard d.activeSession == nil else { return }; d.activeSession = Session(name: Session.unplannedName) }; workoutPresented = true }
     /// Saves the workout and opens it on Train, where Back returns to the first screen.
-    func finish() {
-        guard let id = data.activeSession?.id, perform({ try $0.finish() }) else { return }
+    /// A forgotten workout ends when it was last touched instead of now.
+    func finish(forgotten: Bool = false) {
+        guard let id = data.activeSession?.id, perform({ try forgotten ? $0.finishForgotten() : $0.finish() }) else { return }
         workoutPresented = false; cancelRestAlert(); trainPath = NavigationPath([SessionRoute(id: id)]); trainRevision += 1; scheduleHealthCheck()
         #if os(iOS)
         if data.settings.haptics { UINotificationFeedbackGenerator().notificationOccurred(.success) }
@@ -228,6 +233,7 @@ final class AppStore: ObservableObject {
         }
         refreshWorkoutReminders()
         refreshLiveActivity()
+        watchForForgottenWorkout()
     }
     /// A tap on the Lock Screen or Dynamic Island opens the workout.
     func open(_ url: URL) {
@@ -243,6 +249,19 @@ final class AppStore: ObservableObject {
         guard !demo else { return }
         notifications.refresh(session: data.activeSession, enabled: data.settings.remindsAboutUnfinishedWorkouts)
     }
+    /// Asks about a running workout once nobody has touched it for the reminder delay: now, or when that time comes.
+    func watchForForgottenWorkout() {
+        forgottenCheck?.cancel()
+        guard let touched = data.activeSession?.lastTouched else { forgottenWorkoutPrompt = false; return }
+        let wait = touched.addingTimeInterval(WorkoutReminder.idleDelay).timeIntervalSinceNow
+        forgottenWorkoutPrompt = wait <= 0
+        guard wait > 0 else { return }
+        forgottenCheck = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(wait))
+            if !Task.isCancelled { self?.watchForForgottenWorkout() }
+        }
+    }
+    func resumeForgotten() { perform { $0.resumeForgotten() }; workoutPresented = true }
     func requestWorkoutAlerts() {
         guard !demo, data.settings.remindsAboutUnfinishedWorkouts else { return }
         Task { if await notifications.requestPermission() { refreshWorkoutReminders() } }
@@ -262,7 +281,7 @@ final class AppStore: ObservableObject {
                 try raw.write(to: repository.url.appendingPathExtension("before-import"), options: .atomic)
             }
             try saver?.write(next)
-            data = next; storageBlocked = false; error = nil; workoutPresented = false; cancelRestAlert(); refreshWorkoutReminders()
+            data = next; storageBlocked = false; error = nil; workoutPresented = false; cancelRestAlert(); refreshWorkoutReminders(); watchForForgottenWorkout()
             scheduleFolderSync()
         } catch { self.error = "Import failed. \(error.localizedDescription)" }
     }

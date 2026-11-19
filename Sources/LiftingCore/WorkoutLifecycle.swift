@@ -17,7 +17,34 @@ public extension Session {
     }
 }
 
+public extension Session {
+    /// When a running workout was last touched. Nil while it is paused, finished, or timing an exercise:
+    /// a long timed effort looks the same as a phone left in a bag.
+    var lastTouched: Date? {
+        guard endedAt == nil, pausedAt == nil, !exercises.contains(where: { $0.timerStartedAt != nil }) else { return nil }
+        let logged = exercises.flatMap(\.sets).compactMap(\.completedAt).max() ?? startedAt
+        return max(lastActivityAt ?? startedAt, logged, pauses?.last?.end ?? startedAt)
+    }
+
+    /// The moment a workout was left, once it has gone untouched for as long as the unfinished-workout reminder waits.
+    func forgottenSince(at now: Date) -> Date? {
+        lastTouched.flatMap { $0.addingTimeInterval(WorkoutReminder.idleDelay) <= now ? $0 : nil }
+    }
+}
+
 public extension TrainingData {
+    /// Carries on with a forgotten workout, leaving out the time since it was last touched the way a pause would.
+    mutating func resumeForgotten(now: Date = Date()) {
+        guard let since = activeSession?.forgottenSince(at: now) else { return }
+        setWorkoutPaused(true, now: since)
+        setWorkoutPaused(false, now: now)
+    }
+
+    /// Finishes a forgotten workout at the moment it was last touched.
+    mutating func finishForgotten(now: Date = Date()) throws {
+        try finish(now: activeSession?.forgottenSince(at: now) ?? now)
+    }
+
     mutating func setWorkoutPaused(_ paused: Bool, now: Date = Date()) {
         guard var session = activeSession else { return }
         if paused, session.pausedAt == nil {

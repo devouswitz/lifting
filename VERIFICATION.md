@@ -2,6 +2,17 @@
 
 Entries below are dated records. Earlier toolchain and distribution limitations describe the environment at that time; see the newest pass for current evidence.
 
+## Forgotten workouts and a name on the finish sheet, build 24 (November 19, 2026)
+
+iPhone 17e simulator (iOS 27.0), starter library in a test data directory.
+
+- A workout started 400 minutes earlier and last touched at 65 minutes asked on launch: "Upper is still running", no activity for 5h 35m, with Finish at 1h 5m, Keep Going and Discard Workout (screenshot).
+- UI test: a workout moved six hours into the past asks on the next launch. Keep Going opens it and the finish sheet shows a duration in seconds, not six hours. Typing in the sheet's Name field saves the workout as Upper - Modified, on the saved workout and in History's Log. A second workout left the same way finishes from the question and leaves nothing running.
+- Core test: the time kept is the time up to the last touch, the idle stretch is stored as one pause, and a paused workout or one with an exercise timer running is not treated as forgotten.
+- 124 core tests and 11 UI tests pass. The UI tests ran from a copy of the project, built once and then run without rebuilding: xcodebuild pointed at this folder waited without end on a coordinated read of the project file, and under a plain `xcodebuild test` the first launch of a run sometimes opened the simulator's own saved library instead of the test's data directory.
+
+Not verified: a physical iPhone, the question arriving while the app sits open for 45 minutes (the same check, started by a timer), macOS, and a TestFlight upload, which was not made.
+
 ## Start Workout at the top of a day, build 23 (November 17, 2026)
 
 iPhone 18 Pro simulator (iOS 27.0), showcase library.

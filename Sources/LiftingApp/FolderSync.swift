@@ -157,7 +157,7 @@ extension AppStore {
                         try LocalRepository.encode(data).write(to: repository.url.appendingPathExtension("before-sync"), options: .atomic)
                         try saver?.write(merged)
                     }
-                    data = merged
+                    data = merged; watchForForgottenWorkout()
                 }
             }
             syncState = state

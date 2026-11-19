@@ -49,4 +49,4 @@ Scrolling pages keep a readable width on iPad and Mac. Type is SF Pro with tabul
 
 ## Lifecycle
 
-Pause intervals are persisted and excluded from duration, CSV round trips, and Health writes. Reminder scheduling is serialized so a stale update cannot leave alerts behind after a workout ends. The app keeps its bundle ID, data directory, and sync folder paths across the Setform rename.
+Pause intervals are persisted and excluded from duration, CSV round trips, and Health writes. A forgotten workout reuses them: Keep Going records the time since the last touch as one pause, and finishing from the question ends the workout at that touch, so neither path needs a second notion of idle time. Reminder scheduling is serialized so a stale update cannot leave alerts behind after a workout ends. The app keeps its bundle ID, data directory, and sync folder paths across the Setform rename.

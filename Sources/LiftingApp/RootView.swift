@@ -37,6 +37,7 @@ struct RootView: View {
         .modifier(WorkoutPresentation())
         .modifier(CSVImportModifier(isPresented: .constant(false), opensLaunchFile: true))
         .modifier(NoticeBanner())
+        .modifier(ForgottenWorkoutPrompt(enabled: !store.workoutPresented))
         .alert("Could not complete action", isPresented: Binding(get: { store.error != nil && !store.workoutPresented }, set: { if !$0 { store.error = nil } })) {
             Button("OK") { store.error = nil }
         } message: { Text(store.error ?? "") }
@@ -99,6 +100,28 @@ struct NoticeBanner: ViewModifier {
         .animation(.snappy, value: store.notice)
         .sensoryFeedback(.success, trigger: store.notice) { _, new in new != nil && store.data.settings.haptics }
         .onChange(of: store.notice) { _, value in if let value { AccessibilityNotification.Announcement(value.text).post() } }
+    }
+}
+
+/// Asks what to do with a workout left running: finish it at the moment it was last touched, carry on
+/// without the time since, or discard it.
+struct ForgottenWorkoutPrompt: ViewModifier {
+    @EnvironmentObject var store: AppStore
+    /// False on a screen the workout covers, so only the front one asks.
+    var enabled = true
+    func body(content: Content) -> some View {
+        let now = Date()
+        let session = store.data.activeSession
+        let since = session?.forgottenSince(at: now)
+        let kept = spanText(session?.duration(at: since ?? now) ?? 0)
+        content.alert("\(session?.name ?? "Workout") is still running", isPresented: Binding(get: { store.forgottenWorkoutPrompt && enabled && since != nil }, set: { if !$0 { store.forgottenWorkoutPrompt = false } })) {
+            if (session?.completedSets ?? 0) > 0 { Button("Finish at \(kept)") { store.finish(forgotten: true) } }
+            Button("Keep Going", role: .cancel) { store.resumeForgotten() }
+            Button("Discard Workout", role: .destructive) { store.discard() }
+        } message: { Text("No activity for \(spanText(now.timeIntervalSince(since ?? now))). That time is left out, so the workout stands at \(kept).") }
+    }
+    private func spanText(_ seconds: TimeInterval) -> String {
+        Duration.seconds(max(60, seconds)).formatted(.units(allowed: [.days, .hours, .minutes], width: .narrow, maximumUnitCount: 2))
     }
 }
 

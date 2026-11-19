@@ -84,6 +84,7 @@ struct WorkoutView: View {
             }
         }.tint(palette.action)
         .modifier(NoticeBanner())
+        .modifier(ForgottenWorkoutPrompt())
         .alert("Could not complete action", isPresented: Binding(get: { store.error != nil }, set: { if !$0 { store.error = nil } })) { Button("OK") { store.error = nil } } message: { Text(store.error ?? "") }
         .onAppear {
             store.requestWorkoutAlerts()
@@ -140,6 +141,7 @@ struct WorkoutView: View {
                         if session.completedSets == 0 { Text("Log at least one set to save this workout.") }
                         else if session.completedSets < session.totalSets { Text("\(counted(session.totalSets - session.completedSets, "unchecked set")) will be saved as skipped.") }
                     }
+                    Section("Name") { SavedNameField(name: session.name) { value in store.editActive { $0.name = value } }.accessibilityIdentifier("finish.name") }
                     Section("Workout note") { TextField("Note", text: Binding(get: { store.data.activeSession?.notes ?? "" }, set: { value in store.editActive { $0.notes = value } }), axis: .vertical).lineLimit(3...6) }
                     Section {
                         Button { store.finish(); finishing = false } label: { Text("Save Workout").frame(maxWidth: .infinity, minHeight: 26) }.buttonStyle(AccentButtonStyle()).disabled(session.completedSets == 0).accessibilityIdentifier("workout.save")
