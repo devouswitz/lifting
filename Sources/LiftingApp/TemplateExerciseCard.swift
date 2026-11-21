@@ -231,7 +231,7 @@ struct TemplateExerciseCard: View {
             } else {
                 addSet()
                 guard let index = variant.sets.indices.last else { return }
-                variant.sets[index].kind = kind; variant.sets[index].customTypeID = id
+                variant.sets[index].changeType(to: kind, customTypeID: id)
             }
         }, technique: { technique in
             variant.addTechnique(technique, plans: store.data.techniqueDefaults(for: variant.exerciseID).plans(technique), replacing: false)

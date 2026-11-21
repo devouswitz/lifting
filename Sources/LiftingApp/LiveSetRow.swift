@@ -57,7 +57,7 @@ struct LiveSetRow: View {
                         }
                         if columns.reps {
                             cell(title: set.plan.amrap ? "AMRAP" : "REPS", value: set.reps.map(String.init), field: .reps, labeled: stacked,
-                                 placeholder: set.plan.repRange != nil || set.plan.amrap ? set.plan.repTarget.map(displayTarget) : nil)
+                                 placeholder: untypedTarget(set.plan))
                                 .longPress("Edit rep target", teaches: .reps) { present(.reps(setID)) }
                         }
                         if columns.time { cell(title: "TIME", value: set.seconds.map(clockText), field: .time, labeled: stacked) }
@@ -107,7 +107,7 @@ struct LiveSetRow: View {
         let unit = store.data.settings.unit
         let load = loadText(set.weight, mode: mode, unit: unit)
         if let reps = set.reps { return load.map { "\($0) × \(reps)" } ?? "\(reps) reps" }
-        if let range = set.plan.repRange { return load.map { "\($0) × \(range.lowerBound)-\(range.upperBound)" } ?? "\(range.lowerBound)-\(range.upperBound)" }
+        if let target = untypedTarget(set.plan) { return load.map { "\($0) × \(target)" } ?? target }
         if let seconds = set.seconds { return clockText(seconds) }
         if let rpe = set.rpe { return "RPE \(number(rpe))" }
         return load ?? "·"
@@ -222,11 +222,14 @@ func setBadge(_ plans: [SetPlan], index: Int, types: [CustomSetType]) -> String 
     }
 }
 
+/// What a set logged without a count was aiming for, "8–12", "8+" or "AMRAP", in the set's own terms.
+func untypedTarget(_ plan: SetPlan) -> String? { plan.repRange != nil || plan.amrap ? plan.repTarget.map(displayTarget) : nil }
+
 func loggedSetSummary(_ set: LoggedSet, mode: ExerciseMode = .strength, unit: WeightUnit) -> String {
     var parts: [String] = []
     if let load = loadText(set.weight, mode: mode, unit: unit) { parts.append(mode == .bodyweight && load == "BW" ? load : "\(load) \(unit.rawValue)") }
     if let reps = set.reps { parts.append("\(reps) reps") }
-    else if let range = set.plan.repRange { parts.append("\(range.lowerBound)-\(range.upperBound) reps") }
+    else if let target = untypedTarget(set.plan) { parts.append(set.plan.amrap && set.plan.reps == nil ? target : "\(target) reps") }
     if let seconds = set.seconds { parts.append(clockText(seconds)) }
     if let meters = set.meters { parts.append(distanceText(meters)) }
     if let rpe = set.rpe { parts.append("RPE \(number(rpe))") }

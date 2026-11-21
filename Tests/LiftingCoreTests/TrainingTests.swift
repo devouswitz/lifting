@@ -626,7 +626,8 @@ final class TrainingTests: XCTestCase {
         try data.addExerciseToSession(exercise.id)
         let other = data.activeSession!.exercises.last!
         XCTAssertNotEqual(other.variantID, added.variantID)
-        XCTAssertEqual(other.workingWeight, 0)
+        // A new day's plan starts from the one the exercise was last done with.
+        XCTAssertEqual(other.workingWeight, 12)
         data.activeSession = nil
         try data.start(routineID: upper.id)
         data.activeSession!.name = "Renamed session"
@@ -1175,13 +1176,13 @@ final class TrainingTests: XCTestCase {
         try data.start(routineID: data.routines[0].id)
         let item = data.activeSession!.exercises[0]
         try editFirstWorkingWeight(&data, weight: 100, exerciseID: item.id, saveFuture: false)
-        try data.addSessionSet(to: item.id, warmup: true)
-        let added = data.activeSession!.exercises[0].sets.last!
+        let addedID = try data.addSessionSet(to: item.id, warmup: true)
+        let added = data.activeSession!.exercises[0].sets.first { $0.id == addedID }!
         let increment = data.variant(item.variantID)!.rounding
         XCTAssertEqual(added.weight!, floor(50 / increment) * increment, accuracy: 0.00001)
         var plan = added.plan; plan.percent = 75; plan.rpe = 5; plan.reps = nil
         try data.replaceSetPlan(exerciseID: item.id, setID: added.id, plan: plan)
-        let updated = data.activeSession!.exercises[0].sets.last!
+        let updated = data.activeSession!.exercises[0].sets.first { $0.id == addedID }!
         XCTAssertEqual(updated.weight!, floor(75 / increment) * increment, accuracy: 0.00001)
         XCTAssertNil(updated.reps); XCTAssertEqual(updated.rpe, 5)
     }
@@ -1667,7 +1668,10 @@ final class TrainingTests: XCTestCase {
         try data.toggleSet(exerciseID: item.id, setID: added.id)
         XCTAssertGreaterThan(data.activeSession!.volume, 0)
         try data.addTypedSet(to: item.id, kind: .warmup)
-        XCTAssertEqual(data.activeSession!.exercises[0].sets.last!.plan.kind, .warmup)
+        // A warm-up joins the warm-ups ahead of the work.
+        let sets = data.activeSession!.exercises[0].sets
+        XCTAssertEqual(sets.filter { $0.plan.kind == .warmup }.count, item.sets.filter { $0.plan.kind == .warmup }.count + 1)
+        XCTAssertEqual(sets.lastIndex { $0.plan.kind == .warmup }! + 1, sets.firstIndex { $0.plan.kind != .warmup }!)
         try data.finish()
 
         // History CSV keeps the type name; sync carries the type record.
@@ -2576,5 +2580,63 @@ final class TrainingTests: XCTestCase {
             for s in data.activeSession!.exercises[e].sets.indices { data.activeSession!.exercises[e].sets[s].completedAt = Date() }
         }
         XCTAssertNil(data.activeSession?.nextSet)
+    }
+
+    func testChangingSetTypeAcrossWarmupsDropsTheSetsOwnRest() {
+        var plan = SetPlan(reps: 8, repCeiling: 12, restSeconds: 180)
+        plan.changeType(to: .warmup)
+        XCTAssertEqual(plan.kind, .warmup); XCTAssertNil(plan.restSeconds); XCTAssertEqual(plan.load, .percent)
+        plan.restSeconds = 45
+        plan.changeType(to: .working)
+        XCTAssertNil(plan.restSeconds); XCTAssertEqual(plan.load, .working)
+        plan.restSeconds = 120
+        plan.changeType(to: .failure)
+        XCTAssertEqual(plan.restSeconds, 120); XCTAssertTrue(plan.amrap); XCTAssertEqual(plan.repTarget, "8+")
+        plan.changeType(to: .working)
+        XCTAssertFalse(plan.amrap); XCTAssertEqual(plan.repTarget, "8-12")
+    }
+
+    func testLiveWarmupGoesAfterWarmupsAheadOfWork() throws {
+        var data = TrainingData.starter()
+        try data.start(routineID: data.routines[0].id)
+        let row = data.activeSession!.exercises[1]
+        XCTAssertFalse(row.sets.contains { $0.plan.kind == .warmup })
+        let first = try data.addSessionSet(to: row.id, warmup: true)
+        let second = try data.addSessionSet(to: row.id, warmup: true)
+        let sets = data.activeSession!.exercises[1].sets
+        XCTAssertEqual(sets.prefix(2).map(\.id), [first, second])
+        XCTAssertTrue(sets.dropFirst(2).allSatisfy { $0.plan.kind == .working })
+        // Add Set still copies a working set, not the warm-up.
+        let set = try data.addSessionSet(to: row.id)
+        XCTAssertEqual(data.activeSession!.exercises[1].sets.last?.id, set)
+        XCTAssertEqual(data.activeSession!.exercises[1].sets.last?.plan.kind, .working)
+    }
+
+    func testExerciseAddedToAnotherDayStartsFromItsLastPlan() throws {
+        var data = TrainingData.starter()
+        let upper = data.dayTemplates[0], lower = data.dayTemplates[1]
+        let exercise = Exercise(name: "Pull-up", muscle: "Back", equipment: "Bodyweight", mode: .bodyweight)
+        data.exercises.append(exercise)
+        try data.start(routineID: upper.id)
+        try data.addExerciseToSession(exercise.id)
+        let added = data.activeSession!.exercises.last!
+        var plan = data.variant(added.variantID)!
+        plan.sets = [SetPlan(load: .none, reps: 8, repCeiling: 12), SetPlan(kind: .failure, load: .none, reps: 8, repCeiling: 12, amrap: true)]
+        plan.restSeconds = 150
+        data.variants[data.variants.firstIndex { $0.id == plan.id }!] = plan
+        data.activeSession = nil
+        try data.start(routineID: upper.id)
+        try data.addExerciseToSession(exercise.id)
+        for set in data.activeSession!.exercises.last!.sets { try data.toggleSet(exerciseID: data.activeSession!.exercises.last!.id, setID: set.id) }
+        try data.finish()
+        try data.start(routineID: lower.id)
+        try data.addExerciseToSession(exercise.id)
+        let other = data.activeSession!.exercises.last!
+        XCTAssertNotEqual(other.variantID, plan.id)
+        XCTAssertEqual(other.sets.map(\.plan.kind), [.working, .failure])
+        XCTAssertEqual(other.sets.last?.plan.repTarget, "8+")
+        XCTAssertEqual(other.restSeconds, 150)
+        XCTAssertTrue(Set(other.sets.map(\.plan.id)).isDisjoint(with: plan.sets.map(\.id)))
+        XCTAssertNoThrow(try data.validated())
     }
 }

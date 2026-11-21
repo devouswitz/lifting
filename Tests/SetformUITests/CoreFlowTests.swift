@@ -127,6 +127,22 @@ final class CoreFlowTests: XCTestCase {
         XCTAssertGreaterThan(expect("Expand Bench press").frame.minY, expect("Expand Overhead press").frame.minY)
     }
 
+    func testDraggingOntoAnExerciseInProgressFromBelowPutsItAbove() {
+        launch()
+        startWorkout(collapsed: false)
+        // Bench press is open with one set logged and more to go, so its card is tall.
+        tap("Complete working set 1")
+        if element("rest.skip").waitForExistence(timeout: 3) { tap("rest.skip") }
+        // Scroll so the open card's lower half and the next card are both on screen.
+        app.swipeUp(velocity: .slow)
+        let lowerRow = matches("Complete working set").allElementsBoundByIndex.last { $0.isHittable }!
+        // Dropped on the open card's lower half, the next exercise down still lands above it.
+        let below = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Expand ")).allElementsBoundByIndex.first { $0.isHittable }!
+        let name = below.label
+        below.press(forDuration: 0.8, thenDragTo: lowerRow)
+        XCTAssertLessThan(expect(name).frame.minY, expect("Collapse Bench press").frame.minY)
+    }
+
     func testHoldAndDragReordersSetsInASavedDay() {
         launch()
         app.swipeUp()

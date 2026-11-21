@@ -9,11 +9,22 @@ public extension TrainingData {
         let previous = sessions.sorted { $0.startedAt > $1.startedAt }.lazy.filter { $0.routineID == session.routineID && (session.routineID != nil || $0.name == session.name) }
             .flatMap(\.exercises).first { $0.exerciseID == exerciseID && $0.mode == exercise.mode }.flatMap { variant($0.variantID) }
         let base = [session.programID.flatMap(program)?.name, session.name].compactMap { $0 }.joined(separator: " · ")
-        let selected = current ?? prescribed ?? previous ?? Variant.standard(for: exercise, label: Self.uniqueName(base, among: variants.filter { $0.exerciseID == exerciseID }.map(\.label)))
+        let selected = current ?? prescribed ?? previous ?? newVariant(for: exercise, label: Self.uniqueName(base, among: variants.filter { $0.exerciseID == exerciseID }.map(\.label)))
         if variant(selected.id) == nil { variants.append(selected) }
         var item = SessionExercise(variant: selected, exercise: exercise)
         if activeSession!.exercises.contains(where: { $0.collapsed != true }) { item.collapsed = true }
         activeSession!.exercises.append(item)
+    }
+
+    /// A plan for an exercise new to a day. It starts as a copy of the plan the exercise was last done with,
+    /// so set types, targets, loads and rests carry over; an exercise never planned starts from the standard plan.
+    func newVariant(for exercise: Exercise, label: String) -> Variant {
+        let lastDone = sessions.filter { $0.skipped != true }.sorted { $0.startedAt > $1.startedAt }.lazy.flatMap(\.exercises)
+            .first { $0.exerciseID == exercise.id && $0.mode == exercise.mode }.flatMap { variant($0.variantID) }
+        guard var plan = lastDone ?? variants.last(where: { $0.exerciseID == exercise.id }) else { return .standard(for: exercise, label: label) }
+        plan.id = UUID(); plan.label = label; plan.substitutionSourceID = nil; plan.progression.failures = 0
+        plan.sets = plan.sets.map { set in var copy = set; copy.id = UUID(); return copy }
+        return plan
     }
 
     /// Takes an exercise out of the workout and returns it with its place, so the removal can be undone.

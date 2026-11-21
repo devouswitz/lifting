@@ -27,11 +27,18 @@ struct Reordering {
     /// For a card shown alone, with nothing to reorder against.
     static let none = Reordering(space: "none", lifted: .constant(nil), rows: RowFrames()) { _, _, _ in }
 
-    /// The row under the finger, and whether the lifted row goes after it.
+    /// The row nearest the finger, gaps between rows included, and whether the lifted row goes after it.
+    /// Rows below the lifted one take it after them and rows above take it before, so a tall row is passed
+    /// by touching any part of it. Nil while the finger is still nearest the lifted row itself.
     func target(for lifted: LiftedRow) -> (id: UUID, after: Bool)? {
         let moving = linked(lifted.id)
-        guard let hit = rows.frames.first(where: { !moving.contains($0.key) && ($0.value.minY...$0.value.maxY).contains(lifted.location.y) }) else { return nil }
-        let after = lifted.location.y > hit.value.midY
+        let y = lifted.location.y
+        func distance(_ frame: CGRect) -> CGFloat { max(0, frame.minY - y, y - frame.maxY) }
+        // Lifted rows report frames that follow the finger; take the drag back out to find where they sit.
+        let own = moving.compactMap { rows.frames[$0] }.reduce(CGRect.null) { $0.union($1) }.offsetBy(dx: 0, dy: -lifted.offset)
+        guard !own.isNull, let hit = rows.frames.filter({ !moving.contains($0.key) }).min(by: { distance($0.value) < distance($1.value) }),
+              distance(hit.value) < distance(own) else { return nil }
+        let after = hit.value.minY > own.minY
         let group = linked(hit.key)
         return ((after ? group.last : group.first) ?? hit.key, after)
     }
@@ -82,11 +89,12 @@ private struct ReorderRow: ViewModifier {
             .overlay(alignment: target?.after == true ? .bottom : .top) {
                 if target?.id == id { Capsule().fill(palette.action).frame(height: 3).padding(.horizontal, 8).offset(y: target?.after == true ? 6 : -6).allowsHitTesting(false) }
             }
-            .offset(y: isLifted ? lifted?.offset ?? 0 : 0)
             .scaleEffect(isLifted ? 1.02 : 1)
             .shadow(color: .black.opacity(isLifted ? 0.2 : 0), radius: 12, y: 4)
             .zIndex(isLifted ? 1 : 0)
             .animation(.snappy(duration: 0.2), value: isLifted)
+            // Below the lift animation, so a drop moves the row back from the finger and into its new place as one motion.
+            .offset(y: isLifted ? lifted?.offset ?? 0 : 0)
             .transformPreference(RowLiftedKey.self) { $0 = $0 || isLifted }
     }
 }
@@ -139,12 +147,12 @@ private struct ReorderHandle: ViewModifier {
 
     /// A hold released without moving runs `hold`; otherwise the row lands where the finger lifts.
     private func release(_ location: CGPoint, _ offset: CGFloat, cancelled: Bool) {
-        reordering.lifted = nil
-        guard !cancelled else { return }
-        if let hold, abs(offset) < 6 { hold(); return }
-        if let target = reordering.target(for: LiftedRow(id: id, offset: offset, location: location)) {
-            withAnimation(.snappy) { reordering.place(id, target.id, target.after) }
+        let target = cancelled ? nil : reordering.target(for: LiftedRow(id: id, offset: offset, location: location))
+        withAnimation(.snappy) {
+            reordering.lifted = nil
+            if let target, hold == nil || abs(offset) >= 6 { reordering.place(id, target.id, target.after) }
         }
+        if !cancelled, let hold, abs(offset) < 6 { hold() }
     }
 }
 

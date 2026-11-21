@@ -95,6 +95,18 @@ public struct SetPlan: Identifiable, Codable, Equatable, Sendable {
         kind = .failure
         if reps != nil { amrap = true }
     }
+    /// Changes the set's type. Moving between warm-up and work trades a working load for a percentage and back,
+    /// and drops the set's own rest, which was chosen for the other kind, so the kind's rest applies.
+    public mutating func changeType(to newKind: SetKind, customTypeID: UUID? = nil) {
+        if (newKind == .warmup) != (kind == .warmup) {
+            restSeconds = nil
+            if newKind == .warmup && load == .working { load = .percent }
+            else if kind == .warmup && load == .percent { load = .working }
+        }
+        if newKind == .failure && customTypeID == nil { markToFailure() }
+        else if kind == .failure && newKind != .failure && amrap { amrap = false }
+        kind = newKind; self.customTypeID = customTypeID
+    }
     public func resolvedWeight(working: Double, increment: Double) -> Double? {
         switch load {
         case .none: return nil

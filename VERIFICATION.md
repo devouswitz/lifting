@@ -2,6 +2,19 @@
 
 Entries below are dated records. Earlier toolchain and distribution limitations describe the environment at that time; see the newest pass for current evidence.
 
+## Warm-up rests, AMRAP history, new-day plans and dragging past an open exercise, build 25 (November 21, 2026)
+
+iPhone 18 Pro simulator (iOS 27.1), starter library in a test data directory and the showcase library, scripted UI walker and the UI tests.
+
+- Barbell row with only working sets: Set Details on set 1, Rest after this set 3:00, then Type changed to Warm-up. The warm-up editor showed Rest after "Warm-up default" and the load switched to % of working (screenshot). Before, the set kept the 3:00 chosen for working sets. Changing type in either direction, from the badge menu or the Type picker, now goes through one core function.
+- Rest 3:00 on the exercise, then a warm-up from the quick-add button: Rest 3:00 and Warm-up 1:00 both shown; logging the warm-up started 1:00, logging working set 1 started 3:00 (screenshots). A warm-up added in a workout now joins the other warm-ups ahead of the working sets instead of the end of the list, so numbering and Add Set follow the shown order.
+- Previous column and History: a set checked off without a rep count shows its own target ("BW × 8+" for an AMRAP set) instead of the 8-12 range kept underneath.
+- An exercise added to a day it is not on starts from a copy of the plan it was last done with (set types, targets, loads, rests), so AMRAP sets and their Previous values follow it. Core test.
+- UI test: with Bench press open, one set logged and more to go, the next exercise dragged onto the lower half of Bench press lands above it. It failed on build 24's drag code (the card stayed below) and passes now. Drops in the gap between cards land on the nearest card, and the dropped card moves into place in one motion.
+- 127 core tests and 12 UI tests pass.
+
+Not verified: a physical iPhone, and how the drop animation looks on a device (inferred from the code).
+
 ## Forgotten workouts and a name on the finish sheet, build 24 (November 19, 2026)
 
 iPhone 17e simulator (iOS 27.0), starter library in a test data directory.

@@ -65,9 +65,8 @@ public extension TrainingData {
         guard let e = activeSession?.exercises.firstIndex(where: { $0.id == exerciseID }) else { throw TrainingError.invalid("Exercise unavailable.") }
         let resolved = setType(customTypeID)?.countsAs ?? kind
         if resolved == .warmup {
-            try addSessionSet(to: exerciseID, warmup: true)
-            let last = activeSession!.exercises[e].sets.indices.last!
-            activeSession!.exercises[e].sets[last].plan.customTypeID = customTypeID
+            let id = try addSessionSet(to: exerciseID, warmup: true)
+            if let s = activeSession!.exercises[e].sets.firstIndex(where: { $0.id == id }) { activeSession!.exercises[e].sets[s].plan.customTypeID = customTypeID }
             return
         }
         guard let variant = variant(activeSession!.exercises[e].variantID) else { throw TrainingError.invalid("Exercise unavailable.") }

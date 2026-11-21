@@ -119,8 +119,8 @@ struct WarmupSetEditor: View {
 func setTypeChoice(_ plan: Binding<SetPlan>, types: [CustomSetType]) -> Binding<SetTypeChoice> {
     Binding(get: { plan.wrappedValue.customTypeID.flatMap { id in types.contains { $0.id == id } ? .custom(id) : nil } ?? .kind(plan.wrappedValue.kind) }, set: { choice in
         switch choice {
-        case .kind(let kind): plan.wrappedValue.kind = kind; plan.wrappedValue.customTypeID = nil
-        case .custom(let id): plan.wrappedValue.customTypeID = id; plan.wrappedValue.kind = types.first { $0.id == id }?.countsAs ?? .working
+        case .kind(let kind): plan.wrappedValue.changeType(to: kind)
+        case .custom(let id): plan.wrappedValue.changeType(to: types.first { $0.id == id }?.countsAs ?? .working, customTypeID: id)
         }
     })
 }

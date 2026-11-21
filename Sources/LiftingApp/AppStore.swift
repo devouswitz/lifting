@@ -453,7 +453,7 @@ func loggedExerciseSummary(_ exercise: SessionExercise, unit: WeightUnit) -> Str
         guard let set = group.first else { return "" }
         var parts: [String] = []
         if let reps = set.reps { parts.append("\(group.count) × \(reps)") }
-        else if let range = set.plan.repRange { parts.append("\(group.count) × \(range.lowerBound)–\(range.upperBound)") }
+        else if let target = untypedTarget(set.plan) { parts.append("\(group.count) × \(target)") }
         else if group.count > 1 || (set.seconds == nil && set.meters == nil && set.weight == nil) { parts.append(counted(group.count, "set")) }
         if let weight = set.weight, let load = loadText(weight, mode: exercise.mode, unit: unit), load != "BW" { parts.append("\(load) \(unit.rawValue)") }
         if let seconds = set.seconds { parts.append(clockText(seconds)) }

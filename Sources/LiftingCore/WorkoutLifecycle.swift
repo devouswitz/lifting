@@ -88,7 +88,7 @@ public extension TrainingData {
         for id in exerciseIDs {
             guard let exercise = exercise(id) else { continue }
             let label = Self.uniqueName(base, among: variants.filter { $0.exerciseID == id }.map(\.label))
-            let variant = Variant.standard(for: exercise, label: label)
+            let variant = newVariant(for: exercise, label: label)
             variants.append(variant)
             routines[index].slots.append(RoutineSlot(variantID: variant.id))
         }

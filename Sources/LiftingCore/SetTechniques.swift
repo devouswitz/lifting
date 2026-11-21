@@ -141,7 +141,9 @@ public extension TrainingData {
         }
     }
 
-    mutating func addSessionSet(to exerciseID: UUID, warmup: Bool = false) throws {
+    /// Adds a set copying the last one. A warm-up goes after the other warm-ups, ahead of the work, so the
+    /// sets stay in the order they are shown and done. Returns the new set's id.
+    @discardableResult mutating func addSessionSet(to exerciseID: UUID, warmup: Bool = false) throws -> UUID {
         guard let e = activeSession?.exercises.firstIndex(where: { $0.id == exerciseID }), let variant = variant(activeSession!.exercises[e].variantID) else { throw TrainingError.invalid("Exercise unavailable.") }
         let item = activeSession!.exercises[e]
         var set = item.sets.last ?? LoggedSet(plan: SetPlan(), variant: variant)
@@ -157,7 +159,9 @@ public extension TrainingData {
             if item.sets.last?.plan.kind == .myoActivation { set.reps = 5; set.plan.reps = 5; set.plan.repCeiling = nil }
         }
         if set.plan.initialReps == nil { set.reps = nil }
-        activeSession!.exercises[e].sets.append(set)
+        let position = warmup ? item.sets.lastIndex { $0.plan.kind == .warmup }.map { $0 + 1 } ?? 0 : item.sets.count
+        activeSession!.exercises[e].sets.insert(set, at: position)
+        return set.id
     }
 }
 

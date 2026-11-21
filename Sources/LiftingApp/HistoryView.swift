@@ -386,7 +386,7 @@ private enum HistorySetColumn: CaseIterable, Identifiable, Hashable {
     func value(_ set: LoggedSet, mode: ExerciseMode, unit: WeightUnit) -> String? {
         switch self {
         case .weight: return set.weight == nil && mode == .bodyweight ? nil : loadText(set.weight, mode: mode, unit: unit)
-        case .reps: return set.reps.map(String.init) ?? (set.plan.repRange != nil || set.plan.amrap ? set.plan.repTarget.map(displayTarget) : nil)
+        case .reps: return set.reps.map(String.init) ?? untypedTarget(set.plan)
         case .time: return set.seconds.map(clockText)
         case .distance: return set.meters.map { number(DistanceDisplay.value($0), decimals: 2) }
         case .rpe: return set.rpe.map { number($0) }
